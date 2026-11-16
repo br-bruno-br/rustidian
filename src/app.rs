@@ -435,7 +435,7 @@ impl NotesApp {
                     return false;
                 };
                 tab.set_view(View::Live);
-                self.status = format!("Created {} from HTML", path.display());
+                self.status = format!("{} criado a partir de HTML", path.display());
                 true
             }
             Err(error) => {
@@ -455,7 +455,7 @@ impl NotesApp {
         self.persist_session();
         self.loading_root = Some(root.to_owned());
         self.queue_index(root.to_owned());
-        self.status = "Opening vault…".into();
+        self.status = "Abrindo cofre…".into();
     }
 
     fn queue_index(&mut self, root: PathBuf) {
@@ -575,7 +575,7 @@ impl NotesApp {
         if let Err(error) = spawned {
             self.loading = None;
             self.loading_root = None;
-            self.error = Some(format!("Cannot start vault indexing: {error}"));
+            self.error = Some(format!("Não foi possível iniciar a indexação do cofre: {error}"));
         }
     }
 
@@ -692,7 +692,7 @@ impl NotesApp {
                 Ok(result) => Some(result),
                 Err(mpsc::TryRecvError::Empty) => None,
                 Err(mpsc::TryRecvError::Disconnected) => Some(Err(
-                    "Vault indexing stopped. Try opening the folder again.".into(),
+                    "A indexação do cofre foi interrompida. Tente abrir a pasta de novo.".into(),
                 )),
             });
         if let Some(result) = result {
@@ -860,7 +860,7 @@ impl NotesApp {
                         self.status = format!("{} notes", vault.notes.len());
                         if !vault.warnings.is_empty() {
                             self.error = Some(format!(
-                                "Some files could not be indexed: {}",
+                                "Alguns arquivos não puderam ser indexados: {}",
                                 vault.warnings.join("; ")
                             ));
                         }
@@ -1047,7 +1047,7 @@ impl NotesApp {
                 chrono::Local::now().timestamp_millis(),
                 &self.recovery_config,
             ),
-            _ => Err("Open a vault first.".into()),
+            _ => Err("Abra um cofre primeiro.".into()),
         };
         match result {
             Ok(document) => {
@@ -1069,7 +1069,7 @@ impl NotesApp {
                 self.cache = Default::default();
                 self.search_cache.invalidate();
                 self.recovery_manager.restored(document, &self.ctx);
-                self.status = "Snapshot restored".into();
+                self.status = "Versão restaurada".into();
                 self.error = None;
                 self.ctx.request_repaint();
             }
