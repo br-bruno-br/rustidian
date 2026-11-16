@@ -22,6 +22,7 @@ pub mod query;
 pub mod recovery;
 pub mod recovery_capture;
 pub mod search;
+pub mod spell;
 pub mod structure;
 pub mod sync;
 pub mod tab;

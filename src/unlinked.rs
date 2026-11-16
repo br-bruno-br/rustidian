@@ -26,7 +26,7 @@ fn is_word(c: char) -> bool {
 }
 
 /// Inline code ranges of one line, as byte ranges of that line.
-fn inline_code(line: &str) -> Vec<Range<usize>> {
+pub(crate) fn inline_code(line: &str) -> Vec<Range<usize>> {
     let bytes = line.as_bytes();
     let mut out = Vec::new();
     let mut cursor = 0;
