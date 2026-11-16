@@ -3,12 +3,20 @@ use std::{
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
+use crate::index_photo::{self, IndexPhoto, PhotoReport, Stamp};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 pub type Result<T> = std::result::Result<T, String>;
+
+/// The app's own index photo is kept for vaults of at least this many notes.
+const PHOTO_MIN_NOTES: usize = 1000;
+/// ... and rewritten when more than this many notes, plus one in this many of the vault, were
+/// read or dropped on opening.
+const PHOTO_STALE_BASE: usize = 50;
+const PHOTO_STALE_SHARE: usize = 50;
 
 /// Navigation and watcher refreshes share the same development-clutter policy.
 pub fn is_ignored_path(relative: &Path) -> bool {
@@ -128,6 +136,21 @@ impl Note {
             folded: std::sync::OnceLock::new(),
         }
     }
+    /// A note whose text, aliases and tags the index photo already holds.
+    pub(crate) fn from_photo(
+        path: PathBuf,
+        text: String,
+        aliases: Vec<String>,
+        tags: Vec<String>,
+    ) -> Self {
+        Self {
+            path,
+            text,
+            aliases,
+            tags,
+            folded: std::sync::OnceLock::new(),
+        }
+    }
     pub fn folded_text(&self) -> &str {
         self.folded.get_or_init(|| self.text.to_lowercase())
     }
@@ -217,6 +240,8 @@ pub struct Vault {
     pub notes: Vec<Note>,
     pub warnings: Vec<String>,
     pub index_time: Duration,
+    /// What the index photo did when this vault was opened.
+    pub photo: PhotoReport,
     pub attachments: Vec<PathBuf>,
     pub folders: Vec<PathBuf>,
     /// A folder around the default vault (Masih's ~/Desktop around ~/Desktop/o)
@@ -242,11 +267,26 @@ impl Vault {
         Self::open_beside(root, default.as_deref(), cancelled)
     }
 
+    /// Open `root` with the index photo at `photo` instead of the app's own.
+    pub fn open_with_photo(root: &Path, photo: IndexPhoto) -> Result<Self> {
+        let default = crate::vaults::default_vault().and_then(|vault| vault.canonicalize().ok());
+        Self::open_beside_with(root, default.as_deref(), || false, photo)
+    }
+
     /// Open `root` where `default` is the default vault.
     pub fn open_beside(
         root: &Path,
         default: Option<&Path>,
         cancelled: impl Fn() -> bool,
+    ) -> Result<Self> {
+        Self::open_beside_with(root, default, cancelled, IndexPhoto::Auto)
+    }
+
+    fn open_beside_with(
+        root: &Path,
+        default: Option<&Path>,
+        cancelled: impl Fn() -> bool,
+        photo: IndexPhoto,
     ) -> Result<Self> {
         let root = root
             .canonicalize()
@@ -260,6 +300,7 @@ impl Vault {
             notes: Vec::new(),
             warnings: Vec::new(),
             index_time: Duration::ZERO,
+            photo: PhotoReport::default(),
             attachments: Vec::new(),
             folders: Vec::new(),
             guests: std::collections::BTreeSet::new(),
@@ -267,7 +308,7 @@ impl Vault {
             names: HashMap::new(),
             incoming: std::sync::OnceLock::new(),
         };
-        vault.refresh_cancellable(cancelled)?;
+        vault.refresh_cancellable(cancelled, &photo)?;
         Ok(vault)
     }
 
@@ -279,12 +320,29 @@ impl Vault {
             .into_owned()
     }
 
-    fn refresh_cancellable(&mut self, cancelled: impl Fn() -> bool) -> Result<()> {
+    fn refresh_cancellable(
+        &mut self,
+        cancelled: impl Fn() -> bool,
+        photo: &IndexPhoto,
+    ) -> Result<()> {
         if !self.root.is_dir() {
             return Err("The vault folder is no longer available.".into());
         }
         let start = Instant::now();
-        let mut notes = Vec::new();
+        let taken = SystemTime::now();
+        let location = match photo {
+            IndexPhoto::Auto => crate::paths::state_file(&self.root, "index", "photo"),
+            IndexPhoto::Off => None,
+            IndexPhoto::At(location) => Some(location.clone()),
+        };
+        let mut previous = location
+            .as_deref()
+            .and_then(|location| index_photo::read(location, &self.root));
+        let mut report = PhotoReport {
+            found: previous.is_some(),
+            ..PhotoReport::default()
+        };
+        let mut notes: Vec<(Note, Option<Stamp>)> = Vec::new();
         let mut attachments = Vec::new();
         let mut folders = Vec::new();
         let mut warnings = Vec::new();
@@ -318,21 +376,60 @@ impl Vault {
                 }
                 continue;
             }
+            let relative: PathBuf = entry.path().strip_prefix(&self.root).unwrap().into();
+            let stamp = location
+                .is_some()
+                .then(|| entry.metadata().ok().and_then(|metadata| Stamp::of(&metadata)))
+                .flatten();
+            // A note with the size and time the photo recorded is not read.
+            if let Some(stamp) = stamp
+                && let Some(old) = previous.as_mut().and_then(|photo| photo.remove(&relative))
+                && old.stamp == stamp
+            {
+                report.reused += 1;
+                notes.push((
+                    Note::from_photo(relative, old.text, old.aliases, old.tags),
+                    Some(stamp),
+                ));
+                continue;
+            }
             match fs::read_to_string(entry.path()) {
-                Ok(text) => notes.push(Note::new(
-                    entry.path().strip_prefix(&self.root).unwrap().into(),
-                    text,
-                )),
+                Ok(text) => {
+                    report.read += 1;
+                    notes.push((Note::new(relative, text), stamp));
+                }
                 Err(error) => warnings.push(format!("{}: {error}", entry.path().display())),
             }
         }
-        notes.sort_by_key(|note| note.path.to_string_lossy().to_lowercase());
+        report.gone = previous.map_or(0, |photo| photo.len());
+        notes.sort_by_key(|(note, _)| note.path.to_string_lossy().to_lowercase());
+        let (notes, stamps): (Vec<Note>, Vec<Option<Stamp>>) = notes.into_iter().unzip();
         self.notes = notes;
         self.attachments = attachments;
         folders.sort();
         self.folders = folders;
         self.rebuild_lookup();
         self.warnings = warnings;
+        // The photo is rewritten when there is none, or when enough notes differ from it that
+        // the next open would read a noticeable number of them again. Small vaults open fast
+        // without one, so the app's own folder only gets a photo of a vault big enough.
+        if let Some(location) = &location {
+            let stale = report.read + report.gone;
+            let explicit = matches!(photo, IndexPhoto::At(_));
+            let worth = explicit || self.notes.len() >= PHOTO_MIN_NOTES;
+            let outdated = if explicit {
+                stale > 0
+            } else {
+                stale > PHOTO_STALE_BASE + self.notes.len() / PHOTO_STALE_SHARE
+            };
+            if worth && (!report.found || outdated) {
+                match index_photo::write(location, &self.root, taken, &self.notes, &stamps) {
+                    Ok(()) => report.written = true,
+                    Err(error) => eprintln!("Cannot save the index photo: {error}"),
+                }
+            }
+        }
+        self.photo = report;
         self.index_time = start.elapsed();
         Ok(())
     }
