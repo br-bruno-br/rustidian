@@ -89,10 +89,10 @@ impl Manager {
                 .show(ctx, |ui| {
                     ui.set_width((ctx.content_rect().width() - 80.0).clamp(220.0, 500.0));
                     theme::dialog_style(ui);
-                    close = theme::dialog_header(ui, "Move selected items to Trash?", "Cancel")
+                    close = theme::dialog_header(ui, "Mover os itens selecionados para a Lixeira?", "Cancelar")
                         .clicked();
                     ui.label(format!(
-                        "Move {} selected items and any folder contents to system Trash?",
+                        "Mover {} itens selecionados e o conteúdo de qualquer pasta para a Lixeira?",
                         paths.len()
                     ));
                     egui::ScrollArea::vertical()
@@ -102,8 +102,8 @@ impl Manager {
                                 ui.label(path.display().to_string());
                             }
                         });
-                    ui.label("You can recover these items from system Trash.");
-                    let (submit, cancel) = theme::dialog_actions(ui, "Move to Trash", true);
+                    ui.label("Você poderá recuperar estes itens da Lixeira.");
+                    let (submit, cancel) = theme::dialog_actions(ui, "Mover para a Lixeira", true);
                     if focus {
                         cancel.request_focus();
                     }
@@ -132,24 +132,24 @@ impl Manager {
                     let width = (ctx.content_rect().width() - 48.0).clamp(220.0, 560.0);
                     ui.set_width(width - frame.total_margin().sum().x);
                     theme::dialog_style(ui);
-                    let close = theme::dialog_header(ui, "Update links", "Close");
+                    let close = theme::dialog_header(ui, "Atualizar links", "Fechar");
                     ui_probe::record(ctx, "move-links-title", ui.min_rect());
                     ui_probe::record(ctx, "move-links-close", close.rect);
                     if close.clicked() {
                         choice = Some(None);
                     }
-                    ui.label("Do you want to update internal links affected by this move?");
+                    ui.label("Deseja atualizar os links internos afetados por esta mudança?");
                     ui.label(format!(
-                        "This will affect {links} {} in {files} {}.",
+                        "Isso afetará {links} {} em {files} {}.",
                         if links == 1 { "link" } else { "links" },
-                        if files == 1 { "file" } else { "files" },
+                        if files == 1 { "arquivo" } else { "arquivos" },
                     ));
                     ui.add_space(crate::theme::space::S);
                     ui.horizontal_wrapped(|ui| {
                         let choices = [
-                            ("Always update", "move-links-always", Some(true)),
-                            ("Just once", "move-links-once", Some(false)),
-                            ("Do not update", "move-links-no", None),
+                            ("Sempre atualizar", "move-links-always", Some(true)),
+                            ("Só desta vez", "move-links-once", Some(false)),
+                            ("Não atualizar", "move-links-no", None),
                         ];
                         let required = choices
                             .iter()
@@ -235,7 +235,7 @@ impl Manager {
                     let field = ui.add(
                         TextEdit::singleline(&mut picker.query)
                             .id(id)
-                            .hint_text("Type a folder")
+                            .hint_text("Digite uma pasta")
                             .frame(egui::Frame::NONE)
                             .desired_width((ui.available_width() - 46.0).max(100.0)),
                     );
@@ -327,7 +327,7 @@ impl Manager {
                         [ui.available_width(), 32.0],
                         egui::Button::new("")
                             .left_text(RichText::new(query))
-                            .right_text(RichText::new("Enter to create").size(12.0))
+                            .right_text(RichText::new("Enter para criar").size(12.0))
                             .selected(true)
                             .stroke(Stroke::NONE),
                     );
@@ -341,7 +341,7 @@ impl Manager {
                     }
                     ui.add_space(crate::theme::space::M);
                     ui.vertical_centered(|ui| {
-                        ui.weak("No existing folders found.");
+                        ui.weak("Nenhuma pasta existente encontrada.");
                     });
                 }
                 if let Some(error) = &self.error {
@@ -352,7 +352,7 @@ impl Manager {
                     ui.add_space((ui.available_width() - 380.0).max(0.0) / 2.0);
                     ui.label(
                         RichText::new(
-                            "↑↓ to navigate   ↵ to move   shift ↵ to create   esc to dismiss",
+                            "↑↓ para navegar   ↵ para mover   shift ↵ para criar   esc para fechar",
                         )
                         .size(12.0)
                         .color(ui.visuals().weak_text_color()),
