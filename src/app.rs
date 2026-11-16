@@ -5969,6 +5969,9 @@ impl eframe::App for NotesApp {
     /// Runs before every `ui` pass and alone while the window is hidden, so
     /// hand-offs, signals and close requests never wait for a drawn frame.
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Only the single-instance hand-off (Unix) raises the window.
+        #[cfg(not(unix))]
+        let _ = &frame;
         let result = self
             .reveal_result
             .as_ref()

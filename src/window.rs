@@ -1,5 +1,6 @@
 use crate::theme::{self, Icon};
 use eframe::egui::{self, Align, Color32, FontId, Layout, PointerButton, Sense, ViewportCommand};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicI32, Ordering};
 
 /// Leave Rustidian's exact Ctrl+Q as the only quit key. egui's built-in one
@@ -116,6 +117,7 @@ pub fn close(ctx: &egui::Context, source: &'static str) {
 /// winit 0.30 delivers dropped files only to X11 windows, so on Wayland dragging
 /// an image or a note into Rustidian did nothing (5 Nov). `RUSTIDIAN_WAYLAND`
 /// keeps a native Wayland window, without drops.
+#[cfg(target_os = "linux")]
 pub fn use_x11_for_drops(wayland_wanted: bool, wayland_display: bool, x11_display: bool) -> bool {
     !wayland_wanted && wayland_display && x11_display
 }
@@ -136,6 +138,7 @@ pub fn take_close_source(ctx: &egui::Context) -> &'static str {
 /// applications do. Where the compositor refuses the raise, the attention
 /// request makes GNOME show "Rustidian is ready" instead of nothing; the
 /// window never hands its launches to a second one (`instance`).
+#[cfg(unix)]
 pub fn bring_forward(ctx: &egui::Context, frame: &eframe::Frame, token: Option<&str>) {
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(ViewportCommand::Focus);
@@ -222,104 +225,123 @@ mod wayland {
     delegate_noop!(Activation: XdgActivationV1);
 }
 
-/// The write end of the pipe that wakes the signal thread.
-static SIGNAL_PIPE: AtomicI32 = AtomicI32::new(-1);
-/// The process that installed the handler. A child forked to start a helper
-/// runs the handler too until its program starts; it must not close this window.
-static SIGNAL_OWNER: AtomicI32 = AtomicI32::new(0);
-/// The signal the window has not yet acted on.
-static SIGNALLED: AtomicI32 = AtomicI32::new(0);
+/// Closing on SIGTERM, SIGHUP and SIGINT is Unix-only; Windows has no such signals, so there
+/// the window closes through its own button and the two functions below do nothing.
+#[cfg(unix)]
+mod signals {
+    use super::*;
 
-const SIG_DFL: usize = 0;
-const SIG_IGN: usize = 1;
+    /// The write end of the pipe that wakes the signal thread.
+    static SIGNAL_PIPE: AtomicI32 = AtomicI32::new(-1);
+    /// The process that installed the handler. A child forked to start a helper
+    /// runs the handler too until its program starts; it must not close this window.
+    static SIGNAL_OWNER: AtomicI32 = AtomicI32::new(0);
+    /// The signal the window has not yet acted on.
+    static SIGNALLED: AtomicI32 = AtomicI32::new(0);
 
-unsafe extern "C" {
-    /// libc's `signal`; std already links libc.
-    #[link_name = "signal"]
-    fn set_disposition(signal: i32, handler: usize) -> usize;
-}
+    const SIG_DFL: usize = 0;
+    const SIG_IGN: usize = 1;
 
-extern "C" fn on_signal(signal: i32) {
-    // Only async-signal-safe calls here: getpid and write.
-    if rustix::process::getpid().as_raw_nonzero().get() != SIGNAL_OWNER.load(Ordering::Relaxed) {
-        return;
+    unsafe extern "C" {
+        /// libc's `signal`; std already links libc.
+        #[link_name = "signal"]
+        fn set_disposition(signal: i32, handler: usize) -> usize;
     }
-    let pipe = SIGNAL_PIPE.load(Ordering::Relaxed);
-    if pipe >= 0 {
-        // SAFETY: the write end stays open until the process exits.
-        let pipe = unsafe { std::os::fd::BorrowedFd::borrow_raw(pipe) };
-        let _ = rustix::io::write(pipe, &[signal as u8]);
-    }
-}
 
-/// SIGTERM, SIGHUP and SIGINT close the window the way its close button does,
-/// without asking about unsaved edits, so the Agent terminal and the helper
-/// processes end with it. A second signal, or a window still open five
-/// seconds later, ends the process the way the signal would have. Signals
-/// the launch ignored (nohup, a background job) stay ignored.
-pub fn close_on_signals(ctx: egui::Context) {
-    use rustix::process::Signal;
-    use std::io::Read as _;
-    let Ok((mut reader, writer)) = std::io::pipe() else {
-        return;
-    };
-    SIGNAL_OWNER.store(
-        rustix::process::getpid().as_raw_nonzero().get(),
-        Ordering::Relaxed,
-    );
-    SIGNAL_PIPE.store(
-        std::os::fd::IntoRawFd::into_raw_fd(writer),
-        Ordering::Relaxed,
-    );
-    let handler = on_signal as extern "C" fn(i32) as usize;
-    for signal in [Signal::TERM, Signal::HUP, Signal::INT] {
-        // SAFETY: `on_signal` makes only async-signal-safe calls.
-        unsafe {
-            if set_disposition(signal.as_raw(), handler) == SIG_IGN {
-                set_disposition(signal.as_raw(), SIG_IGN);
-            }
+    extern "C" fn on_signal(signal: i32) {
+        // Only async-signal-safe calls here: getpid and write.
+        if rustix::process::getpid().as_raw_nonzero().get() != SIGNAL_OWNER.load(Ordering::Relaxed)
+        {
+            return;
+        }
+        let pipe = SIGNAL_PIPE.load(Ordering::Relaxed);
+        if pipe >= 0 {
+            // SAFETY: the write end stays open until the process exits.
+            let pipe = unsafe { std::os::fd::BorrowedFd::borrow_raw(pipe) };
+            let _ = rustix::io::write(pipe, &[signal as u8]);
         }
     }
-    let _ = std::thread::Builder::new()
-        .name("rustidian-signals".into())
-        .spawn(move || {
-            let mut received = [0];
-            if reader.read_exact(&mut received).is_err() {
-                return;
+
+    /// SIGTERM, SIGHUP and SIGINT close the window the way its close button does,
+    /// without asking about unsaved edits, so the Agent terminal and the helper
+    /// processes end with it. A second signal, or a window still open five
+    /// seconds later, ends the process the way the signal would have. Signals
+    /// the launch ignored (nohup, a background job) stay ignored.
+    pub fn close_on_signals(ctx: egui::Context) {
+        use rustix::process::Signal;
+        use std::io::Read as _;
+        let Ok((mut reader, writer)) = std::io::pipe() else {
+            return;
+        };
+        SIGNAL_OWNER.store(
+            rustix::process::getpid().as_raw_nonzero().get(),
+            Ordering::Relaxed,
+        );
+        SIGNAL_PIPE.store(
+            std::os::fd::IntoRawFd::into_raw_fd(writer),
+            Ordering::Relaxed,
+        );
+        let handler = on_signal as extern "C" fn(i32) as usize;
+        for signal in [Signal::TERM, Signal::HUP, Signal::INT] {
+            // SAFETY: `on_signal` makes only async-signal-safe calls.
+            unsafe {
+                if set_disposition(signal.as_raw(), handler) == SIG_IGN {
+                    set_disposition(signal.as_raw(), SIG_IGN);
+                }
             }
-            let number = i32::from(received[0]);
-            SIGNALLED.store(number, Ordering::Relaxed);
-            ctx.request_repaint();
-            let mut next = [rustix::event::PollFd::new(
-                &reader,
-                rustix::event::PollFlags::IN,
-            )];
-            let _ = rustix::event::poll(
-                &mut next,
-                Some(&rustix::event::Timespec {
-                    tv_sec: 5,
-                    tv_nsec: 0,
-                }),
-            );
-            // SAFETY: restores the default disposition, which ends the process.
-            unsafe { set_disposition(number, SIG_DFL) };
-            if let Some(signal) = Signal::from_named_raw(number) {
-                let _ = rustix::process::kill_process(rustix::process::getpid(), signal);
-            }
-        });
+        }
+        let _ = std::thread::Builder::new()
+            .name("rustidian-signals".into())
+            .spawn(move || {
+                let mut received = [0];
+                if reader.read_exact(&mut received).is_err() {
+                    return;
+                }
+                let number = i32::from(received[0]);
+                SIGNALLED.store(number, Ordering::Relaxed);
+                ctx.request_repaint();
+                let mut next = [rustix::event::PollFd::new(
+                    &reader,
+                    rustix::event::PollFlags::IN,
+                )];
+                let _ = rustix::event::poll(
+                    &mut next,
+                    Some(&rustix::event::Timespec {
+                        tv_sec: 5,
+                        tv_nsec: 0,
+                    }),
+                );
+                // SAFETY: restores the default disposition, which ends the process.
+                unsafe { set_disposition(number, SIG_DFL) };
+                if let Some(signal) = Signal::from_named_raw(number) {
+                    let _ = rustix::process::kill_process(rustix::process::getpid(), signal);
+                }
+            });
+    }
+
+    /// The signal that asked the window to close, once.
+    pub fn take_signal() -> Option<&'static str> {
+        use rustix::process::Signal;
+        let number = SIGNALLED.swap(0, Ordering::Relaxed);
+        [
+            (Signal::TERM, "SIGTERM"),
+            (Signal::HUP, "SIGHUP"),
+            (Signal::INT, "SIGINT"),
+        ]
+        .into_iter()
+        .find_map(|(signal, name)| (signal.as_raw() == number).then_some(name))
+    }
 }
 
-/// The signal that asked the window to close, once.
+#[cfg(unix)]
+pub use signals::{close_on_signals, take_signal};
+
+#[cfg(not(unix))]
+pub fn close_on_signals(_ctx: egui::Context) {}
+
+#[cfg(not(unix))]
 pub fn take_signal() -> Option<&'static str> {
-    use rustix::process::Signal;
-    let number = SIGNALLED.swap(0, Ordering::Relaxed);
-    [
-        (Signal::TERM, "SIGTERM"),
-        (Signal::HUP, "SIGHUP"),
-        (Signal::INT, "SIGINT"),
-    ]
-    .into_iter()
-    .find_map(|(signal, name)| (signal.as_raw() == number).then_some(name))
+    None
 }
 
 /// Keep window controls in the native app so hover feedback matches every other control.
@@ -521,6 +543,8 @@ fn resize_edges(ui: &egui::Ui) {
 
 #[cfg(test)]
 mod tests {
+    // Linux only: it decides between Wayland and X11, which Windows does not have.
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_wayland_session_with_xwayland_opens_the_window_on_x11_so_drops_arrive() {
         assert!(use_x11_for_drops(false, true, true));

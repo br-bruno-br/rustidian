@@ -172,6 +172,7 @@ fn main() -> eframe::Result {
             window::close_on_signals(cc.egui_ctx.clone());
             #[cfg(unix)]
             let _ = ui_context.set(cc.egui_ctx.clone());
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut app = app::NotesApp::new(cc, &root, started, startup_document);
             #[cfg(unix)]
             {
