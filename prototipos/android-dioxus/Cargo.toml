@@ -1,0 +1,26 @@
+# Protótipo R7a: Dioxus 0.7 (renderer mobile = WebView do Android) com um <textarea>.
+# NÃO faz parte do workspace do app: o `[workspace]` vazio abaixo (e o `exclude` no
+# Cargo.toml da raiz) isolam este build.
+[package]
+name = "rustidian-proto-dioxus"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "Protótipo: <textarea> do Dioxus com o Gboard no Android"
+
+[workspace]
+
+[dependencies]
+dioxus = { version = "=0.7.10" }
+
+[features]
+default = []
+mobile = ["dioxus/mobile"]
+desktop = ["dioxus/desktop"]
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "abort"
+codegen-units = 16
