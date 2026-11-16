@@ -95,7 +95,7 @@ impl Manager {
     pub fn restored(&mut self, document: Document, ctx: &egui::Context) {
         self.expected = Some(document);
         self.error = None;
-        self.notice = Some("Snapshot restored".into());
+        self.notice = Some("Versão restaurada".into());
         self.reload(ctx, false);
     }
 
@@ -202,7 +202,7 @@ impl Manager {
                     self.loading = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    self.error = Some("Cannot read local history.".into());
+                    self.error = Some("Não foi possível ler o histórico local.".into());
                     self.loading = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
@@ -220,14 +220,14 @@ impl Manager {
                             self.selected = None;
                             self.text = None;
                             self.changes.clear();
-                            self.notice = Some("History cleared".into());
+                            self.notice = Some("Histórico apagado".into());
                         }
                         Err(error) => self.error = Some(error),
                     }
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.clearing = None;
-                    self.error = Some("Cannot clear local history.".into());
+                    self.error = Some("Não foi possível apagar o histórico local.".into());
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
@@ -286,7 +286,7 @@ impl Manager {
                                 TextEdit::singleline(&mut self.input)
                                     .id(input_id)
                                     .return_key(None)
-                                    .hint_text("Choose a file...")
+                                    .hint_text("Escolha um arquivo...")
                                     .desired_width(ui.available_width()),
                             );
                             if self.focus {
@@ -312,10 +312,10 @@ impl Manager {
                                         )
                                         .map(|time| {
                                             time.with_timezone(&chrono::Local)
-                                                .format("%a, %b %-d, %Y %-I:%M %p")
+                                                .format("%d/%m/%Y %H:%M")
                                                 .to_string()
                                         })
-                                        .unwrap_or_else(|| "Unknown date".into());
+                                        .unwrap_or_else(|| "Data desconhecida".into());
                                         let size = if version.bytes < 1024 {
                                             format!("{} B", version.bytes)
                                         } else {
@@ -409,7 +409,7 @@ impl Manager {
                                         }
                                     }
                                     if self.files.is_empty() && !busy {
-                                        ui.label("No snapshots found.");
+                                        ui.label("Nenhuma versão encontrada.");
                                     }
                                 });
                             }
@@ -439,7 +439,7 @@ impl Manager {
                                 close = button.clicked();
                                 let button = ui.add_enabled(
                                     !busy && self.text.is_some() && self.expected.is_some(),
-                                    egui::Button::new("Restore"),
+                                    egui::Button::new("Restaurar"),
                                 );
                                 ui_probe::record(ctx, "recovery-restore", button.rect);
                                 if button.clicked()
@@ -453,7 +453,7 @@ impl Manager {
                                 }
                                 let button = ui.add_enabled(
                                     !busy && self.text.is_some(),
-                                    egui::Button::new("Copy"),
+                                    egui::Button::new("Copiar"),
                                 );
                                 ui_probe::record(ctx, "recovery-copy", button.rect);
                                 if !busy {
@@ -473,11 +473,11 @@ impl Manager {
                                     && let Some(text) = &self.text
                                 {
                                     ctx.copy_text(text.clone());
-                                    self.notice = Some("Copied to your clipboard".into());
+                                    self.notice = Some("Copiado para a área de transferência".into());
                                 }
                                 let changes = ui.add_enabled(
                                     !busy && self.text.is_some(),
-                                    egui::Checkbox::new(&mut self.show_changes, "Show changes"),
+                                    egui::Checkbox::new(&mut self.show_changes, "Mostrar alterações"),
                                 );
                                 ui_probe::record(ctx, "recovery-changes", changes.rect);
                             });
@@ -572,9 +572,9 @@ impl Manager {
             let modal = dialog.show(ctx, |ui| {
                 theme::dialog_style(ui);
                 ui.set_width(390.0);
-                cancel |= theme::dialog_header(ui, "Clear history?", "Close dialog").clicked();
-                ui.label("This will permanently delete all local snapshots for this vault.");
-                let (confirm, dismiss) = theme::dialog_actions(ui, "Clear", true);
+                cancel |= theme::dialog_header(ui, "Apagar o histórico?", "Fechar diálogo").clicked();
+                ui.label("Isto apagará de vez todas as versões locais deste cofre.");
+                let (confirm, dismiss) = theme::dialog_actions(ui, "Limpar", true);
                 ui_probe::record(ctx, "recovery-clear-cancel", dismiss.rect);
                 ui_probe::record(ctx, "recovery-clear-confirm", confirm.rect);
                 cancel |= dismiss.clicked();
