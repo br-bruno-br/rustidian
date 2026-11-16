@@ -1,5 +1,7 @@
 #[path = "settings_ui.rs"]
 pub(crate) mod settings_ui;
+#[path = "sync_ui.rs"]
+pub(crate) mod sync_ui;
 
 use crate::{
     file_tree::{FileAction, Tree},
@@ -192,6 +194,7 @@ pub struct NotesApp {
     page_preview: crate::page_preview::Manager,
     pub(crate) graph: crate::graph_ui::Manager,
     pub(crate) always_update_links: bool,
+    sync: sync_ui::SyncPanel,
 }
 
 impl NotesApp {
@@ -299,6 +302,7 @@ impl NotesApp {
             page_preview: Default::default(),
             graph: Default::default(),
             always_update_links: false,
+            sync: Default::default(),
         };
         theme::palette::select(&cc.egui_ctx, app.palette);
         app.load_vault(root);
@@ -897,6 +901,7 @@ impl NotesApp {
         {
             ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
+        self.sync_tick(ctx);
         self.capture_recovery(ctx);
     }
 
@@ -1386,6 +1391,7 @@ impl NotesApp {
         }
         self.search_cache.invalidate();
         self.graph.invalidate();
+        self.sync.notify_saved();
     }
 
     fn dirty(&mut self) -> bool {
@@ -6200,6 +6206,7 @@ impl eframe::App for NotesApp {
             && let Some(error) = self.error.clone()
         {
             egui::Area::new(egui::Id::unique("error"))
+                        self.sync_status_label(ui);
                 .order(egui::Order::Foreground)
                 .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 44.0))
                 .show(&ctx, |ui| {
@@ -6275,6 +6282,7 @@ impl eframe::App for NotesApp {
             self.save(self.active);
         }
         crate::ui_probe::frame_time(&ctx, frame_started);
+        self.sync_window(&ctx);
         if frame_started.elapsed() > Duration::from_millis(300) {
             eprintln!(
                 "slow: a whole frame took {} ms (active note {} bytes)",

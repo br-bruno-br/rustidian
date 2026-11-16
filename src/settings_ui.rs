@@ -49,6 +49,7 @@ pub(super) enum Page {
     Editor,
     Files,
     Hotkeys,
+    Sync,
     Daily,
     Templates,
     Unique,
@@ -56,12 +57,13 @@ pub(super) enum Page {
 }
 
 impl Page {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Appearance,
         Self::Interface,
         Self::Editor,
         Self::Files,
         Self::Hotkeys,
+        Self::Sync,
         Self::Daily,
         Self::Templates,
         Self::Unique,
@@ -75,6 +77,7 @@ impl Page {
             Self::Editor => "Editor",
             Self::Files => "Files and links",
             Self::Hotkeys => "Hotkeys",
+            Self::Sync => "Sync",
             Self::Daily => "Daily notes",
             Self::Templates => "Templates",
             Self::Unique => "Unique note creator",
@@ -93,6 +96,9 @@ impl Page {
             }
             Self::Files => "files and links automatically update move folder",
             Self::Hotkeys => "hotkeys keyboard shortcuts commands",
+            Self::Sync => {
+                "sync synchronization server address token passphrase device connect disconnect keys devices"
+            }
             Self::Daily => "daily notes date format folder template new file location",
             Self::Templates => "templates date time format folder location",
             Self::Unique => "unique notes prefix format folder template new file location",
@@ -299,6 +305,10 @@ impl NotesApp {
                             changed |= self.editor_settings(ui);
                             return;
                         }
+                        if self.settings_page == Page::Sync {
+                            self.sync_settings(ui, ctx);
+                            return;
+                        }
                         if self.settings_page == Page::Appearance {
                             changed |= theme::palette::picker(ui, &mut self.palette, self.dark);
                         }
@@ -414,6 +424,7 @@ impl NotesApp {
                                 );
                             }
                             Page::Editor => unreachable!(),
+                            Page::Sync => unreachable!(),
                             Page::Files => {
                                 changed |= toggle(
                                     ui,
@@ -663,7 +674,7 @@ impl NotesApp {
     }
 }
 
-fn row(
+pub(super) fn row(
     ui: &mut egui::Ui,
     title: &str,
     description: &str,
@@ -771,7 +782,13 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
     *value != before
 }
 
-fn toggle(ui: &mut egui::Ui, title: &str, description: &str, id: &str, value: &mut bool) -> bool {
+pub(super) fn toggle(
+    ui: &mut egui::Ui,
+    title: &str,
+    description: &str,
+    id: &str,
+    value: &mut bool,
+) -> bool {
     row(ui, title, description, |ui| {
         let response = switch(ui, value);
         crate::ui_probe::record(ui.ctx(), id, response.rect);
@@ -822,6 +839,7 @@ fn navigation_row(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Respon
         Page::Editor => Icon::Edit,
         Page::Files => Icon::Files,
         Page::Hotkeys => Icon::Commands,
+        Page::Sync => Icon::OpenLink,
         Page::Daily => Icon::DailyNote,
         Page::Templates => Icon::Templates,
         Page::Unique => Icon::NewNote,
@@ -907,7 +925,7 @@ fn choice(
     })
 }
 
-fn group<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub(super) fn group<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
     egui::Frame::new()
         .fill(ui.visuals().faint_bg_color)
         .corner_radius(12)
