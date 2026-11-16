@@ -148,6 +148,8 @@ pub struct NotesApp {
     refresh_paths: std::collections::HashSet<PathBuf>,
     /// Events were lost or folders gained watches: the refresh must re-index.
     refresh_required: bool,
+    /// Notes the last full index did not find, kept until a second index confirms they are gone.
+    doubtful_missing: std::collections::BTreeSet<PathBuf>,
     loading_root: Option<PathBuf>,
     startup_document: Option<PathBuf>,
     find: crate::editor_ui::Find,
@@ -266,6 +268,7 @@ impl NotesApp {
             refresh_due: None,
             refresh_paths: Default::default(),
             refresh_required: false,
+            doubtful_missing: Default::default(),
             loading_root: None,
             startup_document,
             find: Default::default(),
@@ -711,7 +714,7 @@ impl NotesApp {
             match result {
                 Ok(prepared) => {
                     let PreparedVault {
-                        vault,
+                        mut vault,
                         tree,
                         files,
                         monitoring,
@@ -814,6 +817,7 @@ impl NotesApp {
                         self.refresh_due = None;
                         self.refresh_paths.clear();
                         self.refresh_required = false;
+                        self.doubtful_missing.clear();
                         self.tree = tree;
                         self.files = files;
                         self.search_cache.invalidate();
@@ -862,10 +866,33 @@ impl NotesApp {
                                 }
                             }
                         }
+                        let (mut tree, mut files) = (tree, files);
+                        let mut renamed_notes = Vec::new();
+                        // A scan that came up short must not drop a note: what it missed is
+                        // checked again at the next one, and a note that merely moved follows.
+                        if let Some(previous) = &self.vault {
+                            let reconciled =
+                                vault.reconcile(previous, &mut self.doubtful_missing);
+                            if reconciled.changed {
+                                tree = Tree::from_vault(&vault);
+                                files = rustidian::search::FileMatcher::from_vault(&vault);
+                            }
+                            if reconciled.recheck {
+                                self.refresh_required = true;
+                                self.refresh_due = Some(Instant::now() + Duration::from_millis(400));
+                            }
+                            renamed_notes = reconciled.renamed;
+                        }
                         self.tree = tree;
                         self.files = files;
                         self.search_cache.invalidate();
                         self.vault = Some(vault);
+                        if !renamed_notes.is_empty() {
+                            for (source, destination) in renamed_notes {
+                                self.relocate_tabs(&source, &destination);
+                            }
+                            self.persist_session();
+                        }
                     }
                     if let Some(vault) = &self.vault {
                         self.status = format!("{} notes", vault.notes.len());

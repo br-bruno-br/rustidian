@@ -9,6 +9,9 @@ use std::{
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
+mod reconcile;
+pub use reconcile::Reconciled;
+
 pub type Result<T> = std::result::Result<T, String>;
 
 /// The app's own index photo is kept for vaults of at least this many notes.
