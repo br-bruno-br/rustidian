@@ -13,10 +13,10 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use nota_sync::protocolo::{BLOB_MAXIMO, CABECALHO_HASH, PedidoPublicar, hex64};
+use nota_sync::protocolo::{BLOB_MAXIMO, CABECALHO_HASH, CHAVE_MAXIMA, PedidoPublicar, hex64};
 use serde::Deserialize;
 
-use crate::banco::{Banco, ErroBlob, ErroPublicar, ResultadoPublicar};
+use crate::banco::{Banco, ErroBlob, ErroChave, ErroPublicar, ResultadoPublicar};
 use crate::tokens;
 
 pub struct Estado {
@@ -43,6 +43,12 @@ pub fn roteador(estado: S) -> Router {
         .route(
             "/v1/blob",
             put(enviar_blob).layer(DefaultBodyLimit::max(BLOB_MAXIMO)),
+        )
+        .route(
+            "/v1/chave",
+            get(baixar_chave)
+                .put(enviar_chave)
+                .layer(DefaultBodyLimit::max(CHAVE_MAXIMA)),
         )
         .route("/v1/item/{id}", post(publicar))
         .route_layer(middleware::from_fn_with_state(estado.clone(), autenticar))
@@ -153,6 +159,36 @@ async fn publicar(
         Ok(Ok(Err(ErroPublicar::BlobDesconhecido))) => {
             erro(StatusCode::BAD_REQUEST, "envie o blob antes de publicar")
         }
+        Ok(Err(e)) => interno(e),
+        Err(e) => interno(e),
+    }
+}
+
+/// `GET /v1/chave`: o `cofre.chave` (K embrulhada), ou 404 se ainda não há.
+async fn baixar_chave(State(s): State<S>) -> Response {
+    let r = tokio::task::spawn_blocking(move || s.banco.ler_chave()).await;
+    match r {
+        Ok(Ok(Some(b))) => (
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            Bytes::from(b),
+        )
+            .into_response(),
+        Ok(Ok(None)) => erro(StatusCode::NOT_FOUND, "sem cofre.chave"),
+        Ok(Err(e)) => interno(e),
+        Err(e) => interno(e),
+    }
+}
+
+/// `PUT /v1/chave`: grava o `cofre.chave` só se não existir (409 se já existe).
+async fn enviar_chave(State(s): State<S>, corpo: Bytes) -> Response {
+    let r = tokio::task::spawn_blocking(move || s.banco.gravar_chave(&corpo)).await;
+    match r {
+        Ok(Ok(Ok(()))) => StatusCode::OK.into_response(),
+        Ok(Ok(Err(ErroChave::Vazia))) => erro(StatusCode::BAD_REQUEST, "cofre.chave vazio"),
+        Ok(Ok(Err(ErroChave::GrandeDemais))) => {
+            erro(StatusCode::PAYLOAD_TOO_LARGE, "cofre.chave grande demais")
+        }
+        Ok(Ok(Err(ErroChave::JaExiste))) => erro(StatusCode::CONFLICT, "já existe um cofre.chave"),
         Ok(Err(e)) => interno(e),
         Err(e) => interno(e),
     }

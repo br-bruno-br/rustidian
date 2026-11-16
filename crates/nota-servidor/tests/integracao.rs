@@ -112,6 +112,16 @@ fn sem_token_e_token_errado_dao_401_em_todas_as_rotas() {
             "{nome}"
         );
         assert_eq!(
+            status(com(ag.get(a.url("/v1/chave"))).call()),
+            401,
+            "{nome}"
+        );
+        assert_eq!(
+            status(com_corpo(ag.put(a.url("/v1/chave"))).send(&b"abc"[..])),
+            401,
+            "{nome}"
+        );
+        assert_eq!(
             status(
                 com_corpo(ag.post(a.url(&format!("/v1/item/{id}"))))
                     .content_type("application/json")
@@ -489,4 +499,100 @@ fn subcomando_token_novo_imprime_o_token_e_ele_funciona() {
         .header("Authorization", format!("Bearer {token}"))
         .call();
     assert_eq!(status(r), 200);
+}
+
+#[test]
+fn chave_do_cofre_so_grava_uma_vez_e_tem_limite() {
+    let a = Ambiente::novo();
+    let ag = agente();
+    let aut = format!("Bearer {}", a.token);
+
+    // ainda não há: 404
+    let r = ag
+        .get(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .call();
+    assert_eq!(status(r), 404);
+
+    // vazio e grande demais são recusados e nada é gravado
+    let r = ag
+        .put(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .send(&b""[..]);
+    assert_eq!(status(r), 400);
+    let grande = vec![7u8; 4 * 1024 + 1];
+    let r = ag
+        .put(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .send(&grande[..]);
+    assert_eq!(status(r), 413);
+    assert!(!a.dados.path().join("cofre.chave").exists());
+
+    // o limite exato passa
+    let no_limite = vec![9u8; 4 * 1024];
+    let r = ag
+        .put(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .send(&no_limite[..]);
+    assert_eq!(status(r), 200);
+
+    // a segunda gravação é 409 e não troca o conteúdo
+    let r = ag
+        .put(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .send(&b"outra"[..]);
+    assert_eq!(status(r), 409);
+    let mut r = ag
+        .get(a.url("/v1/chave"))
+        .header("Authorization", &aut)
+        .call()
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    let corpo = r.body_mut().read_to_vec().unwrap();
+    assert_eq!(corpo, no_limite);
+
+    // nenhum temporário ficou na pasta de dados
+    let sobras: Vec<_> = fs::read_dir(a.dados.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".chave-tmp"))
+        .collect();
+    assert!(sobras.is_empty(), "{sobras:?}");
+}
+
+#[test]
+fn chave_pelo_cliente_http_e_o_embrulho_da_frase_funciona_entre_dois_aparelhos() {
+    use nota_sync::{EnvioChave, Remoto};
+
+    let a = Ambiente::novo();
+    let mut r1 = RemotoHttp::novo(&a.config("pc")).unwrap();
+    let mut r2 = RemotoHttp::novo(&a.config("celular")).unwrap();
+    assert_eq!(r1.baixar_chave().unwrap(), None);
+
+    let k = ChaveCofre::nova();
+    let embrulho = k.embrulhar("frase de teste certa").unwrap();
+    assert_eq!(r1.enviar_chave(&embrulho).unwrap(), EnvioChave::Gravada);
+    // o segundo aparelho que chegou junto perde a corrida e baixa a chave do primeiro
+    let outra = ChaveCofre::nova()
+        .embrulhar("frase de teste certa")
+        .unwrap();
+    assert_eq!(r2.enviar_chave(&outra).unwrap(), EnvioChave::JaExiste);
+    let baixada = r2.baixar_chave().unwrap().expect("há chave");
+    assert_eq!(baixada, embrulho);
+    let k2 = ChaveCofre::desembrulhar(&baixada, "frase de teste certa").unwrap();
+    assert_eq!(&k.bytes()[..], &k2.bytes()[..]);
+    assert!(ChaveCofre::desembrulhar(&baixada, "frase errada").is_err());
+}
+
+#[test]
+fn chave_com_token_errado_no_cliente_e_nao_autorizado() {
+    use nota_sync::{ErroRemoto, Remoto};
+
+    let a = Ambiente::novo();
+    let mut cfg = a.config("pc");
+    cfg.token = "nst_errado".into();
+    let mut r = RemotoHttp::novo(&cfg).unwrap();
+    assert_eq!(r.baixar_chave(), Err(ErroRemoto::NaoAutorizado));
+    assert_eq!(r.enviar_chave(b"x"), Err(ErroRemoto::NaoAutorizado));
 }
