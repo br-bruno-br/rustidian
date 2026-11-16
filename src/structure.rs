@@ -93,6 +93,9 @@ enum BlockKind {
     Html,
 }
 
+/// How deep inside lists a block may sit and still be referenceable.
+const MAX_BLOCK_DEPTH: usize = 24;
+
 /// Referenceable blocks, with standalone IDs attached to the preceding structured block.
 pub fn blocks(text: &str) -> Vec<Block> {
     let base = crate::metadata::frontmatter(text)
@@ -102,6 +105,8 @@ pub fn blocks(text: &str) -> Vec<Block> {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH;
     let mut stack: Vec<(BlockKind, Range<usize>)> = Vec::new();
+    // Quotes open on the stack, so that asking whether an item sits in one is not a walk of it.
+    let mut quotes = 0_usize;
     let mut blocks: Vec<Block> = Vec::new();
     for (event, range) in Parser::new_ext(&text[base..], options).into_offset_iter() {
         let kind = match &event {
@@ -116,6 +121,7 @@ pub fn blocks(text: &str) -> Vec<Block> {
             _ => None,
         };
         if let Some(kind) = kind {
+            quotes += usize::from(kind == BlockKind::Quote);
             stack.push((kind, base + range.start..base + range.end));
             continue;
         }
@@ -137,9 +143,14 @@ pub fn blocks(text: &str) -> Vec<Block> {
         let Some((kind, range)) = stack.pop() else {
             continue;
         };
-        if !stack.is_empty()
-            && (kind != BlockKind::Item || stack.iter().any(|(kind, _)| *kind == BlockKind::Quote))
-        {
+        quotes = quotes.saturating_sub(usize::from(kind == BlockKind::Quote));
+        if !stack.is_empty() && (kind != BlockKind::Item || quotes > 0) {
+            continue;
+        }
+        // Every nested item is a block that holds all that follows it, so a list nested a
+        // thousand deep (`1. 1. 1. ...`) made this quadratic: 4.8 KB took 3.6 s. Nobody
+        // references an item that deep (the stack counts lists and items: 12 levels).
+        if stack.len() >= MAX_BLOCK_DEPTH {
             continue;
         }
         let raw = &text[range.clone()];
