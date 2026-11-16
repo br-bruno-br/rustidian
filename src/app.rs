@@ -5031,33 +5031,33 @@ impl NotesApp {
                                 .as_ref()
                                 .is_some_and(|vault| vault.folders.contains(path))
                         }) {
-                            "The folder and everything in it will be recoverable from your desktop’s Trash."
+                            "A pasta e tudo o que há nela poderão ser recuperados da Lixeira do seu computador."
                         } else {
-                            "The file will be recoverable from your desktop’s Trash."
+                            "O arquivo poderá ser recuperado da Lixeira do seu computador."
                         });
                     }
                     if dialog == Dialog::TrashNote {
-                        let response = ui.checkbox(&mut self.dialog_skip_trash, "Don’t ask again");
+                        let response = ui.checkbox(&mut self.dialog_skip_trash, "Não perguntar de novo");
                         crate::ui_probe::record(ui.ctx(), "trash-dont-ask", response.rect);
                     }
                     if dialog == Dialog::RenameNote {
-                        ui.label("Links will be updated. Enter a new path inside this vault.");
+                        ui.label("Os links serão atualizados. Digite um novo caminho dentro deste cofre.");
                     }
                     if dialog == Dialog::OpenVault {
                         ui.label(
-                            RichText::new("Opening a vault does not modify its files.")
+                            RichText::new("Abrir um cofre não modifica os arquivos dele.")
                                 .small()
                                 .weak(),
                         );
                     }
                     let (action, cancel) = theme::dialog_actions(ui, match dialog {
-                        Dialog::OpenVault => "Open folder",
-                        Dialog::NewFolder => "Create folder",
-                        Dialog::RenameNote => "Rename",
-                        Dialog::TrashNote => "Move to Trash",
-                        Dialog::AddProperty => "Add property",
-                        Dialog::SaveCopy => "Save copy",
-                        Dialog::BookmarkTitle => "Save title",
+                        Dialog::OpenVault => "Abrir pasta",
+                        Dialog::NewFolder => "Criar pasta",
+                        Dialog::RenameNote => "Renomear",
+                        Dialog::TrashNote => "Mover para a Lixeira",
+                        Dialog::AddProperty => "Adicionar propriedade",
+                        Dialog::SaveCopy => "Salvar cópia",
+                        Dialog::BookmarkTitle => "Salvar título",
                         _ => unreachable!(),
                     }, dialog == Dialog::TrashNote);
                     submit = action.clicked() || (enter && !cancel.has_focus());
