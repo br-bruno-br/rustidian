@@ -50,7 +50,7 @@ Este repositório é **público**. Aqui entra só código e documentação. Nunc
 - **Teste de propriedade obrigatório:** 3 aparelhos simulados com edições, criações, apagamentos e renomeações aleatórias, e quedas de rede injetadas no meio do envio. Ao fim, todos convergem e todo conteúdo que existiu aparece num arquivo ou na lixeira.
 
 ### Backup
-- No re-servidor, o **rustic** (Rust, compatível com restic) guarda todo dia a pasta de dados do `nota-servidor` no Google Drive. Essa pasta já está cifrada, e o rustic cifra de novo.
+- No re-servidor, o **rustic** (Rust, compatível com restic) guarda todo dia a pasta de dados do `nota-servidor` no Google Drive. Ele grava por meio do **rclone** (backend `rclone:gdrive:...`), decisão do dono em 15/11: o rclone faz o login no Google sem precisar de um cliente OAuth próprio. É a única peça fora do Rust, e só faz o transporte, porque a cifra é do rustic. Essa pasta já está cifrada, e o rustic cifra de novo.
 - Retenção: 7 diários, 4 semanais e 12 mensais.
 - `rustic check` toda semana e teste de restauração todo mês, num diretório descartável.
 - Para restaurar: rustic restore, depois o `nota-servidor`, depois o cliente com a frase-senha.
@@ -67,11 +67,19 @@ Este repositório é **público**. Aqui entra só código e documentação. Nunc
 | R4 | `nota-sync` + `nota-servidor` (em memória e em disco) | teste de propriedade com 3 aparelhos e quedas; servidor recusa sem token |
 | R5 | Sync no app desktop: tela de configurar (endereço, token, frase), ícone de estado, ciclo em segundo plano | dois apps no mesmo PC com cofres diferentes convergem pelo servidor local |
 | R6 | Implantar no re-servidor (systemd, só Tailscale) e backup rustic → Google Drive | serviço volta sozinho após reinício; backup e restauração testados |
+| R8 | Tudo em Rust: os scripts Python de empacotamento, benchmark e release viram um `xtask` (`cargo xtask ...`). O smoke de GUI (`tests/gui_smoke.py`, ~12 mil linhas, dirigido por X11) vira testes Rust com `egui_kittest`, que funcionam no Windows e no CI sem X11. O Python sai em fatias, só quando a cobertura equivalente existir | `git ls-files '*.py'` vazio; os mesmos fluxos cobertos por `cargo test` |
 | R7 | Android: protótipo comparando egui (android-activity) e Dioxus para digitar acentos pelo Gboard, selecionar e rolar; depois o app com o mesmo miolo | APK instalado no celular do dono, sincronizando |
 
 R2 e R3 tocam arquivos diferentes e podem correr em paralelo.
 
 ## O que depende do dono
-- **R6:** login no Google para o rustic, e criar e guardar as duas senhas.
+- **R6:** login no Google pelo `rclone config` (no re-servidor, com o navegador do PC), e criar e guardar as duas senhas.
 - **R7:** ok para instalar o Android SDK e o NDK (~5–8 GB) no PC; instalar o APK no celular.
 - Escolher a frase-senha do cofre (só ele digita).
+
+## Contribuir com o original (MasihMoafi/rustidian)
+
+Um fork só: este. Há dois tipos de branch.
+- **`main` (nosso produto):** Windows, criptografia, sync, Android e backup. O que é pessoal (servidor do Bruno, rclone) fica aqui e não sobe para o original.
+- **`upstream/<assunto>`:** correções gerais que servem a todos, como a imagem remota opcional, o histórico configurável, o suporte a Windows e os testes em Rust. Cada uma nasce do `main` do original (`git remote add original https://github.com/MasihMoafi/rustidian`), tem um commit limpo em inglês e vira Pull Request no original. **Abrir PR é publicar: só com o ok do dono para cada um.**
+- **Puxar novidades do original:** `git fetch original && git merge original/main` no nosso `main`, com o gate rodando depois. Quanto mais o nosso código ficar em crates separadas e atrás de `cfg`, menos conflito.
