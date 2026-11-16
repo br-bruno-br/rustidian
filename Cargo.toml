@@ -63,6 +63,10 @@ fastrand = "=2.5.0"
 portable-pty = { version = "0.9", optional = true }
 vt100 = { version = "0.16", optional = true }
 htmd = "=0.5.6"
+# Corretor ortografico (R10): Hunspell em Rust puro. O dicionario pt-BR (VERO) NAO vai no binario.
+spellbook = "=0.4.2"
+# O mesmo ureq 3 (com rustls) que o ehttp do egui_extras ja traz: baixa o dicionario por HTTPS.
+ureq = "3"
 # Sync of the open vault (R5): the vault key, the engine and the system credential store.
 nota-cripto = { path = "crates/nota-cripto" }
 nota-sync = { path = "crates/nota-sync" }

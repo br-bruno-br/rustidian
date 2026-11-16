@@ -6300,6 +6300,17 @@ impl eframe::App for NotesApp {
             }
         }
         rustidian::assets::set_remote_images(self.editor_preferences.remote_images);
+        // Corretor ortografico (R10): liga/desliga e recolhe o dicionario carregado ou baixado
+        // em segundo plano; enquanto ha trabalho la, pede outro quadro.
+        self.editor
+            .spelling
+            .set_enabled(self.editor_preferences.spellcheck);
+        if self.editor.spelling.poll() {
+            ctx.request_repaint();
+        }
+        if self.editor.spelling.busy() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         self.dark = ctx.theme() == egui::Theme::Dark;
         crate::ui_probe::metric(
             &ctx,

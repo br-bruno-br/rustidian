@@ -217,6 +217,23 @@ pub struct Editor {
     /// Text the note menu asked the sidebar search to find.
     pub search_request: Option<String>,
     deferred_input: Option<(u64, Vec<egui::Event>)>,
+    /// R10: o corretor ortografico (dicionario, lista pessoal e as palavras da nota aberta).
+    pub spelling: rustidian::spell::SpellService,
+    /// As palavras sublinhadas no ultimo quadro, para achar a do clique direito.
+    spell_words: Vec<rustidian::spell::Word>,
+    /// A palavra errada sob o ultimo clique direito, para o menu da nota.
+    spell_target: Option<SpellTarget>,
+    /// Quando o texto mudou pela ultima vez: a palavra sendo digitada nao e marcada.
+    spell_changed_at: f64,
+}
+
+/// A palavra errada em que o dono clicou com o botao direito e as correcoes dela.
+#[derive(Clone)]
+struct SpellTarget {
+    tab: u64,
+    word: String,
+    chars: Range<usize>,
+    suggestions: Vec<String>,
 }
 
 /// Where a right-click opens the note's own menu before egui sees it: egui's
@@ -584,6 +601,50 @@ impl<'a> PositionedText<'a> {
         let x = placed.pos.x + placed.x_offset((character - start).into());
         egui::Rect::from_min_max(egui::pos2(x, placed.min_y()), egui::pos2(x, placed.max_y()))
     }
+}
+
+/// Os retangulos (em coordenadas da tela) de uma faixa de caracteres, um por linha do texto.
+fn word_rects(positioned: &PositionedText<'_>, chars: &Range<usize>) -> Vec<egui::Rect> {
+    let output = positioned.output;
+    let rows = &output.galley.rows;
+    let mut out = Vec::new();
+    let mut row = positioned
+        .row_ends
+        .partition_point(|&end| end <= chars.start);
+    while row < rows.len() {
+        let placed = &rows[row];
+        let row_start = if row == 0 {
+            0
+        } else {
+            positioned.row_ends[row - 1] + usize::from(rows[row - 1].ends_with_newline)
+        };
+        if row_start >= chars.end {
+            break;
+        }
+        let from = chars.start.max(row_start) - row_start;
+        let to = chars.end.min(positioned.row_ends[row]) - row_start;
+        for mut rect in placed.selection_rects(from..to) {
+            rect.max.y = placed.height();
+            out.push(rect.translate(output.galley_pos.to_vec2() + placed.pos.to_vec2()));
+        }
+        row += 1;
+    }
+    out
+}
+
+/// Linha ondulada embaixo de `rect`.
+fn squiggle(painter: &egui::Painter, rect: egui::Rect, color: Color32) {
+    let y = rect.bottom() - 1.5;
+    let mut points = Vec::new();
+    let mut x = rect.left();
+    let mut up = false;
+    while x < rect.right() {
+        points.push(egui::pos2(x, if up { y - 1.5 } else { y }));
+        x += 2.5;
+        up = !up;
+    }
+    points.push(egui::pos2(rect.right(), y));
+    painter.add(egui::Shape::line(points, Stroke::new(1.0, color)));
 }
 
 fn embedded_images(
@@ -1155,6 +1216,128 @@ impl Editor {
         self.focus = true;
     }
 
+    /// Troca os caracteres `range` por `text` pelo mesmo caminho do menu da nota
+    /// (desfazer, `tab.edited()` e autosave).
+    fn replace_chars_with(&mut self, tab: &Tab, range: Range<usize>, text: String) {
+        self.edit(
+            tab,
+            Edit::Insert {
+                text,
+                caret_back: 0,
+            },
+        );
+        if let Some(pending) = self.pending_edit.as_mut() {
+            pending.selection = Some(CCursorRange::two(
+                CCursor::new(range.start),
+                CCursor::new(range.end),
+            ));
+        }
+    }
+
+    /// A palavra errada sob `pos` (ponto da tela), com as correcoes dela; `None` fora de uma.
+    fn spell_target_at(
+        &self,
+        tab: &Tab,
+        output: &egui::text_edit::TextEditOutput,
+        pos: egui::Pos2,
+    ) -> Option<SpellTarget> {
+        if !self.spelling.active() {
+            return None;
+        }
+        let character = output
+            .galley
+            .cursor_from_pos(pos - output.galley_pos)
+            .index
+            .0;
+        let word = self
+            .spell_words
+            .iter()
+            .find(|word| word.chars.start <= character && character <= word.chars.end)?;
+        // Um clique bem a direita do fim da linha cai no ultimo caractere: tem de estar em cima.
+        let positioned = PositionedText::new(output);
+        let on_word = word_rects(&positioned, &word.chars)
+            .iter()
+            .any(|rect| rect.expand(2.0).contains(pos));
+        if !on_word {
+            return None;
+        }
+        let text = tab.document.text.get(word.bytes.clone())?.to_string();
+        let suggestions = self.spelling.suggestions(&text);
+        Some(SpellTarget {
+            tab: tab.id(),
+            word: text,
+            chars: word.chars.clone(),
+            suggestions,
+        })
+    }
+
+    /// Sublinha em ondas vermelhas as palavras erradas da parte visivel da nota.
+    fn paint_spelling(
+        &mut self,
+        ui: &egui::Ui,
+        positioned: &PositionedText<'_>,
+        tab: &Tab,
+        live: bool,
+    ) {
+        self.spell_words.clear();
+        if !self.spelling.active() || tab.document.is_plain_text() || tab.document.is_image() {
+            return;
+        }
+        let output = positioned.output;
+        let clip = output.text_clip_rect.intersect(ui.clip_rect());
+        let rows = &output.galley.rows;
+        let (top, bottom) = (
+            clip.min.y - output.galley_pos.y,
+            clip.max.y - output.galley_pos.y,
+        );
+        let first = rows.partition_point(|row| row.max_y() < top);
+        let last = rows.partition_point(|row| row.min_y() <= bottom);
+        if first >= last {
+            return;
+        }
+        let start = if first == 0 {
+            0
+        } else {
+            positioned.row_ends[first - 1] + usize::from(rows[first - 1].ends_with_newline)
+        };
+        let end = positioned.row_ends[last - 1];
+        let (words, incomplete) = self.spelling.flagged(&tab.document.text, start..end, 400);
+        if incomplete {
+            ui.ctx().request_repaint();
+        }
+        // A palavra que esta sendo digitada so e marcada depois de uma pausa.
+        let now = ui.input(|input| input.time);
+        let typing = output.response.has_focus() && now - self.spell_changed_at < 1.2;
+        if typing {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(1300));
+        }
+        let caret = output
+            .cursor_range
+            .filter(|range| range.primary == range.secondary)
+            .map(|range| range.primary.index.0);
+        let color = ui.visuals().error_fg_color;
+        let painter = ui.painter().with_clip_rect(clip);
+        for word in words {
+            if live
+                && self.parsed.tables.iter().any(|table| {
+                    table.range.start < word.bytes.end && table.range.end > word.bytes.start
+                })
+            {
+                continue;
+            }
+            if typing && caret.is_some_and(|c| word.chars.start <= c && c <= word.chars.end) {
+                continue;
+            }
+            for rect in word_rects(positioned, &word.chars) {
+                if rect.height() > 2.0 && rect.intersects(clip) {
+                    squiggle(&painter, rect, color);
+                }
+            }
+            self.spell_words.push(word);
+        }
+    }
+
     /// Obsidian's editor menu: the clipboard, then formatting for the selection.
     /// Actions run on the selection the editor held when the menu opened.
     fn note_menu(&mut self, ui: &mut egui::Ui, tab: &Tab, id: egui::Id, body_start: usize) {
@@ -1184,6 +1367,29 @@ impl Editor {
             response.clicked()
         };
         let mut done = false;
+        if let Some(target) = self.spell_target.clone().filter(|t| t.tab == tab.id()) {
+            for suggestion in &target.suggestions {
+                if item(ui, suggestion, "", true) {
+                    self.replace_chars_with(tab, target.chars.clone(), suggestion.clone());
+                    done = true;
+                }
+            }
+            if target.suggestions.is_empty() {
+                item(ui, "Sem sugestões", "", false);
+            }
+            ui.separator();
+            if item(ui, "Adicionar ao dicionário", "", true) {
+                if let Err(error) = self.spelling.add_to_personal(&target.word) {
+                    self.error = Some(format!("Não consegui gravar a lista pessoal: {error}"));
+                }
+                done = true;
+            }
+            if item(ui, "Ignorar nesta sessão", "", true) {
+                self.spelling.ignore(&target.word);
+                done = true;
+            }
+            ui.separator();
+        }
         if item(ui, "Cut", "Ctrl+X", selected.is_some())
             && let Some(text) = &selected
         {
@@ -2353,8 +2559,20 @@ impl Editor {
         cp.at(2221);
         let mut menu = egui::Popup::context_menu(&output.response);
         cp.at(2222);
-        if take_menu_click(ui.ctx(), MenuArea::Editor).is_some() {
+        let held_click = take_menu_click(ui.ctx(), MenuArea::Editor);
+        if held_click.is_some() {
             menu = menu.open_memory(Some(egui::SetOpenCommand::Bool(true)));
+        }
+        // Clique direito numa palavra sublinhada: o menu ganha as correcoes dela.
+        let right_click = held_click.or_else(|| {
+            output
+                .response
+                .secondary_clicked()
+                .then(|| ui.input(|input| input.pointer.interact_pos()))
+                .flatten()
+        });
+        if let Some(pos) = right_click {
+            self.spell_target = self.spell_target_at(tab, &output, pos);
         }
         cp.at(2225);
         if let Some(menu) = menu.show(|ui| self.note_menu(ui, tab, id, body_start)) {
@@ -2379,6 +2597,7 @@ impl Editor {
         cp.at(2242);
         if output.response.changed() {
             tab.edited();
+            self.spell_changed_at = ui.input(|input| input.time);
             ui.ctx().request_repaint();
         }
         cp.at(2246);
@@ -2398,6 +2617,8 @@ impl Editor {
         let positioned = slow("row ends", tab.document.text.len(), || {
             PositionedText::new(&output)
         });
+        cp.at(2260);
+        self.paint_spelling(ui, &positioned, tab, live);
         cp.at(2261);
         slow("heading folds", tab.document.text.len(), || {
             paint_heading_folds(ui, &positioned, &self.sections, &mut collapsed)
