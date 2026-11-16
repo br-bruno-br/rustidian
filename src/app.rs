@@ -5846,7 +5846,7 @@ impl NotesApp {
                 {
                     self.open_note(&path);
                 } else {
-                    self.status = "No Markdown notes in this vault.".into();
+                    self.status = "Nenhuma nota Markdown neste cofre.".into();
                 }
             }
             "Templates: Insert template" if self.editable_note() => {
@@ -5978,7 +5978,7 @@ impl NotesApp {
                 self.refresh_file_views();
                 self.error = None;
                 if folder {
-                    self.status = format!("Copied folder to {}", copy.display());
+                    self.status = format!("Pasta copiada para {}", copy.display());
                     self.reveal_folder = Some(copy.clone());
                     crate::explorer_selection::select(&self.ctx, &copy);
                 } else {
@@ -5993,7 +5993,7 @@ impl NotesApp {
         if self.can_edit_active() {
             true
         } else {
-            self.error = Some("Open a note in an editing view first.".into());
+            self.error = Some("Abra primeiro uma nota em um modo de edição.".into());
             false
         }
     }
@@ -6017,7 +6017,7 @@ impl NotesApp {
             .any(|part| !matches!(part, std::path::Component::Normal(_)))
             || rustidian::vault::is_ignored_path(&path)
         {
-            self.error = Some("Choose a visible note path inside this vault.".into());
+            self.error = Some("Escolha um caminho de nota visível dentro deste cofre.".into());
             return false;
         }
         let new_tab = new_tab || self.tabs.get(self.active).is_some_and(|tab| tab.pinned);
@@ -6031,7 +6031,7 @@ impl NotesApp {
             return false;
         }
         let Some(vault) = &mut self.vault else {
-            self.error = Some("Open a vault before creating a note.".into());
+            self.error = Some("Abra um cofre antes de criar uma nota.".into());
             return false;
         };
         let mut document = Document::new(path.clone());
@@ -6043,7 +6043,7 @@ impl NotesApp {
         self.error = None;
         self.open_note_at(&path, new_tab);
         self.set_view(View::Live);
-        self.status = format!("Created {}", path.display());
+        self.status = format!("{} criado", path.display());
         true
     }
 
@@ -6053,7 +6053,7 @@ impl NotesApp {
 
     fn create_note_in(&mut self, folder: &Path) {
         let Some(vault) = &mut self.vault else {
-            self.error = Some("Open a vault before creating a note.".into());
+            self.error = Some("Abra um cofre antes de criar uma nota.".into());
             return;
         };
         match vault.create_untitled_in(folder) {
@@ -6063,7 +6063,7 @@ impl NotesApp {
                 self.refresh_file_views();
                 self.dialog = None;
                 self.error = None;
-                self.status = format!("Created {}", path.display());
+                self.status = format!("{} criado", path.display());
                 if self
                     .tabs
                     .get(self.active)
