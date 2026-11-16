@@ -359,7 +359,9 @@ impl NotesApp {
             View::Split => "Split view",
             View::Graph => "Graph",
         };
-        let text = RichText::new(label).color(theme::accent(ui)).size(11.0);
+        let text = RichText::new(rustidian::i18n::t(label))
+            .color(theme::accent(ui))
+            .size(11.0);
         let mut requested = None;
         let plain_text = self.tabs.get(self.active).is_some_and(|tab| {
             tab.document.is_plain_text() && !rustidian::html_import::is_html(&tab.document.path)
@@ -374,7 +376,7 @@ impl NotesApp {
                     ("Source mode", View::Source),
                     ("Live Preview", View::Live),
                 ] {
-                    let choice = ui.selectable_label(current == view, name);
+                    let choice = ui.selectable_label(current == view, rustidian::i18n::t(name));
                     if crate::ui_probe::enabled() {
                         crate::ui_probe::record(
                             ui.ctx(),
