@@ -1,0 +1,6 @@
+[application]
+name = "rustidian-proto-dioxus"
+
+[bundle]
+identifier = "dev.rustidian.protodioxus"
+publisher = "Rustidian"
