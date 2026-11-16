@@ -679,6 +679,7 @@ impl NotesApp {
             let required = std::mem::take(&mut self.refresh_required);
             if let Some(root) = self.vault.as_ref().map(|vault| vault.root.clone())
                 && (required || !paths.iter().all(|path| self.holds_known_text(path)))
+                && (required || !self.refresh_edited_notes(&paths))
             {
                 self.queue_index(root);
             }
@@ -913,6 +914,57 @@ impl NotesApp {
         }
         self.sync_tick(ctx);
         self.capture_recovery(ctx);
+    }
+
+    /// Notes edited outside Rustidian, and nothing else, are re-read in place: only their entries
+    /// change, with no scan of the vault. `false` when something else changed (a new, removed or
+    /// renamed file, a folder, too many files) and the vault needs its full index.
+    fn refresh_edited_notes(&mut self, paths: &std::collections::HashSet<PathBuf>) -> bool {
+        const MOST_NOTES: usize = 32;
+        let Some(vault) = &mut self.vault else {
+            return false;
+        };
+        let mut relative = Vec::new();
+        for path in paths {
+            let Ok(path) = path.strip_prefix(&vault.root) else {
+                return false;
+            };
+            if !rustidian::vault::is_ignored_path(path) {
+                relative.push(path.to_owned());
+            }
+        }
+        if relative.len() > MOST_NOTES {
+            return false;
+        }
+        let Some(changed) = vault.refresh_changed(&relative) else {
+            return false;
+        };
+        // What the full index does on swapping the vault in, for these notes.
+        self.recovery_index_paths
+            .extend(self.recovery_changed_paths.drain());
+        for path in std::mem::take(&mut self.recovery_index_paths) {
+            if let Some(note) = vault.note(&path) {
+                self.recovery_saved.insert(path, note.text.clone());
+            }
+        }
+        for tab in &mut self.tabs {
+            if changed.contains(&tab.document.path)
+                && !tab.document.dirty()
+                && !tab.document.is_blank()
+            {
+                match vault.open_document(&tab.document.path) {
+                    Ok(document) if document.text != tab.document.text => tab.replace(document),
+                    Err(error) => self.error = Some(error),
+                    _ => {}
+                }
+            }
+        }
+        if !changed.is_empty() {
+            self.graph.invalidate();
+            self.search_cache.invalidate();
+            self.cache = CommonMarkCache::default();
+        }
+        true
     }
 
     /// Whether a file the watcher reported holds what Rustidian already has
