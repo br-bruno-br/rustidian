@@ -2261,7 +2261,7 @@ impl NotesApp {
 
     fn show_workspaces(&mut self, load_only: bool) {
         let Some(vault) = &self.vault else {
-            self.error = Some("Open a vault first.".into());
+            self.error = Some("Abra um cofre primeiro.".into());
             return;
         };
         self.workspace_manager.show_manager(&vault.root, load_only);
@@ -2275,7 +2275,7 @@ impl NotesApp {
     }
 
     fn save_named_workspace(&mut self) -> Result<bool, String> {
-        let vault = self.vault.as_ref().ok_or("Open a vault first.")?;
+        let vault = self.vault.as_ref().ok_or("Abra um cofre primeiro.")?;
         let mut list = rustidian::workspaces::Workspaces::open(&vault.root)?;
         let Some(name) = list.active().map(str::to_owned) else {
             return Ok(false);
@@ -2285,7 +2285,7 @@ impl NotesApp {
             self.workspace_layout(),
             chrono::Local::now().timestamp_millis(),
         )?;
-        self.status = format!("Workspace saved: {name}");
+        self.status = format!("Espaço de trabalho salvo: {name}");
         Ok(true)
     }
 
@@ -2300,13 +2300,13 @@ impl NotesApp {
 
     fn load_workspace(&mut self, name: &str) {
         let load = || -> Result<_, String> {
-            let vault = self.vault.as_ref().ok_or("Open a vault first.")?;
+            let vault = self.vault.as_ref().ok_or("Abra um cofre primeiro.")?;
             let mut list = rustidian::workspaces::Workspaces::open(&vault.root)?;
             let layout = list
                 .entries()
                 .iter()
                 .find(|entry| entry.name == name)
-                .ok_or("This workspace no longer exists.")?
+                .ok_or("Este espaço de trabalho não existe mais.")?
                 .layout
                 .clone();
             let restored = layout.restore(vault)?;
@@ -2331,7 +2331,7 @@ impl NotesApp {
                 self.title = Default::default();
                 self.properties = Default::default();
                 self.pending_anchor = None;
-                self.status = format!("Workspace loaded: {name}");
+                self.status = format!("Espaço de trabalho carregado: {name}");
                 self.focus_editor();
             }
             Err(error) => {
