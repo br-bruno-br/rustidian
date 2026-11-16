@@ -96,7 +96,7 @@ impl Page {
             Self::Daily => "daily notes date format folder template new file location",
             Self::Templates => "templates date time format folder location",
             Self::Unique => "unique notes prefix format folder template new file location",
-            Self::Recovery => "file recovery snapshots history interval length days",
+            Self::Recovery => "file recovery snapshots history interval length days keep",
         };
         query.split_whitespace().all(|word| terms.contains(word))
     }
@@ -527,6 +527,14 @@ impl NotesApp {
                                 );
                             }
                             Page::Recovery => {
+                                changed |= toggle(
+                                    ui,
+                                    "Keep file recovery history",
+                                    "Off: nothing is recorded, and the history already saved is deleted.",
+                                    "settings-recovery-enabled",
+                                    &mut self.recovery_config.enabled,
+                                );
+                                ui.separator();
                                 changed |= row(
                                     ui,
                                     "Snapshot interval",
