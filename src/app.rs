@@ -3820,7 +3820,7 @@ impl NotesApp {
         if let Some((source, name)) = renamed_title {
             if name.is_empty() || name.contains(['/', '\\']) || matches!(name.as_str(), "." | "..")
             {
-                self.error = Some("Enter a file name without folder separators.".into());
+                self.error = Some("Digite um nome de arquivo sem separadores de pasta.".into());
                 self.title.reject();
             } else {
                 let extension = source
@@ -3865,15 +3865,15 @@ impl NotesApp {
             .tabs
             .iter()
             .position(|tab| tab.id() == request.tab)
-            .ok_or("The source tab is no longer open.")?;
+            .ok_or("A aba de origem não está mais aberta.")?;
         let source = self.tabs[source_index].document.clone();
         let query = format!("[[{}", request.completion.query);
         let typed = source
             .text
             .get(request.completion.range.clone())
-            .ok_or("The link changed. Choose the block again.")?;
+            .ok_or("O link mudou. Escolha o bloco de novo.")?;
         if typed != query && typed != format!("{query}]]") {
-            return Err("The link changed. Choose the block again.".into());
+            return Err("O link mudou. Escolha o bloco de novo.".into());
         }
         let target_indices: Vec<_> = self
             .tabs
@@ -3886,7 +3886,7 @@ impl NotesApp {
         } else {
             self.vault
                 .as_ref()
-                .ok_or("No vault is open.")?
+                .ok_or("Nenhum cofre aberto.")?
                 .read(&request.path)?
         };
         if target.text.get(request.block.range.clone()) != Some(request.block.text.as_str())
@@ -3898,7 +3898,7 @@ impl NotesApp {
                 .iter()
                 .any(|tab| tab.document.path == source.path && tab.document.text != source.text)
         {
-            return Err("The block or an open draft changed. Choose the block again; nothing was overwritten.".into());
+            return Err("O bloco ou um rascunho aberto mudou. Escolha o bloco de novo; nada foi sobrescrito.".into());
         }
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3911,7 +3911,7 @@ impl NotesApp {
         let (position, insertion) = request.block.id_edit(&id);
         let mut changed = target.clone();
         if position > changed.text.len() || !changed.text.is_char_boundary(position) {
-            return Err("The block changed. Choose it again.".into());
+            return Err("O bloco mudou. Escolha-o de novo.".into());
         }
         changed.text.insert_str(position, &insertion);
         let mut completion = request.completion;
@@ -3931,7 +3931,7 @@ impl NotesApp {
         // A failed target write leaves both drafts and the link untouched.
         self.vault
             .as_mut()
-            .ok_or("No vault is open.")?
+            .ok_or("Nenhum cofre aberto.")?
             .save(&mut changed)?;
         let root = self.vault.as_ref().expect("vault was checked").root.clone();
         crate::editor_ui::record_document_edit(ctx, &root, &target, &changed);
@@ -3958,7 +3958,7 @@ impl NotesApp {
         self.focus_editor();
         self.refresh_file_views();
         self.error = None;
-        self.status = "Block reference inserted".into();
+        self.status = "Referência de bloco inserida".into();
         Ok(())
     }
 
