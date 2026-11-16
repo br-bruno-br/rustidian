@@ -1013,7 +1013,7 @@ pub fn dialog_actions(
                     .min_size(egui::vec2(0.0, space::CONTROL)),
             );
             let cancel = ui.add(
-                egui::Button::new("Cancel")
+                egui::Button::new("Cancelar")
                     .fill(ui.visuals().window_fill)
                     .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                     .corner_radius(6)
@@ -1039,7 +1039,12 @@ pub fn menu_style(ui: &mut egui::Ui) {
 }
 
 pub fn delete_menu_item(ui: &mut egui::Ui, label: &str) -> (egui::Response, bool) {
-    let response = menu_item(ui, Icon::Trash, &format!("D  {label}"));
+    let response = menu_item_shown(
+        ui,
+        Icon::Trash,
+        &format!("D  {label}"),
+        &format!("D  {}", rustidian::i18n::t(label)),
+    );
     let shortcut = ui.input_mut(|input| {
         input.modifiers.matches_exact(egui::Modifiers::NONE)
             && input.consume_key(egui::Modifiers::NONE, egui::Key::D)
@@ -1056,6 +1061,11 @@ pub fn delete_menu_item(ui: &mut egui::Ui, label: &str) -> (egui::Response, bool
 }
 
 pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
+    menu_item_shown(ui, icon, label, rustidian::i18n::t(label))
+}
+
+/// `label` is the item's identity (the screen test's probe id); `shown` is the text on screen.
+fn menu_item_shown(ui: &mut egui::Ui, icon: Icon, label: &str, shown: &str) -> egui::Response {
     let color = if matches!(icon, Icon::Trash) {
         ui.visuals().error_fg_color
     } else {
@@ -1063,7 +1073,7 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     };
     let image = icon_image(icon, color).fit_to_exact_size(egui::vec2(16.0, 16.0));
     let response = ui.add(
-        egui::Button::image_and_text(image, egui::RichText::new(label).size(13.0).color(color))
+        egui::Button::image_and_text(image, egui::RichText::new(shown).size(13.0).color(color))
             .min_size(egui::vec2(210.0, space::ROW))
             .frame_when_inactive(false)
             .corner_radius(4.0),
@@ -1110,7 +1120,12 @@ fn toolbar_button(
         ui.allocate_exact_size(egui::Vec2::splat(space::CONTROL), egui::Sense::click());
     crate::ui_probe::record(ui.ctx(), format!("button:{tooltip}"), rect);
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, tooltip)
+        egui::WidgetInfo::selected(
+            egui::Role::Button,
+            ui.is_enabled(),
+            selected,
+            rustidian::i18n::t(tooltip),
+        )
     });
     if ui.is_rect_visible(rect) {
         if selected {
@@ -1125,7 +1140,7 @@ fn toolbar_button(
         paint(ui, rect, color);
     }
     response.on_hover_ui(|ui| {
-        ui.label(egui::RichText::new(tooltip).size(13.0));
+        ui.label(egui::RichText::new(rustidian::i18n::t(tooltip)).size(13.0));
     })
 }
 
