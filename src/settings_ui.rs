@@ -392,15 +392,15 @@ impl NotesApp {
                                 changed |=
                                     row(
                                         ui,
-                                        "Base color scheme",
-                                        "Follow your system or choose a light or dark appearance.",
+                                        "Esquema de cores",
+                                        "Siga o sistema ou escolha uma aparência clara ou escura.",
                                         |ui| {
                                             let before = self.appearance;
                                             let response = egui::ComboBox::from_id_salt(
                                                 "settings-color-scheme",
                                             )
                                             .icon(theme::combo_chevron)
-                                            .selected_text(self.appearance.label())
+                                            .selected_text(rustidian::i18n::t(self.appearance.label()))
                                             .show_ui(ui, |ui| {
                                                 theme::menu_style(ui);
                                                 for appearance in [theme::Appearance::System, theme::Appearance::Dark, theme::Appearance::Light] {
@@ -408,7 +408,7 @@ impl NotesApp {
                                                     let response = ui.selectable_value(
                                                         &mut self.appearance,
                                                         appearance,
-                                                        label,
+                                                        rustidian::i18n::t(label),
                                                     );
                                                     crate::ui_probe::record(
                                                         ctx,
@@ -428,8 +428,8 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= row(
                                     ui,
-                                    "Font size",
-                                    "Font size in pixels that affects editing and reading views.",
+                                    "Tamanho da fonte",
+                                    "Tamanho da fonte em pixels, que vale para a edição e a leitura.",
                                     |ui| {
                                         let response = theme::slider(
                                             ui,
@@ -445,22 +445,22 @@ impl NotesApp {
                                 );
                                 for (title, description, id, value, mono) in [
                                     (
-                                        "Interface font",
-                                        "Font for menus, sidebars and dialogs.",
+                                        "Fonte da interface",
+                                        "Fonte de menus, painéis laterais e diálogos.",
                                         "settings-interface-font",
                                         &mut self.fonts.interface,
                                         false,
                                     ),
                                     (
-                                        "Text font",
-                                        "Font for editing and reading views.",
+                                        "Fonte do texto",
+                                        "Fonte da edição e da leitura.",
                                         "settings-text-font",
                                         &mut self.fonts.text,
                                         false,
                                     ),
                                     (
-                                        "Monospace font",
-                                        "Font for code blocks and inline code.",
+                                        "Fonte monoespaçada",
+                                        "Fonte de blocos de código e de código em linha.",
                                         "settings-monospace-font",
                                         &mut self.fonts.monospace,
                                         true,
@@ -469,7 +469,7 @@ impl NotesApp {
                                     ui.separator();
                                     let missing = self.missing_fonts.iter().any(|name| name == &*value);
                                     let description = if missing {
-                                        format!("{value} is not installed; the default font is used.")
+                                        format!("{value} não está instalada; a fonte padrão será usada.")
                                     } else {
                                         description.to_owned()
                                     };
