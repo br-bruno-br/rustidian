@@ -88,24 +88,40 @@ impl Page {
         }
     }
 
+    /// The page name shown; `label` stays English because the screen test finds pages by it.
+    fn shown(self) -> &'static str {
+        match self {
+            Self::Appearance => "Aparência",
+            Self::Interface => "Interface",
+            Self::Editor => "Editor",
+            Self::Files => "Arquivos e links",
+            Self::Hotkeys => "Atalhos",
+            Self::Sync => "Sincronização",
+            Self::Daily => "Notas diárias",
+            Self::Templates => "Modelos",
+            Self::Unique => "Criador de nota única",
+            Self::Recovery => "Recuperação de arquivos",
+        }
+    }
+
     fn matches(self, query: &str) -> bool {
         let terms = match self {
             Self::Appearance => {
-                "appearance base color scheme theme system dark light font text size interface monospace family"
+                "appearance base color scheme theme system dark light font text size interface monospace family aparência aparencia cor esquema tema escuro claro fonte tamanho texto"
             }
-            Self::Interface => "interface zoom",
+            Self::Interface => "interface zoom nível",
             Self::Editor => {
-                "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load"
+                "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load edição edicao modo padrão título linha largura privacidade imagens salvar salvamento automático"
             }
-            Self::Files => "files and links automatically update move folder",
-            Self::Hotkeys => "hotkeys keyboard shortcuts commands",
+            Self::Files => "files and links automatically update move folder arquivos links atualizar automaticamente mover pasta lixeira",
+            Self::Hotkeys => "hotkeys keyboard shortcuts commands atalhos teclado comandos",
             Self::Sync => {
-                "sync synchronization server address token passphrase device connect disconnect keys devices"
+                "sync synchronization server address token passphrase device connect disconnect keys devices sincronização sincronizar servidor endereço senha dispositivo conectar"
             }
-            Self::Daily => "daily notes date format folder template new file location",
-            Self::Templates => "templates date time format folder location",
-            Self::Unique => "unique notes prefix format folder template new file location",
-            Self::Recovery => "file recovery snapshots history interval length days keep",
+            Self::Daily => "daily notes date format folder template new file location notas diárias data formato pasta modelo local",
+            Self::Templates => "templates date time format folder location modelos data hora formato pasta local",
+            Self::Unique => "unique notes prefix format folder template new file location notas únicas prefixo formato pasta modelo local",
+            Self::Recovery => "file recovery snapshots history interval length days keep recuperação recuperacao arquivos versões histórico intervalo dias",
         };
         query.split_whitespace().all(|word| terms.contains(word))
     }
