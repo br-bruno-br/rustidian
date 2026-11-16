@@ -23,6 +23,25 @@ Linux desktop · Plain files · Native Rust
 
 </div>
 
+## Este fork (br-bruno-br/rustidian)
+
+Fork do [Rustidian de Masih Moafi](https://github.com/MasihMoafi/rustidian) para trocar o Obsidian no **Windows**, no **Android** e no **Linux**, com as notas sincronizadas entre os três. O que ele acrescenta ao original:
+
+| Peça | O que faz |
+| --- | --- |
+| **Windows** | O app roda no Windows: seletor de arquivos nativo, tema e fontes do sistema, uma janela só por vez |
+| **Segurança** | Imagem remota desligada por padrão (opção para ligar), aba do agente desligada, histórico de recuperação de 1 dia com chave para desligar |
+| **Sincronização cifrada** | `nota-cripto` (chave do cofre derivada da frase, cifra de ponta a ponta) e `nota-sync` + `nota-servidor`: o servidor guarda só conteúdo cifrado, cada aparelho tem a cópia completa e funciona sem rede; na dúvida guarda as duas versões |
+| **Sync dentro do app** | Tela para configurar endereço, token e frase; ícone de estado; ciclo em segundo plano |
+| **Menções sem link** | No painel de backlinks, lista as notas que citam o título (ou um apelido) da nota aberta sem link, com botão **Link** que transforma a menção em `[[link]]`. Ideia do [RustSidian](https://github.com/siddarth1872004/RustSidian) (MIT) |
+| **Corretor ortográfico pt-BR** | Sublinha palavras erradas, sugere correções no clique direito, lista pessoal de palavras e "Ignorar". Usa o [spellbook](https://github.com/helix-editor/spellbook) e o dicionário VERO (LibreOffice), baixado à parte pelo botão **Baixar dicionário pt-BR** e conferido por sha256 |
+| **Android** | Protótipos para escolher o toolkit que digita bem pelo Gboard (egui × Dioxus); roteiro em [docs/bruno/R7-TESTE.md](docs/bruno/R7-TESTE.md) |
+| **Interface em português** | Em andamento: menus, botões, configurações e mensagens em pt-BR |
+
+**Compilar no Windows:** `cargo build --release --bin rustidian` (MSVC); o executável sai em `target\release\rustidian.exe`. O plano completo e o estado de cada fatia estão em [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Créditos de terceiros em [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
+---
+
 I built Rustidian for myself because every note editor I tried felt too slow. **Speed and stability** guide the project: ordinary Markdown folders, native editing, linked notes and graphs.
 
 **Try Rustidian for Linux. Contributors are welcome.**
