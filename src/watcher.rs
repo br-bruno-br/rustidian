@@ -39,7 +39,11 @@ impl Watch {
                         .unwrap_or_else(PoisonError::into_inner)
                         .extend(event.paths.iter().cloned());
                 }
-                handler.handle_event(event);
+                // A handler that panics (its receiver gone at shutdown, say) must not
+                // unwind into the native watcher's thread: that aborts the whole process.
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler.handle_event(event);
+                }));
             },
             Config::default().with_follow_symlinks(false),
         )?;

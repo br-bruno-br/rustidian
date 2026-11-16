@@ -46,7 +46,8 @@ fn vault_watcher_delivers_external_changes() {
     let vault = rustidian::vault::Vault::open(dir.path()).unwrap();
     let (sender, receiver) = mpsc::channel();
     let mut watch = rustidian::watcher::Watch::new(&vault.root, move |event| {
-        sender.send(event).unwrap();
+        // The receiver is gone once the test ends, while the native thread may still deliver.
+        let _ = sender.send(event);
     })
     .expect("the vault must be watched");
     watch
