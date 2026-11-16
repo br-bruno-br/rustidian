@@ -615,16 +615,16 @@ impl NotesApp {
                             Page::Recovery => {
                                 changed |= toggle(
                                     ui,
-                                    "Keep file recovery history",
-                                    "Off: nothing is recorded, and the history already saved is deleted.",
+                                    "Manter o histórico de recuperação de arquivos",
+                                    "Desligado: nada é gravado, e o histórico já salvo é apagado.",
                                     "settings-recovery-enabled",
                                     &mut self.recovery_config.enabled,
                                 );
                                 ui.separator();
                                 changed |= row(
                                     ui,
-                                    "Snapshot interval",
-                                    "Minutes between recovery snapshots.",
+                                    "Intervalo entre versões",
+                                    "Minutos entre as versões de recuperação.",
                                     |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
@@ -643,7 +643,7 @@ impl NotesApp {
                                 );
                                 ui.separator();
                                 changed |=
-                                    row(ui, "History length", "Days to keep snapshots.", |ui| {
+                                    row(ui, "Duração do histórico", "Dias para guardar as versões.", |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
                                                 &mut self.recovery_config.keep_days,
@@ -660,12 +660,12 @@ impl NotesApp {
                                 ui.separator();
                                 row(
                                     ui,
-                                    "Snapshots",
-                                    "Review or clear the saved recovery history.",
+                                    "Versões",
+                                    "Veja ou apague o histórico de recuperação salvo.",
                                     |ui| {
                                         let ready = !self.recovery_manager.active();
                                         let clear =
-                                            ui.add_enabled(ready, egui::Button::new("Clear"));
+                                            ui.add_enabled(ready, egui::Button::new("Limpar"));
                                         crate::ui_probe::record(
                                             ctx,
                                             "settings-recovery-clear",
@@ -674,7 +674,7 @@ impl NotesApp {
                                         if clear.clicked() {
                                             *recovery_action = Some(true);
                                         }
-                                        let view = ui.add_enabled(ready, egui::Button::new("View"));
+                                        let view = ui.add_enabled(ready, egui::Button::new("Ver"));
                                         crate::ui_probe::record(
                                             ctx,
                                             "settings-recovery-view",
@@ -697,7 +697,7 @@ impl NotesApp {
                         });
                         if self.settings_page == Page::Hotkeys {
                             ui.add_space(crate::theme::space::M);
-                            ui.weak("Shortcut customization is not available yet.");
+                            ui.weak("A personalização de atalhos ainda não está disponível.");
                         }
                     });
                 crate::ui_probe::record(ctx, "settings-viewport", content.inner_rect);
