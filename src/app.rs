@@ -4858,18 +4858,18 @@ impl NotesApp {
                         }
                     });
                     if matches.is_empty() {
-                        ui.label("No matching files");
+                        ui.label("Nenhum arquivo encontrado");
                         if !self.dialog_input.trim().is_empty() {
-                            let create = ui.button("Create note");
+                            let create = ui.button("Criar nota");
                             crate::ui_probe::record(ui.ctx(), "quick-create", create.rect);
                             create_note = create.clicked() || enter;
                         }
                     }
                     ui.label(
                         RichText::new(if matches.is_empty() && !self.dialog_input.trim().is_empty() {
-                            "Enter to create · Ctrl+Enter for a new tab"
+                            "Enter para criar · Ctrl+Enter para uma nova aba"
                         } else {
-                            "↑ ↓ to navigate · Enter to open · Ctrl+Enter for a new tab"
+                            "↑ ↓ para navegar · Enter para abrir · Ctrl+Enter para uma nova aba"
                         })
                             .size(11.0)
                             .weak(),
@@ -4880,7 +4880,7 @@ impl NotesApp {
                         Err(error) => {
                             let label = ui.label(error.as_str());
                             crate::ui_probe::record(ctx, "template-error", label.rect);
-                            let configure = ui.button("Open Templates settings");
+                            let configure = ui.button("Abrir configurações de Modelos");
                             crate::ui_probe::record(ctx, "template-configure", configure.rect);
                             configure_templates = configure.clicked();
                         }
@@ -4928,11 +4928,11 @@ impl NotesApp {
                                 }
                             });
                             if matches.is_empty() {
-                                ui.weak("No matching templates");
+                                ui.weak("Nenhum modelo encontrado");
                             }
                         }
                     }
-                    ui.weak("↑ ↓ navigate · Enter to insert template · Esc to dismiss");
+                    ui.weak("↑ ↓ navegar · Enter para inserir o modelo · Esc para fechar");
                 }
                 Dialog::Commands => {
                     let tab = self.tabs.get(self.active);
