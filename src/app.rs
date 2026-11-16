@@ -871,15 +871,15 @@ impl NotesApp {
                         // A scan that came up short must not drop a note: what it missed is
                         // checked again at the next one, and a note that merely moved follows.
                         if let Some(previous) = &self.vault {
-                            let reconciled =
-                                vault.reconcile(previous, &mut self.doubtful_missing);
+                            let reconciled = vault.reconcile(previous, &mut self.doubtful_missing);
                             if reconciled.changed {
                                 tree = Tree::from_vault(&vault);
                                 files = rustidian::search::FileMatcher::from_vault(&vault);
                             }
                             if reconciled.recheck {
                                 self.refresh_required = true;
-                                self.refresh_due = Some(Instant::now() + Duration::from_millis(400));
+                                self.refresh_due =
+                                    Some(Instant::now() + Duration::from_millis(400));
                             }
                             renamed_notes = reconciled.renamed;
                         }
