@@ -202,7 +202,7 @@ fn refuses_external_edits_deletion_and_new_note_collisions() {
         vault
             .save(&mut document)
             .unwrap_err()
-            .contains("changed outside")
+            .contains("mudou fora")
     );
     assert_eq!(
         fs::read_to_string(dir.path().join("Note.md")).unwrap(),
@@ -329,7 +329,7 @@ fn autosave_writes_on_its_thread_and_text_typed_meanwhile_stays_unsaved() {
     fs::write(&path, "theirs").unwrap();
     writer.submit(7, pending, || {});
     let error = writer.wait().pop().unwrap().result.unwrap_err();
-    assert!(error.contains("changed outside"), "{error}");
+    assert!(error.contains("mudou fora"), "{error}");
     assert_eq!(fs::read_to_string(&path).unwrap(), "theirs");
 }
 

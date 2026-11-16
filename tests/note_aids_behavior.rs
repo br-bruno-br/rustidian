@@ -277,7 +277,7 @@ fn unique_notes_apply_a_template_and_reject_missing_folders_templates_and_consta
         config
             .create_unique(&mut vault, clock())
             .unwrap_err()
-            .contains("Failed to generate")
+            .contains("Não foi possível gerar")
     );
     assert_eq!(
         fs::read_to_string(base.path().join(literal)).unwrap(),
