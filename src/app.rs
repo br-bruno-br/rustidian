@@ -3375,7 +3375,7 @@ impl NotesApp {
                 }
                 if self.loading_root.is_some() {
                     ui.centered_and_justified(|ui| {
-                        ui.label("Opening vault…");
+                        ui.label("Abrindo cofre…");
                     });
                     return;
                 }
@@ -3395,20 +3395,20 @@ impl NotesApp {
                         ui.add_space((ui.available_height() * 0.35).max(60.0));
                         ui.label(
                             RichText::new(if self.loading.is_some() {
-                                "Opening vault…"
+                                "Abrindo cofre…"
                             } else {
-                                "No file is open"
+                                "Nenhum arquivo aberto"
                             })
                             .size(24.0),
                         );
                         ui.add_space(theme::space::XL);
-                        if ui.link("Create new note (Ctrl+N)").clicked() {
+                        if ui.link("Criar nova nota (Ctrl+N)").clicked() {
                             self.create_note();
                         }
-                        if ui.link("Go to file (Ctrl+O)").clicked() {
+                        if ui.link("Ir para o arquivo (Ctrl+O)").clicked() {
                             self.ask(Dialog::QuickOpen);
                         }
-                        if !self.tabs.is_empty() && ui.link("Close").clicked() {
+                        if !self.tabs.is_empty() && ui.link("Fechar").clicked() {
                             self.close_tab(self.active);
                         }
                     });
