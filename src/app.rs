@@ -5200,7 +5200,7 @@ impl NotesApp {
                     .iter()
                     .any(|&index| self.tabs[index].document.text != before.text)
                 {
-                    self.error = Some("The target changed while its preview was open. Reopen the preview before editing it.".into());
+                    self.error = Some("O destino mudou enquanto a pré-visualização estava aberta. Reabra a pré-visualização antes de editá-lo.".into());
                     self.page_preview.close();
                     return;
                 }
@@ -5243,14 +5243,14 @@ impl NotesApp {
             self.move_failed(
                 self.error
                     .clone()
-                    .unwrap_or_else(|| "Save your changes before moving files.".into()),
+                    .unwrap_or_else(|| "Salve suas alterações antes de mover arquivos.".into()),
             );
             return;
         }
         let result = self
             .vault
             .as_mut()
-            .ok_or_else(|| "Open a vault first.".to_owned())
+            .ok_or_else(|| "Abra um cofre primeiro.".to_owned())
             .and_then(|vault| vault.begin_move_entries(sources, folder, create));
         match result {
             Ok(Some(moved)) => {
@@ -5266,7 +5266,7 @@ impl NotesApp {
                     self.file_move.moved(Some(moved.updates));
                 }
                 self.status = format!(
-                    "Moved {count} items to {}",
+                    "{count} itens movidos para {}",
                     if folder.as_os_str().is_empty() {
                         "/".into()
                     } else {
@@ -5290,7 +5290,7 @@ impl NotesApp {
         let paths = match self
             .vault
             .as_ref()
-            .ok_or_else(|| "Open a vault first.".to_owned())
+            .ok_or_else(|| "Abra um cofre primeiro.".to_owned())
             .and_then(|vault| vault.selected_entries(sources))
         {
             Ok(paths) => paths,
@@ -5330,19 +5330,19 @@ impl NotesApp {
             self.new_tab();
         }
         self.status = format!(
-            "Moved {} items to {}",
+            "{} itens movidos para {}",
             removed.len(),
             if in_vault {
-                "the vault trash"
+                "a lixeira do cofre"
             } else {
-                "system Trash"
+                "Lixeira do sistema"
             }
         );
         if in_vault {
             self.sync.notify_saved();
         }
         self.error = (!failures.is_empty())
-            .then(|| format!("Some items were not deleted: {}", failures.join("; ")));
+            .then(|| format!("Alguns itens não foram excluídos: {}", failures.join("; ")));
         self.refresh_file_views();
         crate::explorer_selection::reset(ctx);
         if let Err(error) = self.write_session() {
@@ -5360,7 +5360,7 @@ impl NotesApp {
             .any(|part| !matches!(part, std::path::Component::Normal(_)))
             || !path.exists()
         {
-            self.error = Some("This file or folder is no longer in the vault.".into());
+            self.error = Some("Este arquivo ou pasta não está mais no cofre.".into());
             return;
         }
         let (sender, result) = mpsc::channel();
@@ -5371,7 +5371,7 @@ impl NotesApp {
             ctx.request_repaint();
         });
         self.error = None;
-        self.status = "Opening system file manager…".into();
+        self.status = "Abrindo o gerenciador de arquivos do sistema…".into();
     }
 
     fn ask_move_file(&mut self, source: PathBuf) {
@@ -5397,12 +5397,12 @@ impl NotesApp {
         }
         self.error = (!outcome.warnings.is_empty()).then(|| {
             format!(
-                "File moved. Some links need review: {}",
+                "Arquivo movido. Alguns links precisam de revisão: {}",
                 outcome.warnings.join("; ")
             )
         });
         self.status = format!(
-            "Moved to {} · updated {} files",
+            "Movido para {} · {} arquivos atualizados",
             outcome.path.display(),
             outcome.updated_notes
         );
@@ -5414,20 +5414,20 @@ impl NotesApp {
             let error = self
                 .error
                 .clone()
-                .unwrap_or_else(|| "Save your changes before moving the file.".into());
+                .unwrap_or_else(|| "Salve suas alterações antes de mover o arquivo.".into());
             self.move_failed(error);
             return;
         }
         let result = self
             .vault
             .as_mut()
-            .ok_or_else(|| "Open a vault first.".to_owned())
+            .ok_or_else(|| "Abra um cofre primeiro.".to_owned())
             .and_then(|vault| vault.begin_move_file(source, folder, create));
         match result {
             Ok(Some(updates)) => {
                 self.relocate_tabs(source, updates.path());
                 self.reveal_folder = Some(folder.to_owned());
-                self.status = format!("Moved to {}", updates.path().display());
+                self.status = format!("Movido para {}", updates.path().display());
                 self.error = None;
                 let automatic = self.always_update_links || updates.counts().0 == 0;
                 self.file_move.moved(None);
@@ -5498,7 +5498,7 @@ impl NotesApp {
         }
         if dialog == Dialog::NewFolder {
             if input.is_empty() {
-                self.error = Some("Enter a folder name.".into());
+                self.error = Some("Digite um nome de pasta.".into());
                 return false;
             }
             let path = self
@@ -5508,7 +5508,7 @@ impl NotesApp {
             let result = self
                 .vault
                 .as_mut()
-                .ok_or("Open a vault first.".to_owned())
+                .ok_or("Abra um cofre primeiro.".to_owned())
                 .and_then(|vault| vault.create_folder(&path));
             return match result {
                 Ok(()) => {
@@ -5516,7 +5516,7 @@ impl NotesApp {
                     self.reveal_folder = Some(path.clone());
                     self.searching = false;
                     self.show_bookmarks = false;
-                    self.status = format!("Created folder {}", path.display());
+                    self.status = format!("Pasta {} criada", path.display());
                     self.error = None;
                     true
                 }
@@ -5537,7 +5537,7 @@ impl NotesApp {
                             .values
                             .contains_key(serde_yaml_ng::Value::String(input.clone()))
                     }) {
-                        return Err("This property already exists.".into());
+                        return Err("Esta propriedade já existe.".into());
                     }
                     let value = if matches!(input.as_str(), "aliases" | "tags" | "cssclasses") {
                         serde_yaml_ng::Value::Sequence(Vec::new())
@@ -5561,7 +5561,7 @@ impl NotesApp {
         }
         if matches!(dialog, Dialog::RenameNote | Dialog::TrashNote) {
             let Some(source) = self.dialog_path.clone() else {
-                self.error = Some("Choose a file first.".into());
+                self.error = Some("Escolha um arquivo primeiro.".into());
                 return false;
             };
             if !self.save_all() {
@@ -5583,7 +5583,7 @@ impl NotesApp {
                 }
                 self.vault
                     .as_mut()
-                    .ok_or_else(|| "Open a vault first.".to_owned())
+                    .ok_or_else(|| "Abra um cofre primeiro.".to_owned())
                     .and_then(|vault| {
                         let plan = vault.plan_rename(&source, &target)?;
                         vault.rename_note(plan).map(Some)
@@ -5592,7 +5592,7 @@ impl NotesApp {
                 let in_vault = self.sync_trash_in_vault();
                 self.vault
                     .as_mut()
-                    .ok_or_else(|| "Open a vault first.".to_owned())
+                    .ok_or_else(|| "Abra um cofre primeiro.".to_owned())
                     .and_then(|vault| {
                         if in_vault {
                             vault.trash_entry_in_vault(&source)
@@ -5606,7 +5606,7 @@ impl NotesApp {
                 Ok(Some(outcome)) => {
                     self.relocate_tabs(&source, &outcome.path);
                     self.status = format!(
-                        "Renamed to {} · updated {} notes",
+                        "Renomeado para {} · {} notas atualizadas",
                         outcome.path.display(),
                         outcome.updated_notes
                     );
@@ -5619,7 +5619,7 @@ impl NotesApp {
                         None
                     } else {
                         Some(format!(
-                            "File renamed. Some links need review: {}",
+                            "Arquivo renomeado. Alguns links precisam de revisão: {}",
                             outcome.warnings.join("; ")
                         ))
                     };
@@ -5646,12 +5646,12 @@ impl NotesApp {
                     }
                     let in_vault = self.sync_trash_in_vault();
                     self.status = format!(
-                        "Moved {} to {}",
+                        "{} movido para {}",
                         source.display(),
                         if in_vault {
-                            "the vault trash"
+                            "a lixeira do cofre"
                         } else {
-                            "system Trash"
+                            "Lixeira do sistema"
                         }
                     );
                     if in_vault {
@@ -5677,7 +5677,7 @@ impl NotesApp {
             return true;
         }
         if input.is_empty() {
-            self.error = Some("Enter a name or folder path first.".into());
+            self.error = Some("Digite primeiro um nome ou caminho de pasta.".into());
             return false;
         }
         if dialog == Dialog::OpenVault {
@@ -5697,7 +5697,7 @@ impl NotesApp {
             path.set_extension("md");
         }
         if self.tabs.iter().any(|tab| tab.document.path == path) {
-            self.error = Some("This note is already open. Choose another name.".into());
+            self.error = Some("Esta nota já está aberta. Escolha outro nome.".into());
             return false;
         }
         let mut document = Document::new(path);
@@ -5707,7 +5707,7 @@ impl NotesApp {
             .map(|tab| tab.document.text.clone())
             .unwrap_or_default();
         let Some(vault) = &mut self.vault else {
-            self.error = Some("Open a vault before creating a note.".into());
+            self.error = Some("Abra um cofre antes de criar uma nota.".into());
             return false;
         };
         // A successful create validates containment and prevents name collisions.
@@ -5717,7 +5717,7 @@ impl NotesApp {
                 self.files = rustidian::search::FileMatcher::from_vault(vault);
                 self.search_cache.invalidate();
                 self.error = None;
-                self.status = format!("Created {}", document.path.display());
+                self.status = format!("{} criado", document.path.display());
                 self.tabs.push(Tab::new(document));
                 self.active = self.tabs.len() - 1;
                 self.set_view(View::Live);
@@ -5743,7 +5743,7 @@ impl NotesApp {
                 self.editor.native_highlight(tab, color);
                 ctx.request_repaint();
             } else {
-                self.error = Some("Choose an editable Markdown note to highlight text.".into());
+                self.error = Some("Escolha uma nota Markdown editável para destacar o texto.".into());
             }
             return;
         }
@@ -5760,7 +5760,7 @@ impl NotesApp {
                 self.editor.highlight(tab, color);
                 ctx.request_repaint();
             } else {
-                self.error = Some("Choose an editable Markdown note to highlight text.".into());
+                self.error = Some("Escolha uma nota Markdown editável para destacar o texto.".into());
             }
             return;
         }
