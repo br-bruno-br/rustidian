@@ -23,6 +23,7 @@ pub mod recovery;
 pub mod recovery_capture;
 pub mod search;
 pub mod structure;
+pub mod sync;
 pub mod tab;
 pub mod tables;
 #[cfg(all(feature = "agente", not(target_os = "linux")))]
