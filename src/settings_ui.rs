@@ -531,8 +531,8 @@ impl NotesApp {
                             Page::Daily => {
                                 changed |= text(
                                     ui,
-                                    "Date format",
-                                    "How daily note file names are formatted.",
+                                    "Formato da data",
+                                    "Como os nomes dos arquivos das notas diárias são formatados.",
                                     "settings-daily-format",
                                     &mut self.note_aids.daily.format,
                                     "YYYY-MM-DD",
@@ -540,27 +540,27 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "New file location",
-                                    "Folder for new daily notes.",
+                                    "Local dos novos arquivos",
+                                    "Pasta das novas notas diárias.",
                                     "settings-daily-folder",
                                     &mut self.note_aids.daily.folder,
-                                    "Vault folder",
+                                    "Pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Template file location",
-                                    "A note to use as the daily template.",
+                                    "Local do arquivo de modelo",
+                                    "Uma nota para usar como modelo diário.",
                                     "settings-daily-template",
                                     &mut self.note_aids.daily.template,
-                                    "Optional template note",
+                                    "Nota de modelo (opcional)",
                                 );
                             }
                             Page::Templates => {
                                 changed |= text(
                                     ui,
-                                    "Template folder location",
-                                    "Folder containing your templates.",
+                                    "Local da pasta de modelos",
+                                    "Pasta que contém seus modelos.",
                                     "settings-template-folder",
                                     &mut self.note_aids.templates.folder,
                                     "Choose a vault folder",
