@@ -179,15 +179,15 @@ impl Panel {
         }
         let current = self.backend().map(|(backend, _)| *backend);
         let status = if self.installed.is_empty() {
-            "No agent".to_owned()
+            "Nenhum agente".to_owned()
         } else if self.error.is_some() {
-            "Failed".to_owned()
+            "Falhou".to_owned()
         } else if let Some(exit) = self.session.as_mut().and_then(Session::exit) {
             describe(exit)
         } else if self.session.is_some() {
-            "Running".to_owned()
+            "Em execução".to_owned()
         } else {
-            "Starting".to_owned()
+            "Iniciando".to_owned()
         };
         let mut picked = current;
         let mut restart = false;
@@ -196,7 +196,7 @@ impl Panel {
             ui.add_enabled_ui(!self.installed.is_empty(), |ui| {
                 let combo = egui::ComboBox::from_id_salt("agent-backend")
                     .icon(theme::combo_chevron)
-                    .selected_text(current.map_or("No agent", Backend::label))
+                    .selected_text(current.map_or("Nenhum agente", Backend::label))
                     .show_ui(ui, |ui| {
                         theme::menu_style(ui);
                         for (backend, _) in &self.installed {
@@ -261,7 +261,7 @@ impl Panel {
             match Session::start(&program, &args, root, size, repaint) {
                 Ok(session) => self.session = Some(session),
                 Err(error) => {
-                    self.error = Some(format!("Couldn’t start {}: {error}", backend.label()));
+                    self.error = Some(format!("Não foi possível iniciar {}: {error}", backend.label()));
                 }
             }
         }
@@ -371,7 +371,7 @@ impl Panel {
                 let message = match (&self.error, current) {
                     (Some(error), _) => error.clone(),
                     (None, None) => {
-                        "No agent CLI on PATH: install elpis, codex or claude.".to_owned()
+                        "Nenhum agente de linha de comando no PATH: instale elpis, codex ou claude.".to_owned()
                     }
                     (None, Some(_)) => String::new(),
                 };
@@ -398,8 +398,8 @@ impl Panel {
 /// "Exited (code N)", or the signal that ended the agent.
 fn describe(status: &ExitStatus) -> String {
     match status.signal() {
-        Some(signal) => format!("Exited ({signal})"),
-        None => format!("Exited (code {})", status.exit_code()),
+        Some(signal) => format!("Encerrado ({signal})"),
+        None => format!("Encerrado (código {})", status.exit_code()),
     }
 }
 
@@ -683,8 +683,8 @@ fn load(root: &Path) -> Option<Backend> {
 
 fn save(root: &Path, backend: Backend) -> Result<(), String> {
     let path = rustidian::paths::state_file(root, "agent", "json")
-        .ok_or("Cannot find the state folder.")?;
-    let parent = path.parent().ok_or("Cannot find the state folder.")?;
+        .ok_or("Não foi possível achar a pasta de estado.")?;
+    let parent = path.parent().ok_or("Não foi possível achar a pasta de estado.")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec(&Saved {
         backend: Some(backend),
@@ -1332,7 +1332,7 @@ mod tests {
         assert_eq!(describe(&ExitStatus::with_exit_code(0)), "Exited (code 0)");
         assert_eq!(
             describe(&ExitStatus::with_signal("Killed")),
-            "Exited (Killed)"
+            "Encerrado (Killed)"
         );
     }
 

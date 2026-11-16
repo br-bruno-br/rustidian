@@ -277,7 +277,7 @@ impl Session {
         let descriptor = pair
             .master
             .as_raw_fd()
-            .ok_or("The terminal has no file descriptor.")?;
+            .ok_or("O terminal não tem descritor de arquivo.")?;
         // SAFETY: `pair.master` owns this open descriptor for the whole borrow.
         let borrowed = unsafe { BorrowedFd::borrow_raw(descriptor) };
         // Own handles, not portable-pty's writer: dropping that one types a
