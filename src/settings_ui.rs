@@ -730,7 +730,7 @@ impl NotesApp {
                     self.always_update_links,
                     self.confirm_trash,
                 ) = before;
-                self.error = Some(format!("Settings weren’t saved: {error}"));
+                self.error = Some(format!("As configurações não foram salvas: {error}"));
                 self.missing_fonts = theme::set_fonts(ctx, &self.fonts);
                 theme::palette::select(ctx, self.palette);
                 theme::apply_appearance(ctx, self.appearance);
