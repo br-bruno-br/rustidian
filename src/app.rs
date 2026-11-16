@@ -4991,7 +4991,7 @@ impl NotesApp {
                     ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                         for (index, command) in matches.iter().enumerate() {
                             let row = ui.add(
-                                egui::Button::new(command.name)
+                                egui::Button::new(rustidian::commands::label(command.name))
                                     .shortcut_text(command.shortcut)
                                     .selected(index == self.dialog_selected)
                                     .frame_when_inactive(false)
@@ -5011,10 +5011,10 @@ impl NotesApp {
                         }
                     });
                     if matches.is_empty() {
-                        ui.label("No matching commands");
+                        ui.label("Nenhum comando encontrado");
                     }
                     ui.label(
-                        RichText::new("↑ ↓ navigate · Enter to run · Esc to close")
+                        RichText::new("↑ ↓ navegar · Enter para executar · Esc para fechar")
                             .size(11.0)
                             .weak(),
                     );
