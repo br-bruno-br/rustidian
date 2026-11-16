@@ -1686,7 +1686,7 @@ impl NotesApp {
         if self.document_font_size != before {
             if let Err(error) = self.write_session() {
                 self.document_font_size = before;
-                self.error = Some(format!("Settings weren’t saved: {error}"));
+                self.error = Some(format!("As configurações não foram salvas: {error}"));
             } else {
                 self.settings_saved();
             }
@@ -1696,11 +1696,11 @@ impl NotesApp {
     }
 
     fn settings_saved(&mut self) {
-        self.status = "Settings saved".into();
+        self.status = "Configurações salvas".into();
         if self
             .error
             .as_deref()
-            .is_some_and(|error| error.starts_with("Settings weren’t saved:"))
+            .is_some_and(|error| error.starts_with("As configurações não foram salvas:"))
         {
             self.error = None;
         }
