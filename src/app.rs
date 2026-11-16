@@ -45,7 +45,7 @@ enum Pending {
     CloseOtherTabs(u64),
     CloseTabsToRight(u64),
     Quit,
-    /// Ctrl+Q's "Quit Rustidian?" question, asked when nothing is unsaved.
+    /// Ctrl+Q's "Sair do Rustidian?" question, asked when nothing is unsaved.
     ConfirmQuit,
     ChangeVault,
     OpenVault(PathBuf, Option<PathBuf>),
@@ -136,7 +136,7 @@ pub struct NotesApp {
     showing: Vec<mpsc::Sender<crate::instance::Reply>>,
     /// When to check that a window just opened has focus. GNOME may leave it
     /// behind the window being typed in; it then asks for attention, so
-    /// "Rustidian is ready" appears instead of nothing.
+    /// "Rustidian pronto" appears instead of nothing.
     attention_check: Option<Instant>,
     watcher: Option<SharedWatch>,
     watch_events: Option<Receiver<notify::Result<notify::Event>>>,
@@ -248,7 +248,7 @@ impl NotesApp {
             files: rustidian::search::FileMatcher::new(Vec::new()),
             pending: None,
             error: None,
-            status: "Ready".into(),
+            status: "Pronto".into(),
             allow_close: false,
             started,
             first_frame: true,
