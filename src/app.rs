@@ -2944,11 +2944,11 @@ impl NotesApp {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
                     for (tab, title, key) in [
-                        (0, "Outline", "outline"),
-                        (1, "Backlinks", "backlinks"),
-                        (2, "Outgoing", "outgoing"),
+                        (0, "Sumário", "outline"),
+                        (1, "Links de entrada", "backlinks"),
+                        (2, "Links de saída", "outgoing"),
                         #[cfg(feature = "agente")]
-                        (3, "Agent", "agent"),
+                        (3, "Agente", "agent"),
                     ] {
                         let response = ui.selectable_value(
                             &mut self.right_tab,
@@ -2973,7 +2973,7 @@ impl NotesApp {
                             self.agent.show(ui, root, &font);
                         }
                         None => {
-                            ui.label(RichText::new("Open a vault to use the agent").weak());
+                            ui.label(RichText::new("Abra um cofre para usar o agente").weak());
                         }
                     }
                     return;
@@ -2985,11 +2985,11 @@ impl NotesApp {
                                 Icon::Outline,
                                 ui.visuals().weak_text_color(),
                             ));
-                            ui.label(RichText::new("Outline").size(14.0).strong());
+                            ui.label(RichText::new("Sumário").size(14.0).strong());
                         });
                         ui.add_space(theme::space::S);
                         if outline.is_empty() {
-                            ui.label(RichText::new("No headings yet").size(13.0).weak());
+                            ui.label(RichText::new("Nenhum título ainda").size(13.0).weak());
                         }
                         for heading in outline {
                             let depth = heading.level;
@@ -3008,10 +3008,10 @@ impl NotesApp {
                         }
                     }
                     if self.right_tab == 1 {
-                        ui.label(RichText::new("Backlinks").size(14.0).strong());
+                        ui.label(RichText::new("Links de entrada").size(14.0).strong());
                         ui.add_space(theme::space::S);
                         let count = ui.label(
-                            RichText::new(format!("{} linked mentions", backlinks.len()))
+                            RichText::new(format!("{} menções com link", backlinks.len()))
                                 .size(12.0)
                                 .weak(),
                         );
@@ -3086,9 +3086,9 @@ impl NotesApp {
                         }
                         ui.add_space(theme::space::M);
                         let title = if self.unlinked_open {
-                            format!("▾ {} unlinked mentions", unlinked.len())
+                            format!("▾ {} menções sem link", unlinked.len())
                         } else {
-                            "▸ Unlinked mentions".to_owned()
+                            "▸ Menções sem link".to_owned()
                         };
                         let header = ui.add(
                             egui::Button::new(RichText::new(title).size(12.0).weak())
@@ -3144,7 +3144,7 @@ impl NotesApp {
                                         .on_hover_text(mention.path.display().to_string());
                                     let link = ui
                                         .small_button("Link")
-                                        .on_hover_text("Turn this mention into a [[link]]");
+                                        .on_hover_text("Transformar esta menção em [[link]]");
                                     crate::ui_probe::record(
                                         ui.ctx(),
                                         format!(
@@ -3165,11 +3165,11 @@ impl NotesApp {
                         }
                     }
                     if self.right_tab == 2 {
-                        ui.label(RichText::new("Outgoing links").size(14.0).strong());
+                        ui.label(RichText::new("Links de saída").size(14.0).strong());
                         ui.add_space(theme::space::S);
                         if outgoing.is_empty() {
                             ui.label(
-                                RichText::new("Connect a note with [[links]]")
+                                RichText::new("Conecte uma nota com [[links]]")
                                     .size(12.0)
                                     .weak(),
                             );
@@ -3230,7 +3230,7 @@ impl NotesApp {
             &vault.link_target(&mention.path, &target),
             &mention.link,
         );
-        let changed = "The mention changed. It is listed again with its current text.";
+        let changed = "A menção mudou. Ela foi listada de novo com o texto atual.";
         if let Some(tab) = self
             .tabs
             .iter_mut()
@@ -3276,7 +3276,7 @@ impl NotesApp {
         };
         if tab.document.text.get(mention.range.clone()) != Some(mention.link.as_str()) {
             self.error = Some(
-                "The linked mention changed. Select it again to open its current location.".into(),
+                "A menção com link mudou. Selecione-a de novo para abrir o local atual.".into(),
             );
             return;
         }
