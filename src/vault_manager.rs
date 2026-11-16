@@ -9,6 +9,13 @@ use std::{
     time::Duration,
 };
 
+/// The home folder, where the "create vault" form starts when no vault is open.
+fn home_folder() -> String {
+    rustidian::paths::home_dir()
+        .map(|home| home.display().to_string())
+        .unwrap_or_default()
+}
+
 #[derive(Default, PartialEq)]
 enum Page {
     #[default]
@@ -71,7 +78,7 @@ impl Manager {
         self.folder = current
             .and_then(Path::parent)
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default());
+            .unwrap_or_else(home_folder);
         self.focus = true;
     }
 
@@ -307,9 +314,7 @@ impl Manager {
                                             self.folder = current
                                                 .and_then(Path::parent)
                                                 .map(|path| path.display().to_string())
-                                                .unwrap_or_else(|| {
-                                                    std::env::var("HOME").unwrap_or_default()
-                                                });
+                                                .unwrap_or_else(home_folder);
                                             self.focus = true;
                                         }
                                     });

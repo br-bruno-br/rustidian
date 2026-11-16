@@ -30,16 +30,45 @@ pub fn read_obsidian<T: serde::de::DeserializeOwned + Default>(
     serde_json::from_slice(&bytes).map_err(|error| format!("Cannot import note settings: {error}"))
 }
 
+/// The user's home folder: `HOME`, or `USERPROFILE` on Windows.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| {
+            cfg!(windows)
+                .then(|| std::env::var_os("USERPROFILE"))
+                .flatten()
+        })
+        .map(PathBuf::from)
+}
+
+/// Where the app keeps per-user state (sessions, recovery history, the agent's context file):
+/// `XDG_STATE_HOME` or `~/.local/state`, and `%LOCALAPPDATA%` on Windows.
+pub fn state_base() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    }
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".local/state")))
+}
+
+/// Where the app keeps per-user data (the vault list): `XDG_DATA_HOME` or `~/.local/share`,
+/// and `%LOCALAPPDATA%` on Windows.
+pub fn data_base() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    }
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".local/share")))
+}
+
 pub fn state_file(root: &Path, group: &str, extension: &str) -> Option<PathBuf> {
     use std::{
         collections::hash_map::DefaultHasher,
         hash::{Hash, Hasher},
     };
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })?;
+    let base = state_base()?;
     let mut hash = DefaultHasher::new();
     root.hash(&mut hash);
     Some(
