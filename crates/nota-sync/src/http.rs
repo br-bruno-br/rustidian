@@ -15,10 +15,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::protocolo::{
-    BLOB_MAXIMO, CABECALHO_HASH, Conflito409, Mudancas, PedidoPublicar, RespostaPublicar, hex64,
-    sha256_hex,
+    BLOB_MAXIMO, CABECALHO_HASH, CHAVE_MAXIMA, Conflito409, Mudancas, PedidoPublicar,
+    RespostaPublicar, hex64, sha256_hex,
 };
-use crate::remoto::{ErroRemoto, Remoto};
+use crate::remoto::{EnvioChave, ErroRemoto, Remoto};
 
 /// Configuração do cliente: endereço do servidor, token do aparelho e o nome do aparelho.
 /// A chave do cofre não entra aqui: chega ao `Sincronizador` como `ChaveCofre`.
@@ -150,6 +150,47 @@ impl RemotoHttp {
 }
 
 impl Remoto for RemotoHttp {
+    fn baixar_chave(&mut self) -> Result<Option<Vec<u8>>, ErroRemoto> {
+        let mut resp = self
+            .agent
+            .get(self.url("/v1/chave"))
+            .header("Authorization", &self.autorizacao)
+            .call()
+            .map_err(Self::rede)?;
+        let status = resp.status().as_u16();
+        let corpo = Self::ler(&mut resp, CHAVE_MAXIMA)?;
+        match status {
+            200 if !corpo.is_empty() => Ok(Some(corpo)),
+            200 => Err(ErroRemoto::Protocolo(
+                "cofre.chave vazio no servidor".into(),
+            )),
+            404 => Ok(None),
+            _ => Err(Self::erro_de_status(status, &corpo)),
+        }
+    }
+
+    fn enviar_chave(&mut self, bytes: &[u8]) -> Result<EnvioChave, ErroRemoto> {
+        if bytes.is_empty() || bytes.len() > CHAVE_MAXIMA {
+            return Err(ErroRemoto::Protocolo(
+                "cofre.chave com tamanho inválido".into(),
+            ));
+        }
+        let mut resp = self
+            .agent
+            .put(self.url("/v1/chave"))
+            .header("Authorization", &self.autorizacao)
+            .content_type("application/octet-stream")
+            .send(bytes)
+            .map_err(Self::rede)?;
+        let status = resp.status().as_u16();
+        let corpo = Self::ler(&mut resp, 4096)?;
+        match status {
+            200 | 201 => Ok(EnvioChave::Gravada),
+            409 => Ok(EnvioChave::JaExiste),
+            _ => Err(Self::erro_de_status(status, &corpo)),
+        }
+    }
+
     fn mudancas(&mut self, desde: u64) -> Result<Mudancas, ErroRemoto> {
         let mut resp = self
             .agent

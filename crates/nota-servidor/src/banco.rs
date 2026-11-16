@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use nota_sync::protocolo::{
-    BLOB_MAXIMO, Conflito409, ItemRemoto, Mudancas, PAGINA_MUDANCAS, PedidoPublicar,
+    BLOB_MAXIMO, CHAVE_MAXIMA, Conflito409, ItemRemoto, Mudancas, PAGINA_MUDANCAS, PedidoPublicar,
     RespostaPublicar, hex64, sha256_hex,
 };
 use rand_core::{OsRng, RngCore};
@@ -16,6 +16,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub struct Banco {
     conn: Mutex<Connection>,
     blobs: PathBuf,
+    chave: PathBuf,
 }
 
 /// Por que um blob foi recusado.
@@ -24,6 +25,14 @@ pub enum ErroBlob {
     Vazio,
     GrandeDemais,
     HashNaoBate,
+}
+
+/// Por que o `cofre.chave` foi recusado.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ErroChave {
+    Vazia,
+    GrandeDemais,
+    JaExiste,
 }
 
 /// Por que uma publicação foi recusada (que não seja o 409).
@@ -67,6 +76,7 @@ impl Banco {
         Ok(Self {
             conn: Mutex::new(conn),
             blobs,
+            chave: dados.join("cofre.chave"),
         })
     }
 
@@ -99,6 +109,52 @@ impl Banco {
         itens.truncate(PAGINA_MUDANCAS);
         let seq = itens.last().map_or(desde, |i| i.seq);
         Ok(Mudancas { itens, seq, mais })
+    }
+
+    /// O `cofre.chave` (K embrulhada pela frase). O servidor não o abre: são bytes opacos.
+    pub fn ler_chave(&self) -> io::Result<Option<Vec<u8>>> {
+        match fs::read(&self.chave) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Grava o `cofre.chave` **uma única vez**. O arquivo completo é escrito num temporário
+    /// e ligado ao nome final com `hard_link`, que falha se o nome já existe: dois aparelhos
+    /// que chegam juntos não se sobrepõem e ninguém lê um arquivo pela metade.
+    pub fn gravar_chave(&self, corpo: &[u8]) -> io::Result<Result<(), ErroChave>> {
+        if corpo.is_empty() {
+            return Ok(Err(ErroChave::Vazia));
+        }
+        if corpo.len() > CHAVE_MAXIMA {
+            return Ok(Err(ErroChave::GrandeDemais));
+        }
+        if self.chave.exists() {
+            return Ok(Err(ErroChave::JaExiste));
+        }
+        let mut b = [0u8; 8];
+        OsRng.fill_bytes(&mut b);
+        let temp = self.chave.with_file_name(format!(
+            ".chave-tmp-{}",
+            b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+        ));
+        let r = (|| {
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            f.write_all(corpo)?;
+            f.sync_all()?;
+            drop(f);
+            fs::hard_link(&temp, &self.chave)
+        })();
+        let _ = fs::remove_file(&temp); // o temporário é nosso
+        match r {
+            Ok(()) => Ok(Ok(())),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(Err(ErroChave::JaExiste)),
+            Err(e) => Err(e),
+        }
     }
 
     fn caminho_blob(&self, hash: &str) -> Option<PathBuf> {

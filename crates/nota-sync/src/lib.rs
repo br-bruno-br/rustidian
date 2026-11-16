@@ -23,5 +23,5 @@ pub mod sincronizador;
 pub use erro::ErroSync;
 pub use http::{Config, RemotoHttp};
 pub use memoria::RemotoMemoria;
-pub use remoto::{ErroRemoto, Remoto};
+pub use remoto::{EnvioChave, ErroRemoto, Remoto};
 pub use sincronizador::{Opcoes, Relatorio, Sincronizador};

@@ -34,8 +34,24 @@ impl fmt::Display for ErroRemoto {
 
 impl std::error::Error for ErroRemoto {}
 
+/// Resposta de `enviar_chave`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvioChave {
+    /// O servidor não tinha `cofre.chave` e agora tem.
+    Gravada,
+    /// Já havia um `cofre.chave` (409): o servidor nunca troca.
+    JaExiste,
+}
+
 /// O servidor visto pelo cliente. Nada aqui conhece conteúdo claro: só blobs cifrados.
 pub trait Remoto {
+    /// O `cofre.chave` do servidor (K embrulhada pela frase), ou `None` se ainda não há (404).
+    fn baixar_chave(&mut self) -> Result<Option<Vec<u8>>, ErroRemoto>;
+
+    /// Grava o `cofre.chave` **só se o servidor ainda não tem um**; com um já gravado,
+    /// devolve [`EnvioChave::JaExiste`] e não muda nada.
+    fn enviar_chave(&mut self, bytes: &[u8]) -> Result<EnvioChave, ErroRemoto>;
+
     /// Itens que mudaram depois do cursor `desde` (uma página; `mais` diz se há outra).
     fn mudancas(&mut self, desde: u64) -> Result<Mudancas, ErroRemoto>;
 

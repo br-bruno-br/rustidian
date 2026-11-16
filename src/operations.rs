@@ -874,8 +874,8 @@ impl Vault {
         outcome
     }
 
-    /// Moves a note, attachment or folder (with everything inside) to the system Trash.
-    pub fn trash_entry(&mut self, path: &Path) -> Result<()> {
+    /// The file or folder `path` names, checked the same way for both kinds of trash.
+    fn trash_target(&self, path: &Path) -> Result<(PathBuf, bool)> {
         let folder = self.folders.iter().any(|folder| folder == path);
         let absolute = if folder || self.attachments.iter().any(|attachment| attachment == path) {
             self.safe_file_path(path, false)?
@@ -887,14 +887,72 @@ impl Vault {
         if metadata.file_type().is_symlink() || metadata.is_dir() != folder {
             return Err("Choose an existing file or folder.".into());
         }
-        trash::delete(&absolute)
-            .map_err(|error| format!("Cannot move to system Trash: {error}"))?;
+        Ok((absolute, folder))
+    }
+
+    /// Drops a trashed entry from the vault's lists.
+    fn forget_trashed(&mut self, path: &Path) {
         self.notes.retain(|note| !note.path.starts_with(path));
         self.attachments
             .retain(|attachment| !attachment.starts_with(path));
         self.folders.retain(|entry| !entry.starts_with(path));
         self.rebuild_lookup();
+    }
+
+    /// Moves a note, attachment or folder (with everything inside) to the system Trash.
+    pub fn trash_entry(&mut self, path: &Path) -> Result<()> {
+        let (absolute, _) = self.trash_target(path)?;
+        trash::delete(&absolute)
+            .map_err(|error| format!("Cannot move to system Trash: {error}"))?;
+        self.forget_trashed(path);
         Ok(())
+    }
+
+    /// Like `trash_entry`, but into the vault's own `.trash/` folder, in the format `nota-sync`
+    /// uses (`.trash/<folder>/<name> YYYY-MM-DD HHMMSS.<ext>`). With sync on this is how a
+    /// deletion made here leaves a copy in the vault, and travels to the other devices as a
+    /// deletion mark instead of vanishing into a trash the other devices cannot see.
+    pub fn trash_entry_in_vault(&mut self, path: &Path) -> Result<()> {
+        let (absolute, folder) = self.trash_target(path)?;
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string();
+        // A save or a sync cycle never runs in the middle of the moves.
+        let _gate = crate::sync::gate::global().hold();
+        let mut folders = Vec::new();
+        if folder {
+            for entry in walkdir::WalkDir::new(&absolute).follow_links(false) {
+                let entry = entry.map_err(|error| format!("Cannot inspect folder: {error}"))?;
+                if entry.file_type().is_dir() {
+                    folders.push(entry.into_path());
+                } else {
+                    self.move_into_vault_trash(entry.path(), &stamp)?;
+                }
+            }
+            // Deepest first; a folder that is not empty (a file appeared meanwhile) stays.
+            folders.sort_by_key(|dir| std::cmp::Reverse(dir.components().count()));
+            for dir in &folders {
+                let _ = std::fs::remove_dir(dir);
+            }
+            if absolute.exists() {
+                return Err(
+                    "Some files could not be moved to the vault trash; the folder was kept.".into(),
+                );
+            }
+        } else {
+            self.move_into_vault_trash(&absolute, &stamp)?;
+        }
+        self.forget_trashed(path);
+        Ok(())
+    }
+
+    fn move_into_vault_trash(&self, absolute: &Path, stamp: &str) -> Result<()> {
+        let relative = absolute
+            .strip_prefix(&self.root)
+            .ok()
+            .filter(|relative| relative.to_str().is_some())
+            .ok_or("This file cannot be moved to the vault trash.")?;
+        nota_sync::cofre::mover_para_lixeira(&self.root, &crate::paths::slashed(relative), stamp)
+            .map(|_| ())
+            .map_err(|error| format!("Cannot move to the vault trash: {error}"))
     }
 }
 

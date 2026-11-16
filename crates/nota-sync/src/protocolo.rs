@@ -8,6 +8,9 @@ use sha2::{Digest, Sha256};
 /// documenta (versão, nonce, tag e o caminho cifrado dentro do blob; ver "Desvios da R3").
 pub const BLOB_MAXIMO: usize = nota_cripto::TAMANHO_MAXIMO + 8 * 1024;
 
+/// Maior `cofre.chave` aceito por `PUT /v1/chave` (o arquivo v1 tem 101 bytes).
+pub const CHAVE_MAXIMA: usize = 4 * 1024;
+
 /// Itens por página de `GET /v1/mudancas`.
 pub const PAGINA_MUDANCAS: usize = 1000;
 

@@ -8,9 +8,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::protocolo::{
-    BLOB_MAXIMO, Conflito409, ItemRemoto, Mudancas, PAGINA_MUDANCAS, hex64, sha256_hex,
+    BLOB_MAXIMO, CHAVE_MAXIMA, Conflito409, ItemRemoto, Mudancas, PAGINA_MUDANCAS, hex64,
+    sha256_hex,
 };
-use crate::remoto::{ErroRemoto, Remoto};
+use crate::remoto::{EnvioChave, ErroRemoto, Remoto};
 
 /// Qual chamada da trait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,7 @@ struct Central {
     itens: BTreeMap<String, ItemRemoto>,
     blobs: HashMap<String, Vec<u8>>,
     seq: u64,
+    chave: Option<Vec<u8>>,
 }
 
 type Gancho = Box<dyn FnMut(Chamada) + Send>;
@@ -140,6 +142,24 @@ impl RemotoMemoria {
 }
 
 impl Remoto for RemotoMemoria {
+    fn baixar_chave(&mut self) -> Result<Option<Vec<u8>>, ErroRemoto> {
+        Ok(self.trava().chave.clone())
+    }
+
+    fn enviar_chave(&mut self, bytes: &[u8]) -> Result<EnvioChave, ErroRemoto> {
+        if bytes.is_empty() || bytes.len() > CHAVE_MAXIMA {
+            return Err(ErroRemoto::Protocolo(
+                "cofre.chave com tamanho inválido".into(),
+            ));
+        }
+        let mut c = self.trava();
+        if c.chave.is_some() {
+            return Ok(EnvioChave::JaExiste);
+        }
+        c.chave = Some(bytes.to_vec());
+        Ok(EnvioChave::Gravada)
+    }
+
     fn mudancas(&mut self, desde: u64) -> Result<Mudancas, ErroRemoto> {
         let (n, falha) = self.entrar(Chamada::Mudancas);
         if falha.is_some() {
@@ -286,6 +306,17 @@ mod testes {
         }]);
         assert!(r.publicar(&id(1), 0, &h, false).is_err());
         assert!(r.item(&id(1)).is_none());
+    }
+
+    #[test]
+    fn chave_so_grava_uma_vez_e_o_outro_aparelho_enxerga() {
+        let mut a = RemotoMemoria::novo();
+        let mut b = a.outro_aparelho();
+        assert_eq!(a.baixar_chave().unwrap(), None);
+        assert_eq!(a.enviar_chave(b"um").unwrap(), EnvioChave::Gravada);
+        assert_eq!(b.enviar_chave(b"dois").unwrap(), EnvioChave::JaExiste);
+        assert_eq!(b.baixar_chave().unwrap().as_deref(), Some(&b"um"[..]));
+        assert!(a.enviar_chave(b"").is_err());
     }
 
     #[test]

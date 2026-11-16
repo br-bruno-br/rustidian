@@ -479,6 +479,8 @@ impl Vault {
             return Ok(());
         }
         let absolute = self.safe_path(&document.path, true)?;
+        // A new note is also a write into the vault: it waits for a sync cycle's disk work.
+        let _gate = crate::sync::gate::global().hold();
         if absolute.exists() {
             return Err("A note already exists at this path. Choose a different name.".into());
         }
@@ -744,10 +746,7 @@ impl Vault {
     /// Resolving them must not create notes, change the vault, or follow a symlink escape.
     pub fn external_file_uri(&self, from: &Path, target: &str) -> Option<String> {
         let file = self.external_file(from, target)?;
-        Some(format!(
-            "file://{}",
-            crate::paths::markdown_destination(Path::new(""), &file)
-        ))
+        Some(crate::paths::file_uri(&file))
     }
 
     /// A file a link names that the vault does not own: outside the root, or inside it but
@@ -941,6 +940,8 @@ impl PendingSave {
     /// Atomically replaces the note, keeping its permissions, unless it no longer
     /// holds the text it was loaded or last saved with.
     pub fn write(&self) -> Result<()> {
+        // The sync cycle and the editor take turns on the vault's files (see `sync::gate`).
+        let _gate = crate::sync::gate::global().hold();
         let current = fs::read_to_string(&self.absolute).map_err(|e| {
             format!("Note was removed or cannot be read. Your changes are still open: {e}")
         })?;
