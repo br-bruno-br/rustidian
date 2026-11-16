@@ -18,6 +18,60 @@ const PHOTO_MIN_NOTES: usize = 1000;
 const PHOTO_STALE_BASE: usize = 50;
 const PHOTO_STALE_SHARE: usize = 50;
 
+/// A Markdown note bigger than this stays out of the index: it is neither read nor listed, and
+/// the vault opens with a single warning naming it. Reading one whole would stall opening and
+/// every search, and no hand-written note comes near it.
+pub const MAX_NOTE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// What reading a note under the size ceiling found.
+enum NoteRead {
+    Text(String),
+    TooLarge(u64),
+}
+
+/// Read `path` as text without ever holding more than the ceiling in memory.
+fn read_note_limited(path: &Path) -> std::io::Result<NoteRead> {
+    use std::io::Read;
+    let file = fs::File::open(path)?;
+    if let Ok(metadata) = file.metadata()
+        && metadata.len() > MAX_NOTE_BYTES
+    {
+        return Ok(NoteRead::TooLarge(metadata.len()));
+    }
+    let mut text = String::new();
+    file.take(MAX_NOTE_BYTES + 1).read_to_string(&mut text)?;
+    // The file grew while it was being read.
+    Ok(if text.len() as u64 > MAX_NOTE_BYTES {
+        NoteRead::TooLarge(text.len() as u64)
+    } else {
+        NoteRead::Text(text)
+    })
+}
+
+/// The single warning for notes left out for their size, or `None` when there are none.
+fn oversized_warning(oversized: &[(PathBuf, u64)]) -> Option<String> {
+    const NAMED: usize = 5;
+    let megabytes = |bytes: u64| bytes.div_ceil(1024 * 1024);
+    let named = oversized
+        .iter()
+        .take(NAMED)
+        .map(|(path, bytes)| format!("{} ({} MB)", path.display(), megabytes(*bytes)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = oversized.len().saturating_sub(NAMED);
+    let limit = MAX_NOTE_BYTES / (1024 * 1024);
+    Some(match (oversized.len(), more) {
+        (0, _) => return None,
+        (1, _) => format!("Nota maior que {limit} MB ficou fora do índice: {named}"),
+        (count, 0) => {
+            format!("{count} notas maiores que {limit} MB ficaram fora do índice: {named}")
+        }
+        (count, more) => format!(
+            "{count} notas maiores que {limit} MB ficaram fora do índice: {named} e mais {more}"
+        ),
+    })
+}
+
 /// Navigation and watcher refreshes share the same development-clutter policy.
 pub fn is_ignored_path(relative: &Path) -> bool {
     relative.components().any(|part| {
@@ -252,6 +306,8 @@ pub struct Vault {
     /// agent's file opened beside the note being read. They are read and saved
     /// where they are and never enter the index, the tree or the graph.
     guests: std::collections::BTreeSet<PathBuf>,
+    /// Notes left out of the index for passing `MAX_NOTE_BYTES`.
+    oversized: std::collections::BTreeSet<PathBuf>,
     paths: HashMap<PathBuf, usize>,
     names: HashMap<String, Vec<usize>>,
     incoming: std::sync::OnceLock<HashMap<PathBuf, Vec<usize>>>,
@@ -304,6 +360,7 @@ impl Vault {
             attachments: Vec::new(),
             folders: Vec::new(),
             guests: std::collections::BTreeSet::new(),
+            oversized: std::collections::BTreeSet::new(),
             paths: HashMap::new(),
             names: HashMap::new(),
             incoming: std::sync::OnceLock::new(),
@@ -346,6 +403,7 @@ impl Vault {
         let mut attachments = Vec::new();
         let mut folders = Vec::new();
         let mut warnings = Vec::new();
+        let mut oversized: Vec<(PathBuf, u64)> = Vec::new();
         let entries = WalkDir::new(&self.root)
             .max_depth(if self.loose { 1 } else { usize::MAX })
             .follow_links(false)
@@ -377,14 +435,16 @@ impl Vault {
                 continue;
             }
             let relative: PathBuf = entry.path().strip_prefix(&self.root).unwrap().into();
+            let metadata = entry.metadata().ok();
+            if let Some(metadata) = &metadata
+                && metadata.len() > MAX_NOTE_BYTES
+            {
+                oversized.push((relative, metadata.len()));
+                continue;
+            }
             let stamp = location
                 .is_some()
-                .then(|| {
-                    entry
-                        .metadata()
-                        .ok()
-                        .and_then(|metadata| Stamp::of(&metadata))
-                })
+                .then(|| metadata.as_ref().and_then(Stamp::of))
                 .flatten();
             // A note with the size and time the photo recorded is not read.
             if let Some(stamp) = stamp
@@ -398,11 +458,12 @@ impl Vault {
                 ));
                 continue;
             }
-            match fs::read_to_string(entry.path()) {
-                Ok(text) => {
+            match read_note_limited(entry.path()) {
+                Ok(NoteRead::Text(text)) => {
                     report.read += 1;
                     notes.push((Note::new(relative, text), stamp));
                 }
+                Ok(NoteRead::TooLarge(bytes)) => oversized.push((relative, bytes)),
                 Err(error) => warnings.push(format!("{}: {error}", entry.path().display())),
             }
         }
@@ -414,6 +475,9 @@ impl Vault {
         folders.sort();
         self.folders = folders;
         self.rebuild_lookup();
+        oversized.sort();
+        warnings.extend(oversized_warning(&oversized));
+        self.oversized = oversized.into_iter().map(|(path, _)| path).collect();
         self.warnings = warnings;
         // The photo is rewritten when there is none, or when enough notes differ from it that
         // the next open would read a noticeable number of them again. Small vaults open fast
@@ -807,7 +871,10 @@ impl Vault {
             if !metadata.is_file() || metadata.file_type().is_symlink() {
                 return None;
             }
-            let text = fs::read_to_string(&absolute).ok()?;
+            // A note that grew past the ceiling needs the full index to leave the index.
+            let NoteRead::Text(text) = read_note_limited(&absolute).ok()? else {
+                return None;
+            };
             if self.notes.get(index)?.text != text {
                 changed.push((path.clone(), text));
             }
