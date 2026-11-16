@@ -4118,9 +4118,9 @@ impl NotesApp {
                                                     egui::Sense::click(),
                                                 )
                                                 .on_hover_text(if tab.pinned {
-                                                    "Unpin"
+                                                    "Desafixar"
                                                 } else {
-                                                    "Close tab · Ctrl+W"
+                                                    "Fechar aba · Ctrl+W"
                                                 });
                                             if show_close {
                                                 theme::control_feedback(ui, &closing);
@@ -4432,9 +4432,9 @@ impl NotesApp {
                             let showing = self.show_right && self.right_tab == 3;
                             let agent = ui
                                 .add_enabled_ui(self.vault.is_some(), |ui| {
-                                    ui.selectable_label(showing, RichText::new("Agent").size(13.0))
-                                        .on_hover_text("Agent terminal")
-                                        .on_disabled_hover_text("Open a vault first.")
+                                    ui.selectable_label(showing, RichText::new("Agente").size(13.0))
+                                        .on_hover_text("Terminal do agente")
+                                        .on_disabled_hover_text("Abra um cofre primeiro.")
                                 })
                                 .inner;
                             crate::ui_probe::record(ui.ctx(), "toggle-agent", agent.rect);
