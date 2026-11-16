@@ -64,6 +64,7 @@ impl Query {
         let mut parser = Parse {
             tokens,
             position: 0,
+            depth: 0,
         };
         let expression = parser.or(None)?;
         if parser.position != parser.tokens.len() {
@@ -202,9 +203,15 @@ fn property_matches(value: &Value, expected: &str) -> bool {
     }
 }
 
+/// How many groups may sit inside one another. A search typed (or pasted) with thousands of open
+/// parentheses would otherwise recurse until the stack overflowed, and a stack overflow cannot be
+/// caught: it ends the app.
+const MAX_GROUP_DEPTH: usize = 32;
+
 struct Parse {
     tokens: Vec<Token>,
     position: usize,
+    depth: usize,
 }
 impl Parse {
     fn or(&mut self, default: Option<&str>) -> Result<Expression, String> {
@@ -269,7 +276,15 @@ impl Parse {
         Ok(Expression::And(terms))
     }
     fn group(&mut self, default: Option<&str>) -> Result<Expression, String> {
-        let group = self.or(default)?;
+        if self.depth >= MAX_GROUP_DEPTH {
+            return Err(format!(
+                "A busca tem grupos demais dentro de grupos (o máximo é {MAX_GROUP_DEPTH})."
+            ));
+        }
+        self.depth += 1;
+        let group = self.or(default);
+        self.depth -= 1;
+        let group = group?;
         if self.tokens.get(self.position) != Some(&Token::Close) {
             return Err("Feche o grupo da busca com um parêntese.".into());
         }
