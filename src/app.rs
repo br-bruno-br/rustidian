@@ -4529,11 +4529,11 @@ impl NotesApp {
             .frame(theme::dialog_frame(ctx)).show(ctx, |ui| {
                 theme::dialog_style(ui);
                 ui.set_width(440.0);
-                ui.heading("Keep your changes?");
-                ui.label("You have unsaved edits. Save them before continuing, or discard them explicitly.");
+                ui.heading("Manter suas alterações?");
+                ui.label("Você tem edições não salvas. Salve-as antes de continuar ou descarte-as.");
                 ui.add_space(theme::space::L);
                 ui.horizontal(|ui| {
-                    let save = ui.button("Save & continue");
+                    let save = ui.button("Salvar e continuar");
                     crate::ui_probe::record(ctx, "pending-save", save.rect);
                     if save.clicked() {
                         let indices: Vec<usize> = match &pending {
@@ -4553,10 +4553,10 @@ impl NotesApp {
                             self.pending = None; self.run_pending(next, ctx);
                         }
                     }
-                    let discard = ui.button("Discard");
+                    let discard = ui.button("Descartar");
                     crate::ui_probe::record(ctx, "pending-discard", discard.rect);
                     if discard.clicked() { self.pending = None; self.run_pending(pending.clone(), ctx); }
-                    let cancel = ui.button("Cancel");
+                    let cancel = ui.button("Cancelar");
                     crate::ui_probe::record(ctx, "pending-cancel", cancel.rect);
                     if cancel.clicked() { self.pending = None; }
                 });
@@ -4581,7 +4581,7 @@ impl NotesApp {
             } else if !self.vault_manager.open {
                 if self.loading_root.take().is_some() {
                     self.loading = None;
-                    self.status = "Ready".into();
+                    self.status = "Pronto".into();
                 }
                 self.focus_editor();
             }
