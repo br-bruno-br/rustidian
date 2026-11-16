@@ -11,6 +11,8 @@ pub(crate) struct EditorPreferences {
     /// Download images that notes name by web address. Off by default: opening a note must not
     /// call a server the note names.
     pub remote_images: bool,
+    /// Sublinhar palavras desconhecidas (R10). Vale só quando o dicionario esta instalado.
+    pub spellcheck: bool,
 }
 
 impl Default for EditorPreferences {
@@ -22,6 +24,7 @@ impl Default for EditorPreferences {
             inline_title: true,
             readable_line_length: true,
             remote_images: false,
+            spellcheck: true,
         }
     }
 }
@@ -92,7 +95,7 @@ impl Page {
             }
             Self::Interface => "interface zoom",
             Self::Editor => {
-                "editor editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load"
+                "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load"
             }
             Self::Files => "files and links automatically update move folder",
             Self::Hotkeys => "hotkeys keyboard shortcuts commands",
@@ -171,6 +174,10 @@ impl NotesApp {
             );
         });
         ui.add_space(crate::theme::space::XL);
+        ui.strong("Corretor ortográfico");
+        ui.add_space(crate::theme::space::S);
+        changed |= self.spelling_settings(ui);
+        ui.add_space(crate::theme::space::XL);
         ui.strong("Saving");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
@@ -181,6 +188,58 @@ impl NotesApp {
                 "settings-autosave",
                 &mut self.autosave_enabled,
             );
+        });
+        changed
+    }
+
+    /// O corretor ortografico: liga/desliga e o dicionario pt-BR (baixado uma vez, fora do binario).
+    fn spelling_settings(&mut self, ui: &mut egui::Ui) -> bool {
+        use rustidian::spell::Status;
+        let mut changed = false;
+        group(ui, |ui| {
+            changed |= toggle(
+                ui,
+                "Corrigir ortografia (pt-BR)",
+                "Sublinha as palavras que o dicionário não conhece. Só em prosa: front matter, código, matemática, links e números ficam de fora.",
+                "settings-spellcheck",
+                &mut self.editor_preferences.spellcheck,
+            );
+            ui.separator();
+            let spelling = &self.editor.spelling;
+            let installed = spelling.is_installed();
+            let status = spelling.status().clone();
+            let description = match (&status, &spelling.message) {
+                (_, Some(error)) => format!("Não deu certo: {error}"),
+                (Status::Downloading, _) => "Baixando o dicionário…".to_string(),
+                (Status::Loading, _) => "Carregando o dicionário…".to_string(),
+                (Status::Ready, _) => {
+                    "Instalado (VERO, do LibreOffice). Fica na pasta de dados do app, fora do programa.".to_string()
+                }
+                _ if installed => "Instalado. Ligue o corretor para usar.".to_string(),
+                _ => "Não instalado. São uns 5 MB, baixados uma vez do repositório do LibreOffice e conferidos por sha256.".to_string(),
+            };
+            let can_download =
+                !installed && !matches!(status, Status::Downloading | Status::Loading);
+            let retry = installed && self.editor.spelling.message.is_some();
+            row(ui, "Dicionário pt-BR", &description, |ui| {
+                if can_download || retry {
+                    let label = if retry {
+                        "Tentar de novo"
+                    } else {
+                        "Baixar dicionário pt-BR"
+                    };
+                    let response = ui.button(label);
+                    crate::ui_probe::record(
+                        ui.ctx(),
+                        "settings-spellcheck-download",
+                        response.rect,
+                    );
+                    if response.clicked() {
+                        self.editor.spelling.start_download();
+                    }
+                }
+                false
+            });
         });
         changed
     }
