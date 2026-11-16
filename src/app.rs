@@ -4663,17 +4663,17 @@ impl NotesApp {
             return;
         }
         let title = match dialog {
-            Dialog::QuickOpen => "Open a file",
-            Dialog::NewFolder => "New folder",
-            Dialog::SaveCopy => "Save a copy",
-            Dialog::OpenVault => "Open vault",
-            Dialog::Commands => "Command palette",
-            Dialog::RenameNote => "Rename or move",
-            Dialog::TrashNote => "Move to Trash?",
-            Dialog::AddProperty => "Add property",
-            Dialog::BookmarkTitle => "Edit bookmark title",
-            Dialog::Settings => "Settings",
-            Dialog::InsertTemplate => "Insert template",
+            Dialog::QuickOpen => "Abrir um arquivo",
+            Dialog::NewFolder => "Nova pasta",
+            Dialog::SaveCopy => "Salvar uma cópia",
+            Dialog::OpenVault => "Abrir cofre",
+            Dialog::Commands => "Paleta de comandos",
+            Dialog::RenameNote => "Renomear ou mover",
+            Dialog::TrashNote => "Mover para a Lixeira?",
+            Dialog::AddProperty => "Adicionar propriedade",
+            Dialog::BookmarkTitle => "Editar título do favorito",
+            Dialog::Settings => "Configurações",
+            Dialog::InsertTemplate => "Inserir modelo",
         };
         let mut close = false;
         let mut submit = false;
@@ -4722,28 +4722,28 @@ impl NotesApp {
                 500.0
             });
             if dialog != Dialog::Commands {
-                close |= theme::dialog_header(ui, title, "Close dialog").clicked();
+                close |= theme::dialog_header(ui, title, "Fechar diálogo").clicked();
                 ui.add_space(theme::space::S);
             }
             if dialog == Dialog::NewFolder && let Some(parent) = &self.dialog_path {
                 let location = if parent.as_os_str().is_empty() {
-                    "Vault root".to_owned()
+                    "Raiz do cofre".to_owned()
                 } else {
                     parent.display().to_string()
                 };
-                let label = ui.label(RichText::new(format!("Location: {location}")).weak());
+                let label = ui.label(RichText::new(format!("Local: {location}")).weak());
                 crate::ui_probe::record(ui.ctx(), format!("folder-create-location:{}", parent.display()), label.rect);
             }
             let hint = match dialog {
-                Dialog::QuickOpen => "Find a file…",
-                Dialog::SaveCopy => "Folder/Note.md",
-                Dialog::NewFolder if self.dialog_path.is_some() => "New folder",
-                Dialog::NewFolder => "Folder/New folder",
-                Dialog::OpenVault => "/path/to/your/vault",
-                Dialog::Commands => "Select a command…",
-                Dialog::Settings => "Search settings and shortcuts…",
-                Dialog::InsertTemplate => "Search templates…",
-                Dialog::BookmarkTitle => "Leave blank to use the file name",
+                Dialog::QuickOpen => "Buscar um arquivo…",
+                Dialog::SaveCopy => "Pasta/Nota.md",
+                Dialog::NewFolder if self.dialog_path.is_some() => "Nova pasta",
+                Dialog::NewFolder => "Pasta/Nova pasta",
+                Dialog::OpenVault => "/caminho/para/seu/cofre",
+                Dialog::Commands => "Selecione um comando…",
+                Dialog::Settings => "Buscar configurações e atalhos…",
+                Dialog::InsertTemplate => "Buscar modelos…",
+                Dialog::BookmarkTitle => "Deixe em branco para usar o nome do arquivo",
                 Dialog::RenameNote
                     if self.vault.as_ref().is_some_and(|vault| {
                         self.dialog_path
@@ -4751,7 +4751,7 @@ impl NotesApp {
                             .is_some_and(|path| vault.folders.contains(path))
                     }) =>
                 {
-                    "Folder/New name"
+                    "Pasta/Novo nome"
                 }
                 Dialog::RenameNote
                     if self
@@ -4759,10 +4759,10 @@ impl NotesApp {
                         .get(self.active)
                         .is_some_and(|tab| tab.document.is_image()) =>
                 {
-                    "Folder/New filename"
+                    "Pasta/Novo nome de arquivo"
                 }
-                Dialog::RenameNote | Dialog::TrashNote => "Folder/Note.md",
-                Dialog::AddProperty => "Property name",
+                Dialog::RenameNote | Dialog::TrashNote => "Pasta/Nota.md",
+                Dialog::AddProperty => "Nome da propriedade",
             };
             let input_id = ui.make_persistent_id(("dialog-input", title));
             let focus_settled = ui.memory(|memory| {
