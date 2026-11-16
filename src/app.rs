@@ -1900,7 +1900,7 @@ impl NotesApp {
                             .get(self.active)
                             .is_some_and(|tab| tab.view == View::Graph),
                     )
-                    .on_disabled_hover_text("Open a vault first.")
+                    .on_disabled_hover_text("Abra um cofre primeiro.")
                 });
                 if graph.inner.clicked() {
                     self.open_global_graph();
@@ -1929,7 +1929,7 @@ impl NotesApp {
                     if self.editable_note() {
                         self.ask(Dialog::InsertTemplate);
                     } else {
-                        self.status = "Open a note to insert a template.".into();
+                        self.status = "Abra uma nota para inserir um modelo.".into();
                     }
                 }
                 ui.allocate_ui_with_layout(
@@ -1983,8 +1983,8 @@ impl NotesApp {
 
     fn start_open_picker(&mut self, kind: rustidian::native_picker::Kind) {
         let title = match kind {
-            rustidian::native_picker::Kind::File => "Open file",
-            rustidian::native_picker::Kind::Folder => "Open folder",
+            rustidian::native_picker::Kind::File => "Abrir arquivo",
+            rustidian::native_picker::Kind::Folder => "Abrir pasta",
         };
         match self.open_picker.start(
             kind,
@@ -2012,7 +2012,7 @@ impl NotesApp {
             Kind::File => (|| {
                 let absolute = path
                     .canonicalize()
-                    .map_err(|error| format!("Cannot open {}: {error}", path.display()))?;
+                    .map_err(|error| format!("Não foi possível abrir {}: {error}", path.display()))?;
                 let current = self.vault.as_ref().map(|vault| vault.root.as_path());
                 let target =
                     if let Some(current) = current.filter(|root| absolute.starts_with(root)) {
@@ -2025,7 +2025,7 @@ impl NotesApp {
                         vaults::resolve_input(&absolute, default.as_deref(), roots)?
                     };
                 if target.1.is_none() {
-                    return Err("Choose an existing Markdown, text or source-code file.".into());
+                    return Err("Escolha um arquivo Markdown, de texto ou de código-fonte que já exista.".into());
                 }
                 Ok(target)
             })(),
@@ -2036,7 +2036,7 @@ impl NotesApp {
     /// notes already open stay open.
     fn open_guest_tab(&mut self, file: &Path) {
         let Ok(absolute) = file.canonicalize() else {
-            self.error = Some(format!("Cannot open {}", file.display()));
+            self.error = Some(format!("Não foi possível abrir {}", file.display()));
             return;
         };
         if let Some(index) = self
