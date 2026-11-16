@@ -29,11 +29,11 @@ pub fn frontmatter(text: &str) -> Result<Option<Frontmatter>, String> {
             let mut options = serde_saphyr::Options::default();
             options.strict_booleans = true;
             let value: Value = serde_saphyr::from_str_with_options(yaml, options)
-                .map_err(|error| format!("Invalid YAML properties: {error}"))?;
+                .map_err(|error| format!("Propriedades YAML inválidas: {error}"))?;
             let values = match value {
                 Value::Mapping(values) => values,
                 Value::Null => Mapping::new(),
-                _ => return Err("Properties must be a YAML mapping.".into()),
+                _ => return Err("As propriedades devem ser um mapeamento YAML.".into()),
             };
             return Ok(Some(Frontmatter {
                 range: 0..offset + line.len(),
@@ -42,13 +42,13 @@ pub fn frontmatter(text: &str) -> Result<Option<Frontmatter>, String> {
         }
         offset += line.len();
     }
-    Err("The opening properties block has no closing --- line.".into())
+    Err("O bloco de propriedades iniciado não tem a linha --- de fechamento.".into())
 }
 
 pub fn set_property(text: &mut String, name: &str, value: Value) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() || name.contains(['\r', '\n']) {
-        return Err("Use a nonempty property name on one line.".into());
+        return Err("Use um nome de propriedade não vazio, em uma só linha.".into());
     }
     let existing = frontmatter(text)?;
     let (range, mut values) = existing.map_or((0..0, Mapping::new()), |properties| {
