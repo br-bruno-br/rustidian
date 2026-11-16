@@ -317,7 +317,7 @@ pub fn picker(ui: &mut egui::Ui, selected: &mut Palette, dark: bool) -> bool {
                     ui.painter().text(
                         egui::pos2(rect.center().x, rect.top() + 128.0),
                         egui::Align2::CENTER_CENTER,
-                        if active { "Selected" } else { "Use palette" },
+                        if active { "Selecionada" } else { "Usar paleta" },
                         FontId::proportional(12.0),
                         accent,
                     );
