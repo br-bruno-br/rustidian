@@ -150,6 +150,8 @@ pub struct NotesApp {
     refresh_required: bool,
     /// Notes the last full index did not find, kept until a second index confirms they are gone.
     doubtful_missing: std::collections::BTreeSet<PathBuf>,
+    /// The tab the last measured frame was drawn on (`RUSTIDIAN_PERF`).
+    perf_tab: Option<u64>,
     loading_root: Option<PathBuf>,
     startup_document: Option<PathBuf>,
     find: crate::editor_ui::Find,
@@ -269,6 +271,7 @@ impl NotesApp {
             refresh_paths: Default::default(),
             refresh_required: false,
             doubtful_missing: Default::default(),
+            perf_tab: None,
             loading_root: None,
             startup_document,
             find: Default::default(),
@@ -6358,6 +6361,9 @@ impl eframe::App for NotesApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_started = Instant::now();
+        // A frame that starts on another tab than the last one is a tab switch.
+        let switched_tab = rustidian::perf::enabled()
+            && self.perf_tab != self.tabs.get(self.active).map(Tab::id);
         let ctx = ui.ctx().clone();
         // Only an agent reads the context file, so a vault without one gets no
         // `.rustidian` folder (on 3 Nov it appeared in ~/Desktop and changed notes
@@ -6578,6 +6584,20 @@ impl eframe::App for NotesApp {
             self.save(self.active);
         }
         crate::ui_probe::frame_time(&ctx, frame_started);
+        if rustidian::perf::enabled() {
+            let size = || self.vault.as_ref().map(Vault::perf_size);
+            let elapsed = frame_started.elapsed();
+            if switched_tab {
+                // The first tab of the session is not a switch.
+                if self.perf_tab.is_some() {
+                    rustidian::perf::record("trocar_aba", elapsed, size());
+                }
+                self.perf_tab = self.tabs.get(self.active).map(Tab::id);
+            }
+            if elapsed >= rustidian::perf::SLOW_FRAME {
+                rustidian::perf::record("quadro_lento", elapsed, size());
+            }
+        }
         if frame_started.elapsed() > Duration::from_millis(300) {
             eprintln!(
                 "slow: a whole frame took {} ms (active note {} bytes)",

@@ -399,8 +399,18 @@ impl Vault {
             names: HashMap::new(),
             incoming: std::sync::OnceLock::new(),
         };
+        let timer = crate::perf::start();
         vault.refresh_cancellable(cancelled, &photo)?;
+        timer.finish("abrir_cofre", || Some(vault.perf_size()));
         Ok(vault)
+    }
+
+    /// The size that goes with a slowness measurement (`perf`): indexed notes and their text.
+    pub fn perf_size(&self) -> crate::perf::Size {
+        (
+            self.notes.len(),
+            self.notes.iter().map(|note| note.text.len() as u64).sum(),
+        )
     }
 
     pub fn name(&self) -> String {
@@ -710,6 +720,13 @@ impl Vault {
     }
 
     pub fn save(&mut self, document: &mut Document) -> Result<()> {
+        let timer = crate::perf::start();
+        let result = self.save_unmeasured(document);
+        timer.finish("salvar", || Some(self.perf_size()));
+        result
+    }
+
+    fn save_unmeasured(&mut self, document: &mut Document) -> Result<()> {
         if document.is_image() {
             return Err("Imagens não podem ser editadas como Markdown.".into());
         }
@@ -753,11 +770,13 @@ impl Vault {
     /// Record that `text`, written by `save` or `PendingSave::write`, is now the
     /// document's saved state.
     pub fn commit_save(&mut self, document: &mut Document, text: String) {
+        let timer = crate::perf::start();
         document.original = Some(text.clone());
         document.saved_revision = Document::next_revision();
         if !self.guests.contains(&document.path) {
             self.index_note(document.path.clone(), text);
         }
+        timer.finish("indexar_nota", || Some(self.perf_size()));
     }
 
     /// Where a document is on disk: inside the vault by its relative path, or
@@ -1047,12 +1066,15 @@ impl Vault {
     }
 
     pub fn query(&self, query: &str) -> Result<Vec<&Note>> {
+        let timer = crate::perf::start();
         let query = crate::query::Query::parse(query)?;
-        Ok(self
+        let found = self
             .notes
             .iter()
             .filter(|note| query.matches(note))
-            .collect())
+            .collect();
+        timer.finish("buscar", || Some(self.perf_size()));
+        Ok(found)
     }
 
     pub fn resolve(&self, from: &Path, target: &str) -> Option<PathBuf> {
@@ -1312,6 +1334,13 @@ impl PendingSave {
     /// Atomically replaces the note, keeping its permissions, unless it no longer
     /// holds the text it was loaded or last saved with.
     pub fn write(&self) -> Result<()> {
+        let timer = crate::perf::start();
+        let result = self.write_unmeasured();
+        timer.finish("gravar_nota", || None);
+        result
+    }
+
+    fn write_unmeasured(&self) -> Result<()> {
         // The sync cycle and the editor take turns on the vault's files (see `sync::gate`).
         let _gate = crate::sync::gate::global().hold();
         let current = fs::read_to_string(&self.absolute).map_err(|e| {

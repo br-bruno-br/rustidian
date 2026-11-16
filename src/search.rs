@@ -81,7 +81,10 @@ impl FileMatcher {
     }
 
     pub fn rank(&mut self, query: &str, limit: usize) -> Vec<PathBuf> {
-        self.rank_matching(query, limit, |_| true)
+        let timer = crate::perf::start();
+        let ranked = self.rank_matching(query, limit, |_| true);
+        timer.finish("buscar_arquivo", || None);
+        ranked
     }
 
     pub fn rank_folders(&mut self, query: &str, limit: usize) -> Vec<PathBuf> {
