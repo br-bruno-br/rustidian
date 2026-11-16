@@ -80,7 +80,7 @@ fn varrer_dir(cofre: &Path, rel_dir: &str, v: &mut Varredura) -> io::Result<()> 
         if !tipo.is_file() {
             continue;
         }
-        if nome.starts_with(PREFIXO_TEMP) {
+        if eh_temp_nosso(&nome) {
             limpar_temp_orfao(&entrada.path());
             continue;
         }
@@ -115,6 +115,14 @@ fn varrer_dir(cofre: &Path, rel_dir: &str, v: &mut Varredura) -> io::Result<()> 
         }
     }
     Ok(())
+}
+
+/// Só o formato exato que `nome_temp` cria (`.nota-sync-<16 hex>.tmp`) é apagado como órfão.
+/// Uma nota do dono que só comece com o prefixo nunca é apagada.
+fn eh_temp_nosso(nome: &str) -> bool {
+    nome.strip_prefix(PREFIXO_TEMP)
+        .and_then(|r| r.strip_suffix(".tmp"))
+        .is_some_and(|hex| hex.len() == 16 && hex.bytes().all(|c| c.is_ascii_hexdigit()))
 }
 
 fn limpar_temp_orfao(path: &Path) {
@@ -441,5 +449,13 @@ mod testes {
         assert_ne!(alvo, alvo2);
         assert_eq!(fs::read(c.join(&alvo)).unwrap(), b"um");
         assert_eq!(fs::read(c.join(&alvo2)).unwrap(), b"dois");
+    }
+
+    #[test]
+    fn so_o_temporario_exato_e_reconhecido_como_nosso() {
+        assert!(super::eh_temp_nosso(".nota-sync-0123456789abcdef.tmp"));
+        assert!(!super::eh_temp_nosso(".nota-sync-ideias.md"));
+        assert!(!super::eh_temp_nosso(".nota-sync-0123456789abcdef.md"));
+        assert!(!super::eh_temp_nosso(".nota-sync-xyz.tmp"));
     }
 }
