@@ -5138,9 +5138,15 @@ impl NotesApp {
         let active = self.tabs.get(self.active).map(Tab::id);
         let mut removed = Vec::new();
         let mut failures = Vec::new();
+        let in_vault = self.sync_trash_in_vault();
         if let Some(vault) = &mut self.vault {
             for path in paths {
-                match vault.trash_entry(&path) {
+                let moved = if in_vault {
+                    vault.trash_entry_in_vault(&path)
+                } else {
+                    vault.trash_entry(&path)
+                };
+                match moved {
                     Ok(()) => removed.push(path),
                     Err(error) => failures.push(format!("{}: {error}", path.display())),
                 }
@@ -5156,7 +5162,18 @@ impl NotesApp {
         } else {
             self.new_tab();
         }
-        self.status = format!("Moved {} items to system Trash", removed.len());
+        self.status = format!(
+            "Moved {} items to {}",
+            removed.len(),
+            if in_vault {
+                "the vault trash"
+            } else {
+                "system Trash"
+            }
+        );
+        if in_vault {
+            self.sync.notify_saved();
+        }
         self.error = (!failures.is_empty())
             .then(|| format!("Some items were not deleted: {}", failures.join("; ")));
         self.refresh_file_views();
@@ -5405,10 +5422,18 @@ impl NotesApp {
                         vault.rename_note(plan).map(Some)
                     })
             } else {
+                let in_vault = self.sync_trash_in_vault();
                 self.vault
                     .as_mut()
                     .ok_or_else(|| "Open a vault first.".to_owned())
-                    .and_then(|vault| vault.trash_entry(&source).map(|()| None))
+                    .and_then(|vault| {
+                        if in_vault {
+                            vault.trash_entry_in_vault(&source)
+                        } else {
+                            vault.trash_entry(&source)
+                        }
+                        .map(|()| None)
+                    })
             };
             match result {
                 Ok(Some(outcome)) => {
@@ -5452,7 +5477,19 @@ impl NotesApp {
                             .position(|tab| Some(tab.id()) == active_id)
                             .unwrap_or(0);
                     }
-                    self.status = format!("Moved {} to system Trash", source.display());
+                    let in_vault = self.sync_trash_in_vault();
+                    self.status = format!(
+                        "Moved {} to {}",
+                        source.display(),
+                        if in_vault {
+                            "the vault trash"
+                        } else {
+                            "system Trash"
+                        }
+                    );
+                    if in_vault {
+                        self.sync.notify_saved();
+                    }
                     self.error = None;
                 }
                 Err(error) => {
@@ -6169,6 +6206,7 @@ impl eframe::App for NotesApp {
                     ui.label(RichText::new(&self.status).size(11.0).weak());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(theme::space::M);
+                        self.sync_status_label(ui);
                         if self
                             .tabs
                             .get(self.active)
@@ -6206,7 +6244,6 @@ impl eframe::App for NotesApp {
             && let Some(error) = self.error.clone()
         {
             egui::Area::new(egui::Id::unique("error"))
-                        self.sync_status_label(ui);
                 .order(egui::Order::Foreground)
                 .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 44.0))
                 .show(&ctx, |ui| {
@@ -6245,6 +6282,7 @@ impl eframe::App for NotesApp {
                     });
                 });
         }
+        self.sync_window(&ctx);
         self.ribbon(ui);
         self.sidebar(ui);
         self.details(ui);
@@ -6282,7 +6320,6 @@ impl eframe::App for NotesApp {
             self.save(self.active);
         }
         crate::ui_probe::frame_time(&ctx, frame_started);
-        self.sync_window(&ctx);
         if frame_started.elapsed() > Duration::from_millis(300) {
             eprintln!(
                 "slow: a whole frame took {} ms (active note {} bytes)",
