@@ -6129,7 +6129,7 @@ impl NotesApp {
             .as_ref()
             .is_some_and(|(id, source)| *id == tab.id() && source == &tab.document.text)
         {
-            self.error = Some("This note changed while the template chooser was open. Close and reopen the chooser to choose an insertion point.".into());
+            self.error = Some("Esta nota mudou enquanto o seletor de modelos estava aberto. Feche e reabra o seletor para escolher um ponto de inserção.".into());
             return false;
         }
         let Some(vault) = &self.vault else {
@@ -6189,18 +6189,18 @@ impl eframe::App for NotesApp {
                 Ok(result) => Some(result),
                 Err(mpsc::TryRecvError::Empty) => None,
                 Err(mpsc::TryRecvError::Disconnected) => Some(Err(
-                    "The file-manager request was interrupted. Try again.".into(),
+                    "O pedido ao gerenciador de arquivos foi interrompido. Tente de novo.".into(),
                 )),
             });
         if let Some(result) = result {
             self.reveal_result = None;
             match result {
-                Ok(()) => self.status = "Revealed in system file manager".into(),
+                Ok(()) => self.status = "Mostrado no gerenciador de arquivos do sistema".into(),
                 Err(error) => {
                     self.status.clear();
-                    eprintln!("File-manager request failed: {error}");
+                    eprintln!("O pedido ao gerenciador de arquivos falhou: {error}");
                     self.error = Some(
-                        "Could not reveal this item in the system file manager. Try again.".into(),
+                        "Não foi possível mostrar este item no gerenciador de arquivos do sistema. Tente de novo.".into(),
                     );
                 }
             }
