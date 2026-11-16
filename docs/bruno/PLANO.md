@@ -35,6 +35,16 @@ Este repositório é **público**. Aqui entra só código e documentação. Nunc
 - **Blob:** versão(1) ‖ nonce(24) ‖ XChaCha20-Poly1305(k_conteudo, AAD = id ‖ versão do formato, texto = caminho_len(u32) ‖ caminho ‖ conteúdo). O servidor vê só o id e o tamanho.
 - **Teste obrigatório:** byte trocado, AAD trocado, frase errada e K errada falham, e o round-trip funciona com 0 bytes, 1 byte e 10 MB.
 
+#### Desvios da R3
+- **`id_de` devolve `Result<IdArquivo, Erro>`**, não `IdArquivo`: o caminho passa por `normalizar`, que recusa `..`, absoluto e vazio, e não dá para esconder isso num retorno sem erro.
+- **Formato do `cofre.chave` v1** (o PLANO só dizia "versionado"): `versão(1) ‖ m_kib(u32 LE) ‖ t(u32 LE) ‖ p(u32 LE) ‖ sal(16) ‖ nonce(24) ‖ cifra de K + tag(16)`, 101 bytes. O cabeçalho (29 bytes) entra como AAD, então trocar um parâmetro invalida o arquivo. Ao ler, a crate recusa parâmetros acima de 1 GiB de memória, t > 64 ou p > 64 (`Adulterado`), para um arquivo adulterado não forçar alocação enorme.
+- **Frase em NFC** antes do Argon2id, para teclados e sistemas que normalizam Unicode de jeitos diferentes abrirem o mesmo cofre.
+- **API a mais:** `ChaveCofre::de_bytes(&[u8])` e `ChaveCofre::bytes() -> Zeroizing<[u8; 32]>`, para guardar K no cofre do sistema (Credential Manager, Keystore) sem passar pela frase. Tamanho diferente de 32 vira `Erro::Adulterado` (não criei variante nova). Também é público `TAMANHO_MAXIMO` (50 MiB).
+- **Limite de 50 MiB vale para o conteúdo.** O blob fica até ~100 bytes maior (versão, nonce, tag, caminho): o servidor e o `nota-sync` devem aceitar essa folga ao aplicar o limite de blob. `decifrar` recusa blob acima de conteúdo máximo + 4 KiB de caminho + sobrecarga (`TamanhoExcedido`) antes de alocar.
+- **Caminho:** máximo de 4096 bytes, sem NUL, sem letra de unidade (`C:`); barras repetidas e `.` somem. A crate **não** dobra maiúsculas/minúsculas: dois arquivos que só diferem na caixa têm ids diferentes (conflito no Windows é problema do `nota-sync`).
+- **Frase errada e `cofre.chave` adulterado:** autenticação falhou com os parâmetros intactos é `FraseErrada`; tamanho errado, parâmetros fora do limite e sal/nonce trocados chegam como `FraseErrada` ou `Adulterado` (sem como distinguir de frase errada quando só a cifra mudou). Versão desconhecida é `FormatoDesconhecido`.
+- **Vetor fixo conferido por implementação independente** (HKDF, HMAC e XChaCha20-Poly1305 refeitos em Python com HChaCha20 próprio): id e blob batem byte a byte. O vetor do `cofre.chave` (Argon2id) não foi conferido fora do Rust.
+
 ### Protocolo de sync (`nota-sync` ↔ `nota-servidor`)
 - **Servidor:** tabela `itens(id PK, versao INTEGER, hash_blob TEXT, apagado INTEGER, seq INTEGER)`, blobs em `blobs/<sha256>` e um contador global `seq`. Só escuta no IP da Tailscale (100.x). Autenticação por `Authorization: Bearer <token do aparelho>`, com o servidor guardando só o SHA-256 dos tokens. Limite de tamanho por blob de 50 MB.
 - **Rotas:** `GET /v1/mudancas?desde=<seq>`, `GET /v1/blob/<hash>`, `PUT /v1/blob` (corpo = blob; responde o hash) e `POST /v1/item/<id> {versao_base, hash_blob, apagado}`. A última responde 200 com a nova versão se `versao_base` for a atual, e **409** se não for.
