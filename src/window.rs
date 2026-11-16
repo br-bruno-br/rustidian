@@ -61,12 +61,12 @@ pub fn quit_dialog(ctx: &egui::Context) -> Option<bool> {
         .show(ctx, |ui| {
             theme::dialog_style(ui);
             ui.set_width(440.0);
-            ui.heading(format!("Quit {}?", rustidian::APP_NAME));
+            ui.heading(format!("Sair do {}?", rustidian::APP_NAME));
             ui.add_space(crate::theme::space::L);
             ui.horizontal(|ui| {
-                let quit = ui.button("Quit");
+                let quit = ui.button("Sair");
                 crate::ui_probe::record(ctx, "quit-confirm", quit.rect);
-                let cancel = ui.button("Cancel");
+                let cancel = ui.button("Cancelar");
                 crate::ui_probe::record(ctx, "quit-cancel", cancel.rect);
                 // Keys answer the question; nothing behind it keeps the
                 // keyboard. This runs after the frame's other widgets, so
@@ -368,7 +368,7 @@ pub fn title_bar(
         .show(ui, |ui| {
             theme::menu_style(ui);
             ui.horizontal(|ui| {
-                let menu = ui.menu_button("File", |ui| {
+                let menu = ui.menu_button("Arquivo", |ui| {
                     theme::menu_style(ui);
                     ui.set_min_width(240.0);
                     for (kind, label, shortcut, probe) in [
@@ -387,7 +387,7 @@ pub fn title_bar(
                     ] {
                         let button = ui.add_enabled(
                             file_actions_enabled,
-                            egui::Button::new(label).shortcut_text(shortcut),
+                            egui::Button::new(commands::label(label)).shortcut_text(shortcut),
                         );
                         crate::ui_probe::record(ui.ctx(), probe, button.rect);
                         if button.clicked() {
@@ -396,7 +396,7 @@ pub fn title_bar(
                         }
                     }
                     if !file_actions_enabled {
-                        ui.label("Finish the current dialog before opening another item.");
+                        ui.label("Termine o diálogo atual antes de abrir outro item.");
                     }
                 });
                 crate::ui_probe::record(ui.ctx(), "file-menu", menu.response.rect);
@@ -497,9 +497,11 @@ fn control(ui: &mut egui::Ui, icon: Icon, label: &str, close: bool) -> egui::Res
         ui,
         egui::Rect::from_center_size(rect.center(), egui::vec2(14.0, 14.0)),
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, true, rustidian::i18n::t(label))
+    });
     crate::ui_probe::record(ui.ctx(), format!("window:{label}"), rect);
-    response.on_hover_text(label)
+    response.on_hover_text(rustidian::i18n::t(label))
 }
 
 fn resize_edges(ui: &egui::Ui) {
