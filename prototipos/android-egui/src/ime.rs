@@ -24,10 +24,28 @@ pub enum EventoIme {
     LimparComposicao,
     /// `ImeEvent::DeleteSurrounding { before_chars, after_chars: 0 }`.
     ApagarAntes(usize),
-    /// `ImeEvent::Commit(texto)`.
+    /// `ImeEvent::Commit(texto)`. Nunca contém `\n`: a quebra de linha vira [`EventoIme::Enter`],
+    /// porque o `TextEdit` do egui ignora `Commit("\n")` e só aceita a tecla Enter.
     Confirmar(String),
+    /// Tecla Enter (nova linha).
+    Enter,
     /// `ImeEvent::Preedit` com o texto ainda em composição.
     Compor(String),
+}
+
+/// O GameTextInput devolve os índices em bytes do UTF-8 *modificado* do Java, onde um caractere
+/// fora do plano básico (emoji) ocupa 6 bytes (par substituto) e não 4. Converte para o índice
+/// em bytes do `String` do Rust.
+pub fn mutf8_para_utf8(texto: &str, indice: usize) -> usize {
+    let (mut mutf8, mut utf8) = (0usize, 0usize);
+    for c in texto.chars() {
+        if mutf8 >= indice {
+            break;
+        }
+        mutf8 += if (c as u32) > 0xFFFF { 6 } else { c.len_utf8() };
+        utf8 += c.len_utf8();
+    }
+    utf8
 }
 
 /// Separa o texto em (confirmado, em composição). O confirmado é o texto sem a região
@@ -71,8 +89,14 @@ pub fn traduzir(antes: &EstadoIme, depois: &EstadoIme) -> Vec<EventoIme> {
         eventos.push(EventoIme::ApagarAntes(apagar));
     }
     let novo: String = conf1.chars().skip(comum).collect();
-    if !novo.is_empty() {
-        eventos.push(EventoIme::Confirmar(novo));
+    for (i, trecho) in novo.split('\n').enumerate() {
+        if i > 0 {
+            eventos.push(EventoIme::Enter);
+        }
+        let trecho = trecho.trim_end_matches('\r');
+        if !trecho.is_empty() {
+            eventos.push(EventoIme::Confirmar(trecho.to_owned()));
+        }
     }
     if !comp1.is_empty() {
         eventos.push(EventoIme::Compor(comp1));
@@ -184,5 +208,44 @@ mod tests {
                 EventoIme::Compor("mundo".into())
             ]
         );
+    }
+
+    #[test]
+    fn quebra_de_linha_vira_enter() {
+        let a = e("oi", None);
+        let b = e("oi\n", None);
+        assert_eq!(traduzir(&a, &b), vec![EventoIme::Enter]);
+        let c = e("oi\nja", None);
+        assert_eq!(traduzir(&b, &c), vec![EventoIme::Confirmar("ja".into())]);
+        let d = e("oi", None);
+        let f = e("oi a\nb", None);
+        assert_eq!(
+            traduzir(&d, &f),
+            vec![
+                EventoIme::Confirmar(" a".into()),
+                EventoIme::Enter,
+                EventoIme::Confirmar("b".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn emoji_e_um_caractere_so() {
+        let a = e("oi ", None);
+        let b = e("oi 😀", None);
+        assert_eq!(traduzir(&a, &b), vec![EventoIme::Confirmar("😀".into())]);
+        let c = e("oi ", None);
+        assert_eq!(traduzir(&b, &c), vec![EventoIme::ApagarAntes(1)]);
+    }
+
+    #[test]
+    fn indice_do_java_com_emoji_vira_indice_do_rust() {
+        // "a😀b": no Java 1 + 6 + 1 bytes; no Rust 1 + 4 + 1.
+        let t = "a😀b";
+        assert_eq!(mutf8_para_utf8(t, 0), 0);
+        assert_eq!(mutf8_para_utf8(t, 1), 1);
+        assert_eq!(mutf8_para_utf8(t, 7), 5);
+        assert_eq!(mutf8_para_utf8(t, 8), 6);
+        assert_eq!(mutf8_para_utf8("ação", 3), 3); // "ç" tem 2 bytes nos dois
     }
 }
