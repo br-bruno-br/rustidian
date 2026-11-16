@@ -2088,11 +2088,11 @@ impl NotesApp {
         self.ctx.request_repaint();
         if let Err(error) = self.write_session() {
             self.bookmarks = before;
-            self.status = "Bookmarks not saved".into();
-            self.error = Some(format!("Bookmark changes weren't saved. {error}"));
+            self.status = "Favoritos não salvos".into();
+            self.error = Some(format!("As alterações nos favoritos não foram salvas. {error}"));
             return false;
         }
-        self.status = "Bookmarks saved".into();
+        self.status = "Favoritos salvos".into();
         if !self.dirty() {
             self.error = None;
         }
@@ -2108,7 +2108,7 @@ impl NotesApp {
             Ok(true) => {
                 self.save_bookmarks(before);
             }
-            Ok(false) => self.status = "This file is already bookmarked".into(),
+            Ok(false) => self.status = "Este arquivo já está nos favoritos".into(),
             Err(error) => self.error = Some(error),
         }
         self.ctx.request_repaint();
@@ -2132,7 +2132,7 @@ impl NotesApp {
         visible_files: &mut Option<Vec<PathBuf>>,
     ) -> Option<PathBuf> {
         ui.add_space(theme::space::M);
-        ui.label(RichText::new("Bookmarks").size(12.0).strong().weak());
+        ui.label(RichText::new("Favoritos").size(12.0).strong().weak());
         ui.add_space(theme::space::S);
         let can_add = self
             .tabs
@@ -2140,7 +2140,7 @@ impl NotesApp {
             .is_some_and(|tab| !tab.document.is_blank());
         let add = ui.add_enabled(
             can_add,
-            egui::Button::new(RichText::new("Bookmark current file").size(13.0))
+            egui::Button::new(RichText::new("Favoritar o arquivo atual").size(13.0))
                 .frame_when_inactive(false),
         );
         crate::ui_probe::record(ui.ctx(), "bookmark-add-current", add.rect);
@@ -2154,7 +2154,7 @@ impl NotesApp {
         }
         ui.add_space(theme::space::S);
         if self.bookmarks.items.is_empty() {
-            ui.label(RichText::new("No bookmarks yet").small().weak());
+            ui.label(RichText::new("Nenhum favorito ainda").small().weak());
         }
         let mut open = None;
         let mut action = None;
@@ -2177,7 +2177,7 @@ impl NotesApp {
                     let label = if exists {
                         item.label()
                     } else {
-                        format!("{} (missing)", item.label())
+                        format!("{} (ausente)", item.label())
                     };
                     let response = crate::file_tree::file_row(ui, &item.path, &label, active)
                         .on_hover_text(item.path.display().to_string());
@@ -2190,10 +2190,10 @@ impl NotesApp {
                     response.context_menu(|ui| {
                         theme::menu_style(ui);
                         for (name, label, enabled) in [
-                            ("title", "Edit title…", true),
-                            ("up", "Move up", index > 0),
-                            ("down", "Move down", index + 1 < self.bookmarks.items.len()),
-                            ("remove", "Remove bookmark", true),
+                            ("title", "Editar título…", true),
+                            ("up", "Mover para cima", index > 0),
+                            ("down", "Mover para baixo", index + 1 < self.bookmarks.items.len()),
+                            ("remove", "Remover favorito", true),
                         ] {
                             let response = ui.add_enabled(enabled, egui::Button::new(label));
                             crate::ui_probe::record(
