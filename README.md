@@ -38,6 +38,10 @@ Fork do [Rustidian de Masih Moafi](https://github.com/MasihMoafi/rustidian) para
 | **Android** | Protótipos para escolher o toolkit que digita bem pelo Gboard (egui × Dioxus); roteiro em [docs/bruno/R7-TESTE.md](docs/bruno/R7-TESTE.md) |
 | **Interface em português** | Em andamento: menus, botões, configurações e mensagens em pt-BR |
 
+**Cofre grande e vigia confiável.** O índice incremental e a foto do índice (`index_photo`) abrem cofres de dezenas de milhares de notas sem reler tudo. O vigia de arquivos tem estas regras: uma nota que a varredura não achou só sai do índice depois de conferida duas vezes (sync que apaga e recria, ou varredura parcial, não a perdem); gravação do próprio app e arquivo temporário de editor externo (`.tmp`, `~`, `.swp`, `4913`) não pedem nova indexação; um par "apagada + criada" só vira renomeação quando é único e tem o mesmo texto não vazio. Nota `.md` acima de 8 MB fica fora do índice e o cofre abre com um aviso que a cita.
+
+**Medir lentidão (opcional).** Com a variável `RUSTIDIAN_PERF=<arquivo>` o app acrescenta ao arquivo uma linha JSON por ação: `abrir_cofre`, `salvar`, `indexar_nota`, `gravar_nota`, `buscar`, `buscar_arquivo`, `trocar_aba` e `quadro_lento` (quadro de tela acima de 50 ms). Cada linha traz `t` (ms desde 1970), `acao`, `ms` e, quando há cofre, `notas` e `bytes` (tamanho do cofre). Sem a variável não se abre arquivo nem se lê relógio: o custo é zero. Exemplo no PowerShell: `$env:RUSTIDIAN_PERF = "$env:TEMPustidian-perf.jsonl"; .	argeteleaseustidian.exe`.
+
 **Compilar no Windows:** `cargo build --release --bin rustidian` (MSVC); o executável sai em `target\release\rustidian.exe`. O plano completo e o estado de cada fatia estão em [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Créditos de terceiros em [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
 
 ---
