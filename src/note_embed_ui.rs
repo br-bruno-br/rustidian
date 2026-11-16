@@ -104,14 +104,14 @@ pub fn resolve(
     let target = target.split('|').next().unwrap_or(target);
     let path = vault
         .resolve(from, target)
-        .ok_or_else(|| format!("Note not found: {target}"))?;
+        .ok_or_else(|| format!("Nota não encontrada: {target}"))?;
     let full = text(vault, current_path, current_text, open, &path)
-        .ok_or_else(|| format!("Note not found: {target}"))?;
+        .ok_or_else(|| format!("Nota não encontrada: {target}"))?;
     let range = if let Some((_, fragment)) = target
         .split_once('#')
         .filter(|(_, fragment)| !fragment.is_empty())
     {
-        section(full, fragment).ok_or_else(|| format!("Heading or block not found: {fragment}"))?
+        section(full, fragment).ok_or_else(|| format!("Título ou bloco não encontrado: {fragment}"))?
     } else {
         0..full.len()
     };
@@ -198,7 +198,7 @@ impl<'a> Context<'a> {
                     });
                 }
                 if edit_source {
-                    let response = ui.small_button("Edit embed");
+                    let response = ui.small_button("Editar incorporação");
                     crate::ui_probe::record(
                         ui.ctx(),
                         format!("note-embed-edit:{}", embed.target),
@@ -222,12 +222,12 @@ impl<'a> Context<'a> {
             };
             let key = (source.path.clone(), source.range.clone());
             if self.stack.contains(&key) {
-                ui.weak(format!("Recursive embed: {}", embed.target));
+                ui.weak(format!("Incorporação recursiva: {}", embed.target));
                 crate::ui_probe::record(ui.ctx(), "note-embed-cycle", ui.min_rect());
                 return;
             }
             if self.stack.len() >= 8 {
-                ui.weak("Embed nesting limit reached");
+                ui.weak("Limite de aninhamento de incorporações atingido");
                 return;
             }
             self.stack.push(key);
@@ -256,16 +256,16 @@ impl<'a> Context<'a> {
                         self.open,
                         &source.path,
                     )
-                    .ok_or("The embedded note is no longer available.")?;
+                    .ok_or("A nota incorporada não está mais disponível.")?;
                     if full.get(source.range.clone()) != Some(source.text.as_str()) {
-                        return Err("The embedded note changed. Try the edit again.".to_owned());
+                        return Err("A nota incorporada mudou. Tente editar de novo.".to_owned());
                     }
                     let mut before = self.vault.read(&source.path)?;
                     let is_open = source.path == self.current.path
                         || self.open.iter().any(|(path, _)| *path == source.path);
                     if !is_open && before.text != full {
                         return Err(
-                            "The embedded note changed on disk. Reload it before editing.".into(),
+                            "A nota incorporada mudou no disco. Recarregue-a antes de editar.".into(),
                         );
                     }
                     before.text = full.into();

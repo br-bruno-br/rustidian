@@ -17,7 +17,7 @@ pub fn show(ui: &mut egui::Ui, absolute: &Path, id: egui::Id, scale: ImageScale)
         },
         Err(error) => {
             ui.centered_and_justified(|ui| {
-                ui.label(format!("Cannot open image: {error}"));
+                ui.label(format!("Não foi possível abrir a imagem: {error}"));
             });
             return;
         }
