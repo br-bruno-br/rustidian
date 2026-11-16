@@ -18,8 +18,10 @@ pub mod memoria;
 pub mod motor;
 pub mod protocolo;
 pub mod remoto;
+pub mod sincronizador;
 
 pub use erro::ErroSync;
 pub use http::{Config, RemotoHttp};
 pub use memoria::RemotoMemoria;
 pub use remoto::{ErroRemoto, Remoto};
+pub use sincronizador::{Opcoes, Relatorio, Sincronizador};
