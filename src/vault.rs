@@ -86,6 +86,37 @@ pub fn is_ignored_path(relative: &Path) -> bool {
     })
 }
 
+/// A file an editor or a sync tool leaves for a moment while saving: `note.md~`, `note.md.tmp`,
+/// `.note.md.swp`, `~$note.docx`, vim's `4913` probe, macOS's `note.md.sb-1f3a-x`. It never
+/// holds a note of its own, and the real file's own event follows it.
+pub fn is_editor_temporary(relative: &Path) -> bool {
+    let Some(name) = relative.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let extension = relative
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    name.ends_with('~')
+        || name.starts_with("~$")
+        || name.starts_with(".#")
+        || (name.len() > 2 && name.starts_with('#') && name.ends_with('#'))
+        || name.contains(".sb-")
+        || (relative.extension().is_none() && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()))
+        || extension.is_some_and(|extension| {
+            matches!(
+                extension.as_str(),
+                "tmp" | "temp" | "swp" | "swx" | "swo" | "part" | "crdownload" | "partial"
+            )
+        })
+}
+
+/// What the file watcher never needs to hear about: files the index skips and the editors'
+/// temporary files.
+pub fn is_watch_noise(relative: &Path) -> bool {
+    is_ignored_path(relative) || is_editor_temporary(relative)
+}
+
 #[derive(Clone, Debug)]
 pub struct Note {
     pub path: PathBuf,
@@ -853,6 +884,25 @@ impl Vault {
         }
     }
 
+    /// Whether the file at `relative` holds what Rustidian already has for it, as after its own
+    /// save, so that the change event it caused needs no work. `saved` is the text an open tab
+    /// saved there, for a file not in the index. Files the watcher ignores always hold it.
+    /// Anything else (a different text, a file that is gone or unreadable) is `false`.
+    pub fn holds_known_text(&self, relative: &Path, saved: Option<&str>) -> bool {
+        if is_watch_noise(relative) {
+            return true;
+        }
+        let Some(known) = self.note(relative).map(|note| note.text.as_str()).or(saved) else {
+            return false;
+        };
+        let absolute = self.root.join(relative);
+        // Same size first: it spares reading a big file that certainly changed.
+        if fs::metadata(&absolute).is_ok_and(|metadata| metadata.len() != known.len() as u64) {
+            return false;
+        }
+        fs::read(&absolute).is_ok_and(|bytes| bytes == known.as_bytes())
+    }
+
     /// The indexed note at `path`, found without scanning the notes.
     pub fn note(&self, path: &Path) -> Option<&Note> {
         self.notes.get(*self.paths.get(path)?)
@@ -865,6 +915,9 @@ impl Vault {
     pub fn refresh_changed(&mut self, paths: &[PathBuf]) -> Option<Vec<PathBuf>> {
         let mut changed = Vec::new();
         for path in paths {
+            if is_editor_temporary(path) {
+                continue;
+            }
             let index = *self.paths.get(path)?;
             let absolute = self.root.join(path);
             let metadata = fs::symlink_metadata(&absolute).ok()?;

@@ -521,7 +521,7 @@ impl NotesApp {
                                     || event.kind.is_remove())
                                     || !event.paths.iter().any(|path| {
                                         path.strip_prefix(&watch_root).is_ok_and(|relative| {
-                                            !rustidian::vault::is_ignored_path(relative)
+                                            !rustidian::vault::is_watch_noise(relative)
                                         })
                                     }))
                             {
@@ -610,7 +610,7 @@ impl NotesApp {
                             && self.vault.as_ref().is_some_and(|vault| {
                                 event.paths.iter().any(|path| {
                                     path.strip_prefix(&vault.root).is_ok_and(|relative| {
-                                        !rustidian::vault::is_ignored_path(relative)
+                                        !rustidian::vault::is_watch_noise(relative)
                                     })
                                 })
                             })
@@ -636,8 +636,8 @@ impl NotesApp {
                                 && let (Ok(from), Ok(to)) =
                                     (from.strip_prefix(&vault.root), to.strip_prefix(&vault.root))
                                 && from != to
-                                && !rustidian::vault::is_ignored_path(from)
-                                && !rustidian::vault::is_ignored_path(to)
+                                && !rustidian::vault::is_watch_noise(from)
+                                && !rustidian::vault::is_watch_noise(to)
                                 && from
                                     .components()
                                     .chain(to.components())
@@ -648,7 +648,7 @@ impl NotesApp {
                             for path in &event.paths {
                                 if let Ok(relative) = path.strip_prefix(&vault.root)
                                     && rustidian::vault::is_markdown(relative)
-                                    && !rustidian::vault::is_ignored_path(relative)
+                                    && !rustidian::vault::is_watch_noise(relative)
                                 {
                                     self.recovery_changed_paths.insert(relative.to_owned());
                                 }
@@ -661,7 +661,17 @@ impl NotesApp {
                         {
                             ctx.forget_image(&format!("file://{}", path.display()));
                         }
-                        self.refresh_paths.extend(event.paths);
+                        // An editor's temporary file says nothing about the vault; its real
+                        // file has an event of its own.
+                        let root = self.vault.as_ref().map(|vault| vault.root.clone());
+                        self.refresh_paths
+                            .extend(event.paths.into_iter().filter(|path| {
+                                root.as_ref()
+                                    .and_then(|root| path.strip_prefix(root).ok())
+                                    .is_none_or(|relative| {
+                                        !rustidian::vault::is_editor_temporary(relative)
+                                    })
+                            }));
                         self.refresh_due = Some(Instant::now() + Duration::from_millis(150));
                     }
                     Err(error) => self.error = Some(rustidian::watcher::describe(&error)),
@@ -931,7 +941,7 @@ impl NotesApp {
             let Ok(path) = path.strip_prefix(&vault.root) else {
                 return false;
             };
-            if !rustidian::vault::is_ignored_path(path) {
+            if !rustidian::vault::is_watch_noise(path) {
                 relative.push(path.to_owned());
             }
         }
@@ -978,21 +988,12 @@ impl NotesApp {
         let Ok(relative) = path.strip_prefix(&vault.root) else {
             return false;
         };
-        if rustidian::vault::is_ignored_path(relative) {
-            return true;
-        }
-        let known = vault
-            .notes
+        let saved = self
+            .tabs
             .iter()
-            .find(|note| note.path == relative)
-            .map(|note| note.text.as_str())
-            .or_else(|| {
-                self.tabs
-                    .iter()
-                    .find(|tab| tab.document.path == relative)
-                    .and_then(|tab| tab.document.saved_text())
-            });
-        known.is_some_and(|text| std::fs::read(path).is_ok_and(|bytes| bytes == text.as_bytes()))
+            .find(|tab| tab.document.path == relative)
+            .and_then(|tab| tab.document.saved_text());
+        vault.holds_known_text(relative, saved)
     }
 
     fn capture_recovery(&mut self, ctx: &egui::Context) {
