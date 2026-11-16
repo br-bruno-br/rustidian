@@ -520,7 +520,7 @@ impl NotesApp {
                             Page::Hotkeys => {
                                 for command in rustidian::commands::ranked("", Scope::Editor) {
                                     if !command.shortcut.is_empty() {
-                                        row(ui, command.name, "", |ui| {
+                                        row(ui, rustidian::commands::label(command.name), "", |ui| {
                                             ui.weak(command.shortcut);
                                             false
                                         });
