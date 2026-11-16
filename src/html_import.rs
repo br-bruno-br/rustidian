@@ -14,9 +14,9 @@ pub fn convert(html: &str) -> crate::vault::Result<String> {
         ])
         .build()
         .convert(html)
-        .map_err(|error| format!("Cannot convert HTML to Markdown: {error}"))?;
+        .map_err(|error| format!("Não foi possível converter HTML em Markdown: {error}"))?;
     if markdown.trim().is_empty() {
-        return Err("This HTML file has no editable body content.".into());
+        return Err("Este arquivo HTML não tem conteúdo editável no corpo.".into());
     }
     Ok(format!("{}\n", markdown.trim()))
 }

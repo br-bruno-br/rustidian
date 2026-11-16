@@ -41,7 +41,7 @@ impl Bookmarks {
 
     pub fn add(&mut self, vault: &Vault, path: &Path) -> Result<bool, String> {
         if !safe_relative(path) {
-            return Err("Bookmark a note or image inside this vault.".into());
+            return Err("Favorite uma nota ou imagem dentro deste cofre.".into());
         }
         // Recheck the filesystem through the same guarded path used when opening.
         vault.open_document(path)?;

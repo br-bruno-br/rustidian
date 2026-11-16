@@ -59,7 +59,7 @@ impl Title {
             }
             response
                 .on_hover_cursor(egui::CursorIcon::Text)
-                .on_hover_text("Rename note");
+                .on_hover_text("Renomear nota");
             return None;
         }
         let id = ui.make_persistent_id(("note-title-input", path));

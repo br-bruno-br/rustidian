@@ -450,6 +450,6 @@ fn text_attachments_change_extension_on_rename_but_images_and_hidden_targets_are
     );
     assert!(!root.path().join(".archive").exists());
     let error = vault.duplicate_file(Path::new("LICENSE")).unwrap_err();
-    assert!(error.contains("extension"), "{error}");
+    assert!(error.contains("extensão"), "{error}");
     assert!(!root.path().join("LICENSE 1").exists());
 }

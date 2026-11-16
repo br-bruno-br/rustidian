@@ -88,24 +88,40 @@ impl Page {
         }
     }
 
+    /// The page name shown; `label` stays English because the screen test finds pages by it.
+    fn shown(self) -> &'static str {
+        match self {
+            Self::Appearance => "Aparência",
+            Self::Interface => "Interface",
+            Self::Editor => "Editor",
+            Self::Files => "Arquivos e links",
+            Self::Hotkeys => "Atalhos",
+            Self::Sync => "Sincronização",
+            Self::Daily => "Notas diárias",
+            Self::Templates => "Modelos",
+            Self::Unique => "Criador de nota única",
+            Self::Recovery => "Recuperação de arquivos",
+        }
+    }
+
     fn matches(self, query: &str) -> bool {
         let terms = match self {
             Self::Appearance => {
-                "appearance base color scheme theme system dark light font text size interface monospace family"
+                "appearance base color scheme theme system dark light font text size interface monospace family aparência aparencia cor esquema tema escuro claro fonte tamanho texto"
             }
-            Self::Interface => "interface zoom",
+            Self::Interface => "interface zoom nível",
             Self::Editor => {
-                "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load"
+                "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load edição edicao modo padrão título linha largura privacidade imagens salvar salvamento automático"
             }
-            Self::Files => "files and links automatically update move folder",
-            Self::Hotkeys => "hotkeys keyboard shortcuts commands",
+            Self::Files => "files and links automatically update move folder arquivos links atualizar automaticamente mover pasta lixeira",
+            Self::Hotkeys => "hotkeys keyboard shortcuts commands atalhos teclado comandos",
             Self::Sync => {
-                "sync synchronization server address token passphrase device connect disconnect keys devices"
+                "sync synchronization server address token passphrase device connect disconnect keys devices sincronização sincronizar servidor endereço senha dispositivo conectar"
             }
-            Self::Daily => "daily notes date format folder template new file location",
-            Self::Templates => "templates date time format folder location",
-            Self::Unique => "unique notes prefix format folder template new file location",
-            Self::Recovery => "file recovery snapshots history interval length days keep",
+            Self::Daily => "daily notes date format folder template new file location notas diárias data formato pasta modelo local",
+            Self::Templates => "templates date time format folder location modelos data hora formato pasta local",
+            Self::Unique => "unique notes prefix format folder template new file location notas únicas prefixo formato pasta modelo local",
+            Self::Recovery => "file recovery snapshots history interval length days keep recuperação recuperacao arquivos versões histórico intervalo dias",
         };
         query.split_whitespace().all(|word| terms.contains(word))
     }
@@ -117,8 +133,8 @@ impl NotesApp {
         group(ui, |ui| {
             changed |= choice(
                 ui,
-                "Default view for new tabs",
-                "The default view that a new Markdown tab gets opened in.",
+                "Modo padrão para novas abas",
+                "O modo em que uma nova aba Markdown é aberta.",
                 "settings-default-view",
                 &mut self.editor_preferences.reading_view,
                 ["Editing view", "Reading view"],
@@ -126,8 +142,8 @@ impl NotesApp {
             ui.separator();
             changed |= choice(
                 ui,
-                "Default editing mode",
-                "The default editing mode a new tab will start with.",
+                "Modo de edição padrão",
+                "O modo de edição com que uma nova aba começa.",
                 "settings-editing-mode",
                 &mut self.editor_preferences.source_mode,
                 ["Live Preview", "Source mode"],
@@ -135,40 +151,40 @@ impl NotesApp {
             ui.separator();
             changed |= toggle(
                 ui,
-                "Show editing mode in status bar",
-                "Show the editing mode in the status bar.",
+                "Mostrar o modo de edição na barra de status",
+                "Mostra o modo de edição na barra de status.",
                 "settings-show-mode",
                 &mut self.editor_preferences.show_mode,
             );
         });
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Display");
+        ui.strong("Exibição");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Inline title",
-                "Display the filename as an editable title inline with the file contents.",
+                "Título embutido",
+                "Mostra o nome do arquivo como um título editável junto ao conteúdo.",
                 "settings-inline-title",
                 &mut self.editor_preferences.inline_title,
             );
             ui.separator();
             changed |= toggle(
                 ui,
-                "Readable line length",
-                "Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable.",
+                "Largura de linha confortável",
+                "Limita a largura máxima das linhas. Cabe menos conteúdo na tela, mas blocos longos de texto ficam mais legíveis.",
                 "settings-readable-line-length",
                 &mut self.editor_preferences.readable_line_length,
             );
         });
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Privacy");
+        ui.strong("Privacidade");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Load images from the internet",
-                "Off: notes with web images (http or https) make no network request; a marker stands in and a click loads that one image.",
+                "Carregar imagens da internet",
+                "Desligado: notas com imagens da web (http ou https) não fazem nenhum pedido de rede; um marcador toma o lugar e um clique carrega aquela imagem.",
                 "settings-remote-images",
                 &mut self.editor_preferences.remote_images,
             );
@@ -178,13 +194,13 @@ impl NotesApp {
         ui.add_space(crate::theme::space::S);
         changed |= self.spelling_settings(ui);
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Saving");
+        ui.strong("Salvamento");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Autosave",
-                "Save changes after 600 ms without typing.",
+                "Salvar automaticamente",
+                "Salva as alterações após 600 ms sem digitar.",
                 "settings-autosave",
                 &mut self.autosave_enabled,
             );
@@ -291,7 +307,7 @@ impl NotesApp {
                         ui.set_min_height(height - 24.0);
                         let input = ui.add(
                             TextEdit::singleline(&mut self.dialog_input)
-                                .hint_text("Search settings…")
+                                .hint_text("Buscar configurações…")
                                 .desired_width(f32::INFINITY),
                         );
                         crate::ui_probe::record(ctx, "dialog-input", input.rect);
@@ -317,12 +333,12 @@ impl NotesApp {
                             .show(ui, |ui| {
                                 for page in Page::ALL {
                                     if page == Page::Appearance {
-                                        ui.weak("Options");
+                                        ui.weak("Opções");
                                         ui.add_space(crate::theme::space::XS);
                                     }
                                     if page == Page::Daily {
                                         ui.add_space(crate::theme::space::M);
-                                        ui.weak("Core plugins");
+                                        ui.weak("Plugins essenciais");
                                         ui.add_space(crate::theme::space::XS);
                                     }
                                     if page.matches(&query) {
@@ -346,13 +362,13 @@ impl NotesApp {
                 ui.set_width((ui.available_width() - 24.0).max(140.0));
                 ui.set_min_height(height);
                 ui.add_space(crate::theme::space::XL);
-                let button = theme::dialog_header(ui, "Settings", "Close settings");
+                let button = theme::dialog_header(ui, "Configurações", "Fechar configurações");
                 crate::ui_probe::record(ctx, "settings-close", button.rect);
                 *close |= button.clicked();
                 ui.add_space(crate::theme::space::M);
                 let query = self.dialog_input.to_lowercase();
                 if !self.settings_page.matches(&query) {
-                    ui.weak("No settings found.");
+                    ui.weak("Nenhuma configuração encontrada.");
                     return;
                 }
                 ctx.data_mut(|data| data.insert_temp(egui::Id::unique("settings-query"), query.clone()));
@@ -376,15 +392,15 @@ impl NotesApp {
                                 changed |=
                                     row(
                                         ui,
-                                        "Base color scheme",
-                                        "Follow your system or choose a light or dark appearance.",
+                                        "Esquema de cores",
+                                        "Siga o sistema ou escolha uma aparência clara ou escura.",
                                         |ui| {
                                             let before = self.appearance;
                                             let response = egui::ComboBox::from_id_salt(
                                                 "settings-color-scheme",
                                             )
                                             .icon(theme::combo_chevron)
-                                            .selected_text(self.appearance.label())
+                                            .selected_text(rustidian::i18n::t(self.appearance.label()))
                                             .show_ui(ui, |ui| {
                                                 theme::menu_style(ui);
                                                 for appearance in [theme::Appearance::System, theme::Appearance::Dark, theme::Appearance::Light] {
@@ -392,7 +408,7 @@ impl NotesApp {
                                                     let response = ui.selectable_value(
                                                         &mut self.appearance,
                                                         appearance,
-                                                        label,
+                                                        rustidian::i18n::t(label),
                                                     );
                                                     crate::ui_probe::record(
                                                         ctx,
@@ -412,8 +428,8 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= row(
                                     ui,
-                                    "Font size",
-                                    "Font size in pixels that affects editing and reading views.",
+                                    "Tamanho da fonte",
+                                    "Tamanho da fonte em pixels, que vale para a edição e a leitura.",
                                     |ui| {
                                         let response = theme::slider(
                                             ui,
@@ -429,22 +445,22 @@ impl NotesApp {
                                 );
                                 for (title, description, id, value, mono) in [
                                     (
-                                        "Interface font",
-                                        "Font for menus, sidebars and dialogs.",
+                                        "Fonte da interface",
+                                        "Fonte de menus, painéis laterais e diálogos.",
                                         "settings-interface-font",
                                         &mut self.fonts.interface,
                                         false,
                                     ),
                                     (
-                                        "Text font",
-                                        "Font for editing and reading views.",
+                                        "Fonte do texto",
+                                        "Fonte da edição e da leitura.",
                                         "settings-text-font",
                                         &mut self.fonts.text,
                                         false,
                                     ),
                                     (
-                                        "Monospace font",
-                                        "Font for code blocks and inline code.",
+                                        "Fonte monoespaçada",
+                                        "Fonte de blocos de código e de código em linha.",
                                         "settings-monospace-font",
                                         &mut self.fonts.monospace,
                                         true,
@@ -453,7 +469,7 @@ impl NotesApp {
                                     ui.separator();
                                     let missing = self.missing_fonts.iter().any(|name| name == &*value);
                                     let description = if missing {
-                                        format!("{value} is not installed; the default font is used.")
+                                        format!("{value} não está instalada; a fonte padrão será usada.")
                                     } else {
                                         description.to_owned()
                                     };
@@ -465,8 +481,8 @@ impl NotesApp {
                             Page::Interface => {
                                 changed |= row(
                                     ui,
-                                    "Zoom level",
-                                    "Scale the interface and document together.",
+                                    "Nível de zoom",
+                                    "Redimensiona a interface e o documento juntos.",
                                     |ui| {
                                         let response = theme::slider(
                                             ui,
@@ -487,16 +503,16 @@ impl NotesApp {
                             Page::Files => {
                                 changed |= toggle(
                                     ui,
-                                    "Automatically update internal links",
-                                    "Update links when moving or renaming files.",
+                                    "Atualizar links internos automaticamente",
+                                    "Atualiza os links ao mover ou renomear arquivos.",
                                     "settings-update-move-links",
                                     &mut self.always_update_links,
                                 );
                                 ui.separator();
                                 changed |= toggle(
                                     ui,
-                                    "Confirm before moving to Trash",
-                                    "Show a confirmation before moving files or folders to the system Trash.",
+                                    "Confirmar antes de mover para a Lixeira",
+                                    "Mostra uma confirmação antes de mover arquivos ou pastas para a Lixeira.",
                                     "settings-confirm-trash",
                                     &mut self.confirm_trash,
                                 );
@@ -504,7 +520,7 @@ impl NotesApp {
                             Page::Hotkeys => {
                                 for command in rustidian::commands::ranked("", Scope::Editor) {
                                     if !command.shortcut.is_empty() {
-                                        row(ui, command.name, "", |ui| {
+                                        row(ui, rustidian::commands::label(command.name), "", |ui| {
                                             ui.weak(command.shortcut);
                                             false
                                         });
@@ -515,8 +531,8 @@ impl NotesApp {
                             Page::Daily => {
                                 changed |= text(
                                     ui,
-                                    "Date format",
-                                    "How daily note file names are formatted.",
+                                    "Formato da data",
+                                    "Como os nomes dos arquivos das notas diárias são formatados.",
                                     "settings-daily-format",
                                     &mut self.note_aids.daily.format,
                                     "YYYY-MM-DD",
@@ -524,36 +540,36 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "New file location",
-                                    "Folder for new daily notes.",
+                                    "Local dos novos arquivos",
+                                    "Pasta das novas notas diárias.",
                                     "settings-daily-folder",
                                     &mut self.note_aids.daily.folder,
-                                    "Vault folder",
+                                    "Pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Template file location",
-                                    "A note to use as the daily template.",
+                                    "Local do arquivo de modelo",
+                                    "Uma nota para usar como modelo diário.",
                                     "settings-daily-template",
                                     &mut self.note_aids.daily.template,
-                                    "Optional template note",
+                                    "Nota de modelo (opcional)",
                                 );
                             }
                             Page::Templates => {
                                 changed |= text(
                                     ui,
-                                    "Template folder location",
-                                    "Folder containing your templates.",
+                                    "Local da pasta de modelos",
+                                    "Pasta que contém seus modelos.",
                                     "settings-template-folder",
                                     &mut self.note_aids.templates.folder,
-                                    "Choose a vault folder",
+                                    "Escolha uma pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Date format",
-                                    "Format for the date variable.",
+                                    "Formato da data",
+                                    "Formato da variável de data.",
                                     "settings-template-date",
                                     &mut self.note_aids.templates.date_format,
                                     "YYYY-MM-DD",
@@ -561,8 +577,8 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Time format",
-                                    "Format for the time variable.",
+                                    "Formato da hora",
+                                    "Formato da variável de hora.",
                                     "settings-template-time",
                                     &mut self.note_aids.templates.time_format,
                                     "HH:mm",
@@ -571,26 +587,26 @@ impl NotesApp {
                             Page::Unique => {
                                 changed |= text(
                                     ui,
-                                    "New file location",
-                                    "Folder for unique notes.",
+                                    "Local dos novos arquivos",
+                                    "Pasta das notas únicas.",
                                     "settings-unique-folder",
                                     &mut self.note_aids.unique.folder,
-                                    "Vault folder",
+                                    "Pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Template file location",
-                                    "A note to use as the template.",
+                                    "Local do arquivo de modelo",
+                                    "Uma nota para usar como modelo.",
                                     "settings-unique-template",
                                     &mut self.note_aids.unique.template,
-                                    "Optional template note",
+                                    "Nota de modelo (opcional)",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Unique prefix format",
-                                    "Date format for unique note names.",
+                                    "Formato do prefixo único",
+                                    "Formato da data nos nomes das notas únicas.",
                                     "settings-unique-format",
                                     &mut self.note_aids.unique.format,
                                     "YYYYMMDDHHmm",
@@ -599,16 +615,16 @@ impl NotesApp {
                             Page::Recovery => {
                                 changed |= toggle(
                                     ui,
-                                    "Keep file recovery history",
-                                    "Off: nothing is recorded, and the history already saved is deleted.",
+                                    "Manter o histórico de recuperação de arquivos",
+                                    "Desligado: nada é gravado, e o histórico já salvo é apagado.",
                                     "settings-recovery-enabled",
                                     &mut self.recovery_config.enabled,
                                 );
                                 ui.separator();
                                 changed |= row(
                                     ui,
-                                    "Snapshot interval",
-                                    "Minutes between recovery snapshots.",
+                                    "Intervalo entre versões",
+                                    "Minutos entre as versões de recuperação.",
                                     |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
@@ -627,7 +643,7 @@ impl NotesApp {
                                 );
                                 ui.separator();
                                 changed |=
-                                    row(ui, "History length", "Days to keep snapshots.", |ui| {
+                                    row(ui, "Duração do histórico", "Dias para guardar as versões.", |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
                                                 &mut self.recovery_config.keep_days,
@@ -644,12 +660,12 @@ impl NotesApp {
                                 ui.separator();
                                 row(
                                     ui,
-                                    "Snapshots",
-                                    "Review or clear the saved recovery history.",
+                                    "Versões",
+                                    "Veja ou apague o histórico de recuperação salvo.",
                                     |ui| {
                                         let ready = !self.recovery_manager.active();
                                         let clear =
-                                            ui.add_enabled(ready, egui::Button::new("Clear"));
+                                            ui.add_enabled(ready, egui::Button::new("Limpar"));
                                         crate::ui_probe::record(
                                             ctx,
                                             "settings-recovery-clear",
@@ -658,7 +674,7 @@ impl NotesApp {
                                         if clear.clicked() {
                                             *recovery_action = Some(true);
                                         }
-                                        let view = ui.add_enabled(ready, egui::Button::new("View"));
+                                        let view = ui.add_enabled(ready, egui::Button::new("Ver"));
                                         crate::ui_probe::record(
                                             ctx,
                                             "settings-recovery-view",
@@ -681,7 +697,7 @@ impl NotesApp {
                         });
                         if self.settings_page == Page::Hotkeys {
                             ui.add_space(crate::theme::space::M);
-                            ui.weak("Shortcut customization is not available yet.");
+                            ui.weak("A personalização de atalhos ainda não está disponível.");
                         }
                     });
                 crate::ui_probe::record(ctx, "settings-viewport", content.inner_rect);
@@ -714,7 +730,7 @@ impl NotesApp {
                     self.always_update_links,
                     self.confirm_trash,
                 ) = before;
-                self.error = Some(format!("Settings weren’t saved: {error}"));
+                self.error = Some(format!("As configurações não foram salvas: {error}"));
                 self.missing_fonts = theme::set_fonts(ctx, &self.fonts);
                 theme::palette::select(ctx, self.palette);
                 theme::apply_appearance(ctx, self.appearance);
@@ -792,7 +808,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
         .height(320.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .selected_text(if value.is_empty() {
-            "Default"
+            rustidian::i18n::t("Default")
         } else {
             value.as_str()
         })
@@ -809,7 +825,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
             };
             let field = ui.add(
                 egui::TextEdit::singleline(&mut search)
-                    .hint_text("Search fonts")
+                    .hint_text("Buscar fontes")
                     .desired_width(f32::INFINITY),
             );
             if opened {
@@ -826,7 +842,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
             );
             for name in names {
                 let label = if name.is_empty() { "Default" } else { name };
-                let response = ui.selectable_label(*value == name, label);
+                let response = ui.selectable_label(*value == name, rustidian::i18n::t(label));
                 crate::ui_probe::record(ui.ctx(), format!("{id}:{label}"), response.rect);
                 if response.clicked() {
                     *value = name.to_owned();
@@ -879,7 +895,7 @@ fn navigation_row(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Respon
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 25.0), egui::Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, page.label())
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, page.shown())
     });
     if selected || response.hovered() || response.has_focus() {
         ui.painter().rect_filled(
@@ -914,7 +930,7 @@ fn navigation_row(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Respon
     ui.painter().text(
         egui::pos2(rect.left() + 32.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        page.label(),
+        page.shown(),
         FontId::proportional(13.0),
         ui.visuals().text_color(),
     );
@@ -971,11 +987,11 @@ fn choice(
         let before = *value;
         let response = egui::ComboBox::from_id_salt(id)
             .icon(theme::combo_chevron)
-            .selected_text(labels[usize::from(*value)])
+            .selected_text(rustidian::i18n::t(labels[usize::from(*value)]))
             .show_ui(ui, |ui| {
                 theme::menu_style(ui);
                 for (i, label) in labels.into_iter().enumerate() {
-                    let r = ui.selectable_value(value, i == 1, label);
+                    let r = ui.selectable_value(value, i == 1, rustidian::i18n::t(label));
                     crate::ui_probe::record(ui.ctx(), format!("{id}:{label}"), r.rect);
                 }
             });

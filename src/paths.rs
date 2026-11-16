@@ -12,22 +12,22 @@ pub fn read_obsidian<T: serde::de::DeserializeOwned + Default>(
         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {}
         _ => {
             return Err(
-                "Cannot import note settings from a linked or unreadable .obsidian folder.".into(),
+                "Não foi possível importar as configurações de notas de uma pasta .obsidian vinculada ou ilegível.".into(),
             );
         }
     }
     let path = folder.join(name);
     let meta = match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
-        Err(error) => return Err(format!("Cannot read note settings: {error}")),
+        Err(error) => return Err(format!("Não foi possível ler as configurações de notas: {error}")),
         Ok(meta) => meta,
     };
     if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 65536 {
-        return Err("Note settings must be small ordinary JSON files.".into());
+        return Err("As configurações de notas devem ser arquivos JSON comuns e pequenos.".into());
     }
     let bytes =
-        std::fs::read(path).map_err(|error| format!("Cannot read note settings: {error}"))?;
-    serde_json::from_slice(&bytes).map_err(|error| format!("Cannot import note settings: {error}"))
+        std::fs::read(path).map_err(|error| format!("Não foi possível ler as configurações de notas: {error}"))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("Não foi possível importar as configurações de notas: {error}"))
 }
 
 /// The user's home folder: `HOME`, or `USERPROFILE` on Windows.
@@ -87,7 +87,7 @@ pub fn app_directory(base: &Path) -> PathBuf {
     }
     if let Err(error) = std::fs::rename(&previous, &current) {
         eprintln!(
-            "Cannot move existing Rustidian settings: {error}. Using their previous location."
+            "Não foi possível mover as configurações atuais do Rustidian: {error}. Usando o local anterior."
         );
         return previous;
     }

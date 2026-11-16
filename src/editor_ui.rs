@@ -843,7 +843,7 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
                 crate::theme::space::XXL + crate::theme::space::S,
                 crate::theme::space::CONTROL,
             ),
-            egui::Label::new(RichText::new("Find").size(14.0)),
+            egui::Label::new(RichText::new("Buscar").size(14.0)),
         );
         let response = ui.add(crate::theme::text_field(
             TextEdit::singleline(&mut find.query)
@@ -862,20 +862,20 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
         }
         ui.label(
             RichText::new(if matches.is_empty() {
-                "No results".into()
+                "Sem resultados".into()
             } else {
                 format!("{} / {}", find.selected + 1, matches.len())
             })
             .size(14.0)
             .weak(),
         );
-        let previous = ui.button("Previous");
+        let previous = ui.button("Anterior");
         crate::ui_probe::record(ui.ctx(), "find-previous", previous.rect);
         if previous.clicked() && !matches.is_empty() {
             find.selected = (find.selected + matches.len() - 1) % matches.len();
             select = true;
         }
-        if (ui.button("Next").clicked()
+        if (ui.button("Próximo").clicked()
             || response.has_focus()
                 && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter)))
             && !matches.is_empty()
@@ -883,7 +883,7 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
             find.selected = (find.selected + 1) % matches.len();
             select = true;
         }
-        ui.toggle_value(&mut find.replacing, "Replace");
+        ui.toggle_value(&mut find.replacing, "Substituir");
         if ui.button("×").clicked()
             || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
         {
@@ -899,13 +899,13 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
                     crate::theme::space::XXL + crate::theme::space::S,
                     crate::theme::space::CONTROL,
                 ),
-                egui::Label::new(RichText::new("With").size(14.0)),
+                egui::Label::new(RichText::new("Por").size(14.0)),
             );
             ui.add(crate::theme::text_field(
                 TextEdit::singleline(&mut find.replace).desired_width(220.0),
             ));
             if ui
-                .add_enabled(!matches.is_empty(), egui::Button::new("Replace"))
+                .add_enabled(!matches.is_empty(), egui::Button::new("Substituir"))
                 .clicked()
                 && let Some(range) = matches.get(find.selected)
             {
@@ -913,7 +913,7 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
                 tab.edited();
             }
             if ui
-                .add_enabled(!matches.is_empty(), egui::Button::new("Replace all"))
+                .add_enabled(!matches.is_empty(), egui::Button::new("Substituir tudo"))
                 .clicked()
             {
                 for range in matches.iter().rev() {
@@ -1358,7 +1358,7 @@ impl Editor {
                     .collect::<String>()
             });
         let item = |ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bool| {
-            let mut button = egui::Button::new(label);
+            let mut button = egui::Button::new(rustidian::i18n::t(label));
             if !shortcut.is_empty() {
                 button = button.shortcut_text(shortcut);
             }
@@ -1502,11 +1502,11 @@ impl Editor {
                             )
                             .write_image(
                                 &rgba,
-                                image.size[0].try_into().map_err(|_| "Image is too wide.")?,
-                                image.size[1].try_into().map_err(|_| "Image is too tall.")?,
+                                image.size[0].try_into().map_err(|_| "A imagem é larga demais.")?,
+                                image.size[1].try_into().map_err(|_| "A imagem é alta demais.")?,
                                 image::ExtendedColorType::Rgba8,
                             )
-                            .map_err(|error| format!("Cannot encode pasted image: {error}"))?;
+                            .map_err(|error| format!("Não foi possível codificar a imagem colada: {error}"))?;
                             let name = format!(
                                 "Pasted image {}.png",
                                 chrono::Local::now().format("%Y%m%d%H%M%S")
@@ -1540,7 +1540,7 @@ impl Editor {
                         return Ok(relative.to_path_buf());
                     }
                     let bytes = file.bytes()?;
-                    let name = file.path().file_name().ok_or("Invalid image name.")?;
+                    let name = file.path().file_name().ok_or("Nome de imagem inválido.")?;
                     vault.import_attachment(std::path::Path::new(name), &bytes)
                 })();
                 match saved {
@@ -1632,7 +1632,7 @@ impl Editor {
                 || edit.source != tab.document.text
         }) {
             self.pending_edit = None;
-            self.error = Some("This note changed before the edit was applied. Select the text or insertion point again.".into());
+            self.error = Some("Esta nota mudou antes de a edição ser aplicada. Selecione o texto ou o ponto de inserção de novo.".into());
             ui.ctx().request_repaint();
         }
         cp.at(1384);
@@ -3069,9 +3069,9 @@ impl Editor {
                         if candidates.is_empty() {
                             ui.label(
                                 RichText::new(if completion.query.contains('#') {
-                                    "No matching headings or blocks."
+                                    "Nenhum título ou bloco encontrado."
                                 } else {
-                                    "No matching files. Finish the link to create a note."
+                                    "Nenhum arquivo encontrado. Termine o link para criar uma nota."
                                 })
                                 .size(13.0)
                                 .weak(),
@@ -3514,9 +3514,9 @@ fn paint_heading_folds(
             crate::theme::disclosure(ui, if folded { 0.0 } else { 1.0 }, &toggle);
         }
         toggle.on_hover_text(if folded {
-            "Expand section"
+            "Expandir seção"
         } else {
-            "Collapse section"
+            "Recolher seção"
         });
     }
 }

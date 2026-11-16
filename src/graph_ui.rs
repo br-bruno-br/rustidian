@@ -334,8 +334,8 @@ impl Manager {
             ui.allocate_ui_with_layout(header, Layout::left_to_right(Align::Center), |ui| {
                 ui.set_min_height(header.y);
                 let title = root.as_deref().map_or_else(
-                    || "Graph view".to_owned(),
-                    |path| format!("Graph of {}", rustidian::vault::file_title(path)),
+                    || "Visão de grafo".to_owned(),
+                    |path| format!("Grafo de {}", rustidian::vault::file_title(path)),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if local {
@@ -345,7 +345,7 @@ impl Manager {
                             action = Some(Action::CloseLocal);
                         }
                     }
-                    let settings = ui.selectable_label(pane.preferences.settings, "Settings");
+                    let settings = ui.selectable_label(pane.preferences.settings, "Configurações");
                     ui_probe::record(ui.ctx(), "settings", settings.rect);
                     if settings.clicked() {
                         pane.preferences.settings = !pane.preferences.settings;
@@ -533,7 +533,7 @@ impl Manager {
                                 rect.left_bottom() + egui::vec2(12.0, -12.0),
                                 egui::Align2::LEFT_BOTTOM,
                                 format!(
-                                    "{} · {count}/{} notes",
+                                    "{} · {count}/{} notas",
                                     date.format("%Y-%m-%d"),
                                     view.nodes.len()
                                 ),
@@ -546,7 +546,7 @@ impl Manager {
                         painter.text(
                             rect.center(),
                             egui::Align2::CENTER_CENTER,
-                            "No matching notes",
+                            "Nenhuma nota encontrada",
                             FontId::proportional(15.0),
                             ui.visuals().weak_text_color(),
                         );
@@ -574,7 +574,7 @@ impl Manager {
             painter.text(
                 rect.left_bottom() + egui::vec2(12.0, -12.0),
                 egui::Align2::LEFT_BOTTOM,
-                "Updating graph…",
+                "Atualizando o grafo…",
                 FontId::proportional(12.0),
                 ui.visuals().weak_text_color(),
             );
@@ -630,7 +630,7 @@ fn section(ui: &mut egui::Ui, open: &mut bool, label: &str) -> bool {
     ui.painter().text(
         rect.left_center() + egui::vec2(20.0, 0.0),
         egui::Align2::LEFT_CENTER,
-        label,
+        rustidian::i18n::t(label),
         FontId::proportional(13.0),
         ui.visuals().text_color(),
     );
@@ -672,12 +672,12 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
     if section(ui, &mut pane.preferences.sections[0], "Filters") {
         let filter = ui.add(
             egui::TextEdit::singleline(&mut pane.preferences.options.filter)
-                .hint_text("Search files…")
+                .hint_text("Buscar arquivos…")
                 .desired_width(f32::INFINITY),
         );
         ui_probe::record(ui.ctx(), "filter", filter.rect);
         if local {
-            ui.label("Depth");
+            ui.label("Profundidade");
             slider(
                 ui,
                 egui::Slider::new(&mut pane.preferences.options.depth, 1..=5),
@@ -686,19 +686,19 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
             toggle(
                 ui,
                 &mut pane.preferences.options.incoming,
-                "Incoming links",
+                "Links de entrada",
                 "incoming",
             );
             toggle(
                 ui,
                 &mut pane.preferences.options.outgoing,
-                "Outgoing links",
+                "Links de saída",
                 "outgoing",
             );
             toggle(
                 ui,
                 &mut pane.preferences.options.neighbor_links,
-                "Neighbor links",
+                "Links de vizinhos",
                 "neighbor",
             );
         }
@@ -706,20 +706,20 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
         toggle(
             ui,
             &mut pane.preferences.options.attachments,
-            "Attachments",
+            "Anexos",
             "attachments",
         );
         toggle(
             ui,
             &mut pane.preferences.options.existing_only,
-            "Existing files only",
+            "Somente arquivos existentes",
             "existing-only",
         );
         if !local {
             toggle(
                 ui,
                 &mut pane.preferences.options.orphans,
-                "Orphans",
+                "Órfãos",
                 "orphans",
             );
         }
@@ -736,7 +736,7 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
                     let query = ui.add(
                         egui::TextEdit::singleline(&mut group.query)
                             .desired_width((ui.available_width() - 90.0).max(30.0))
-                            .hint_text("Search query"),
+                            .hint_text("Termo de busca"),
                     );
                     ui_probe::record(ui.ctx(), format!("group:{index}:query"), query.rect);
                     let mut rgb = [group.color[0], group.color[1], group.color[2]];
@@ -752,13 +752,13 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
                 ui.horizontal_wrapped(|ui| {
                     let drag =
                         ui.dnd_drag_source(ui.scope_id().with("drag"), (owner, index), |ui| {
-                            ui.small("Drag")
+                            ui.small("Arrastar")
                         });
                     ui_probe::record(ui.ctx(), format!("group:{index}:drag"), drag.response.rect);
-                    if index > 0 && ui.small_button("Move up").clicked() {
+                    if index > 0 && ui.small_button("Mover para cima").clicked() {
                         reorder = Some((index, index - 1));
                     }
-                    if index + 1 < group_count && ui.small_button("Move down").clicked() {
+                    if index + 1 < group_count && ui.small_button("Mover para baixo").clicked() {
                         reorder = Some((index, index + 1));
                     }
                 });
@@ -777,7 +777,7 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
             let group = pane.preferences.options.groups.remove(from);
             pane.preferences.options.groups.insert(to, group);
         }
-        let add = ui.button("New group");
+        let add = ui.button("Novo grupo");
         ui_probe::record(ui.ctx(), "group-add", add.rect);
         if add.clicked() {
             pane.preferences.display.colors = ColorMode::Groups;
@@ -789,15 +789,15 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
         ui.add_space(crate::theme::space::XS);
     }
     if section(ui, &mut pane.preferences.sections[2], "Display") {
-        ui.label("Color by");
+        ui.label("Colorir por");
         let color_mode = egui::ComboBox::from_id_salt("graph-color-mode")
-            .selected_text(pane.preferences.display.colors.label())
+            .selected_text(rustidian::i18n::t(pane.preferences.display.colors.label()))
             .show_ui(ui, |ui| {
                 for mode in [ColorMode::Groups, ColorMode::LinkDirection] {
                     let response = ui.selectable_value(
                         &mut pane.preferences.display.colors,
                         mode,
-                        mode.label(),
+                        rustidian::i18n::t(mode.label()),
                     );
                     ui_probe::record(
                         ui.ctx(),
@@ -808,31 +808,31 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
             });
         ui_probe::record(ui.ctx(), "color-mode", color_mode.response.rect);
         if pane.preferences.display.colors == ColorMode::LinkDirection {
-            for (label, relation) in [("Incoming", 1), ("Outgoing", 2), ("Both directions", 3)] {
+            for (label, relation) in [("Entrada", 1), ("Saída", 2), ("Ambas as direções", 3)] {
                 ui.colored_label(direction_color(ui, relation), label);
             }
             ui.small(if local {
-                "Relative to the current note"
+                "Em relação à nota atual"
             } else {
-                "Current note; hover another to inspect its connections"
+                "Nota atual; passe o mouse sobre outra para ver as conexões dela"
             });
         }
-        toggle(ui, &mut pane.preferences.display.arrows, "Arrows", "arrows");
+        toggle(ui, &mut pane.preferences.display.arrows, "Setas", "arrows");
         for (label, value, range, probe) in [
             (
-                "Text fade threshold",
+                "Limite de esmaecimento do texto",
                 &mut pane.preferences.display.fade,
                 -3.0..=3.0,
                 "text-fade",
             ),
             (
-                "Node size",
+                "Tamanho dos nós",
                 &mut pane.preferences.display.size,
                 0.1..=5.0,
                 "node-size",
             ),
             (
-                "Link thickness",
+                "Espessura dos links",
                 &mut pane.preferences.display.thickness,
                 0.1..=5.0,
                 "link-thickness",
@@ -848,8 +848,8 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
                 .as_ref()
                 .is_ok_and(|scene| !scene.view.nodes.is_empty())
         });
-        let animate = ui.add_enabled(available, egui::Button::new(if running { "Stop animation" } else { "Animate" }))
-            .on_hover_text("Replay notes by creation time; use modification time when creation time is unavailable.");
+        let animate = ui.add_enabled(available, egui::Button::new(if running { "Parar animação" } else { "Animar" }))
+            .on_hover_text("Reproduz as notas pela data de criação; usa a data de modificação quando a de criação não está disponível.");
         ui_probe::record(
             ui.ctx(),
             if running { "animate-stop" } else { "animate" },
@@ -868,25 +868,25 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
     if section(ui, &mut pane.preferences.sections[3], "Forces") {
         for (label, value, range, probe) in [
             (
-                "Center force",
+                "Força central",
                 &mut pane.preferences.forces.center,
                 0.0..=1.0,
                 "force-center",
             ),
             (
-                "Repel force",
+                "Força de repulsão",
                 &mut pane.preferences.forces.repel,
                 0.0..=20.0,
                 "force-repel",
             ),
             (
-                "Link force",
+                "Força dos links",
                 &mut pane.preferences.forces.link,
                 0.0..=1.0,
                 "force-link",
             ),
             (
-                "Link distance",
+                "Distância dos links",
                 &mut pane.preferences.forces.distance,
                 30.0..=500.0,
                 "force-distance",
@@ -897,7 +897,7 @@ fn settings(ui: &mut egui::Ui, pane: &mut Pane, local: bool) {
         }
     }
     ui.separator();
-    let reset = ui.button("Restore default settings");
+    let reset = ui.button("Restaurar configurações padrão");
     ui_probe::record(ui.ctx(), "reset", reset.rect);
     if reset.clicked() {
         pane.preferences.options = Options::default();

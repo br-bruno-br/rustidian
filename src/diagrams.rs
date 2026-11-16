@@ -72,7 +72,7 @@ impl Renderer {
                 let result = std::panic::catch_unwind(|| {
                     render(&job.source, job.dark).and_then(|svg| svg_paths(&svg))
                 })
-                .unwrap_or_else(|_| Err("Unable to render this diagram.".into()));
+                .unwrap_or_else(|_| Err("Não foi possível exibir este diagrama.".into()));
                 rendered_count.fetch_add(1, Ordering::Relaxed);
                 let mut cache = rendered_cache
                     .lock()
@@ -193,7 +193,7 @@ pub fn show(ui: &mut egui::Ui, source: &str, ordinal: usize) -> egui::Response {
             crate::ui_probe::record(ui.ctx(), "mermaid-diagram", response.rect);
         }
         Ok(None) => {
-            ui.weak("Rendering diagram…");
+            ui.weak("Renderizando o diagrama…");
         }
         Err(error) => {
             let response =

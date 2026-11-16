@@ -30,11 +30,11 @@ impl Kind {
 
     fn name(self) -> &'static str {
         match self {
-            Self::Text => "Text",
-            Self::List => "List",
-            Self::Number => "Number",
-            Self::Checkbox => "Checkbox",
-            Self::Other => "Source",
+            Self::Text => "Texto",
+            Self::List => "Lista",
+            Self::Number => "Número",
+            Self::Checkbox => "Caixa de seleção",
+            Self::Other => "Código-fonte",
         }
     }
 }
@@ -103,9 +103,9 @@ impl Field {
             )),
             Kind::Number => match serde_yaml_ng::from_str(&self.text) {
                 Ok(value @ Value::Number(_)) => Ok(value),
-                _ => Err(format!("{} needs a number.", self.name)),
+                _ => Err(format!("{} precisa de um número.", self.name)),
             },
-            Kind::Other => Err("Edit this property in source mode.".into()),
+            Kind::Other => Err("Edite esta propriedade no modo código-fonte.".into()),
         }
     }
 }
@@ -161,7 +161,7 @@ impl Properties {
         let heading = ui
             .scope(|ui| {
                 ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-                ui.add(egui::Button::new(RichText::new("Properties")).frame_when_inactive(false))
+                ui.add(egui::Button::new(RichText::new("Propriedades")).frame_when_inactive(false))
             })
             .inner;
         crate::ui_probe::record(ui.ctx(), "properties:toggle", heading.rect);
@@ -207,7 +207,7 @@ impl Properties {
                                     {
                                         ui.selectable_value(&mut kind, candidate, candidate.name());
                                     }
-                                    if ui.button("Remove property").clicked() {
+                                    if ui.button("Remover propriedade").clicked() {
                                         removed = Some(field.name.clone());
                                     }
                                 })
@@ -221,7 +221,7 @@ impl Properties {
                     );
                     type_button
                         .response
-                        .on_hover_text(format!("{} property", kind.name()));
+                        .on_hover_text(format!("Tipo: {}", kind.name()));
                     let label = ui.allocate_ui_with_layout(
                         egui::vec2(136.0, 33.5),
                         egui::Layout::left_to_right(egui::Align::Center),
@@ -278,9 +278,9 @@ impl Properties {
                                                 .desired_width(value_width)
                                                 .margin(egui::Margin::symmetric(4, 0))
                                                 .hint_text(if field.kind == Kind::Number {
-                                                    "Number"
+                                                    "Número"
                                                 } else {
-                                                    "Empty"
+                                                    "Vazio"
                                                 }),
                                         )
                                     },
@@ -439,7 +439,7 @@ impl Properties {
                                             (ui.available_width() - 4.0).clamp(48.0, 140.0),
                                         )
                                         .hint_text(if field.items.is_empty() {
-                                            "Empty"
+                                            "Vazio"
                                         } else {
                                             ""
                                         }),
@@ -472,7 +472,7 @@ impl Properties {
                         }
                         Kind::Other => {
                             ui.label(
-                                RichText::new("Edit this value in Source mode")
+                                RichText::new("Edite este valor no modo código-fonte")
                                     .size(13.0)
                                     .weak(),
                             );
@@ -522,7 +522,7 @@ impl Properties {
                 ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
                 let fill = crate::theme::hover_fill(ui);
                 ui.add(
-                    egui::Button::new("+ Add property")
+                    egui::Button::new("+ Adicionar propriedade")
                         .fill(fill)
                         .corner_radius(6)
                         .min_size(egui::vec2(0.0, 31.5)),

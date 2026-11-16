@@ -51,7 +51,7 @@ pub(crate) fn reveal_menu(ui: &mut egui::Ui, path: &Path, action: &mut Option<Fi
 }
 
 pub(crate) fn creation_menu(ui: &mut egui::Ui, folder: &Path, action: &mut Option<FileAction>) {
-    let note = ui.button("New note");
+    let note = ui.button("Nova nota");
     crate::ui_probe::record(
         ui.ctx(),
         format!("folder-new-note:{}", folder.display()),
@@ -61,7 +61,7 @@ pub(crate) fn creation_menu(ui: &mut egui::Ui, folder: &Path, action: &mut Optio
         *action = Some(FileAction::NewNote(folder.to_path_buf()));
         ui.close();
     }
-    let child = ui.button("New folder");
+    let child = ui.button("Nova pasta");
     crate::ui_probe::record(
         ui.ctx(),
         format!("folder-new-folder:{}", folder.display()),
@@ -184,7 +184,7 @@ fn start_drag(response: &egui::Response, path: &Path, title: &str) {
     {
         let paths = selection::prepare_drag(&response.ctx, path);
         let title = if paths.len() > 1 {
-            format!("{} items", paths.len())
+            format!("{} itens", paths.len())
         } else {
             title.to_owned()
         };
@@ -604,7 +604,7 @@ impl Tree {
                 copy_menu(ui, &path, &mut open);
                 reveal_menu(ui, &path, &mut open);
                 ui.separator();
-                let response = ui.button("Rename or move…");
+                let response = ui.button("Renomear ou mover…");
                 crate::ui_probe::record(
                     ui.ctx(),
                     format!("folder-rename:{}", path.display()),

@@ -406,7 +406,7 @@ fn extension_less_text_files_move_but_never_take_an_unopenable_numbered_name() {
         .begin_move_file(Path::new("Makefile"), Path::new("Build"), false)
         .err()
         .expect("a collision must be refused");
-    assert!(error.contains("already exists"), "{error}");
+    assert!(error.contains("Já existe"), "{error}");
     assert!(root.path().join("Makefile").is_file());
     fs::remove_file(root.path().join("Build/Makefile")).unwrap();
     let updates = vault

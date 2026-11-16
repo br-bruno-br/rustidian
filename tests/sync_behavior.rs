@@ -280,7 +280,7 @@ fn a_wrong_passphrase_is_refused_and_nothing_is_stored() {
 
     let error = c.connect(&server, "not the phrase at all").unwrap_err();
     assert_eq!(error, ConnectError::WrongPassphrase);
-    assert!(error.to_string().contains("Wrong passphrase"));
+    assert!(error.to_string().contains("Frase secreta incorreta"));
     assert!(c.store.is_empty(), "no key or token was stored");
     assert!(!c.files.config.exists(), "no settings were written");
     assert!(
@@ -392,7 +392,7 @@ fn offline_keeps_the_app_working_and_the_notes_are_synced_when_the_server_return
     a.write("new.md", "new while offline");
     let status = a.sync();
     assert_eq!(status.phase, Phase::Offline);
-    assert_eq!(status.label().text, "Offline");
+    assert_eq!(status.label().text, "Sem conexão");
     assert!(status.error.is_none());
     assert_eq!(a.read("kept.md").as_deref(), Some("written while offline"));
     assert_eq!(a.read("new.md").as_deref(), Some("new while offline"));
@@ -419,11 +419,11 @@ fn a_cycle_that_deletes_most_of_the_server_stops_until_allowed_once() {
     let held = a.sync();
     assert_eq!(held.phase, Phase::Failed);
     assert_eq!(held.mass_deletion, Some((25, 25)));
-    assert_eq!(held.label().text, "Sync error");
+    assert_eq!(held.label().text, "Erro de sincronização");
     assert!(
         held.mass_deletion_text()
             .unwrap()
-            .contains("nothing was sent")
+            .contains("nada foi enviado")
     );
     b.sync();
     assert_eq!(
@@ -485,7 +485,7 @@ fn conflict_copies_are_counted_and_listed() {
     assert_eq!(status.phase, Phase::Synced);
     assert_eq!(status.conflicts.len(), 1, "{:?}", status.conflicts);
     assert!(status.conflicts[0].starts_with("shared (conflito laptop "));
-    assert_eq!(status.label().text, "1 conflict");
+    assert_eq!(status.label().text, "1 conflito");
     // nothing was lost: the winner is the server's, the copy keeps the other text
     assert_eq!(b.read("shared.md").as_deref(), Some("edit on desk"));
     assert_eq!(

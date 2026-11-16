@@ -77,7 +77,7 @@ fn graph_navigation_preserves_the_buffer_and_refuses_to_discard_dirty_edits() {
     tab.set_view(View::Graph);
     tab.toggle_reading();
     assert_eq!(tab.view, View::Graph);
-    assert_eq!(tab.title(), "Graph view");
+    assert_eq!(tab.title(), "Visão de grafo");
     assert!(
         tab.open(vault.read(Path::new("Target.md")).unwrap())
             .is_err()
@@ -126,7 +126,7 @@ fn a_graph_without_a_file_can_be_closed_and_restored() {
     let mut restored = closed.restore(Document::blank());
     assert_eq!(restored.id(), id);
     assert_eq!(restored.view, View::Graph);
-    assert_eq!(restored.title(), "Graph view");
+    assert_eq!(restored.title(), "Visão de grafo");
     restored.show_document();
     assert!(restored.document.is_blank());
     assert_eq!(restored.view, View::Live);

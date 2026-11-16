@@ -48,7 +48,7 @@ impl Secret {
 pub struct KeyringStore;
 
 fn entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, account).map_err(|e| format!("system credential store: {e}"))
+    keyring::Entry::new(SERVICE, account).map_err(|e| format!("cofre de credenciais do sistema: {e}"))
 }
 
 impl SecretStore for KeyringStore {
@@ -56,20 +56,20 @@ impl SecretStore for KeyringStore {
         match entry(account)?.get_secret() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(format!("system credential store: {e}")),
+            Err(e) => Err(format!("cofre de credenciais do sistema: {e}")),
         }
     }
 
     fn set(&self, account: &str, value: &[u8]) -> Result<(), String> {
         entry(account)?
             .set_secret(value)
-            .map_err(|e| format!("system credential store: {e}"))
+            .map_err(|e| format!("cofre de credenciais do sistema: {e}"))
     }
 
     fn delete(&self, account: &str) -> Result<(), String> {
         match entry(account)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("system credential store: {e}")),
+            Err(e) => Err(format!("cofre de credenciais do sistema: {e}")),
         }
     }
 }

@@ -222,10 +222,10 @@ impl NotesApp {
 
     pub(crate) fn write_session(&self) -> Result<(), String> {
         let Some(vault) = &self.vault else {
-            return Err("Open a vault first.".into());
+            return Err("Abra um cofre primeiro.".into());
         };
         let Some(path) = location(&vault.root) else {
-            return Err("Cannot find a folder for workspace state.".into());
+            return Err("Não foi possível achar uma pasta para o estado do espaço de trabalho.".into());
         };
         let session = Session {
             editing_modes: self.tabs.iter().map(Tab::editing_view).collect(),
@@ -261,7 +261,7 @@ impl NotesApp {
         };
         let bytes = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
         let Some(parent) = path.parent().map(Path::to_owned) else {
-            return Err("Cannot find a folder for workspace state.".into());
+            return Err("Não foi possível achar uma pasta para o estado do espaço de trabalho.".into());
         };
         let result = (|| -> std::io::Result<()> {
             std::fs::create_dir_all(&parent)?;
@@ -270,7 +270,7 @@ impl NotesApp {
             file.persist(path)?;
             Ok(())
         })();
-        result.map_err(|error| format!("Cannot preserve workspace state: {error}"))
+        result.map_err(|error| format!("Não foi possível preservar o estado do espaço de trabalho: {error}"))
     }
 }
 

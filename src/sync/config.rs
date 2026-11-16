@@ -42,27 +42,27 @@ impl SyncConfig {
     pub fn load(path: &Path) -> Result<Self, String> {
         match std::fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| format!("Cannot read the sync settings: {e}")),
+                .map_err(|e| format!("Não foi possível ler as configurações de sincronização: {e}")),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(format!("Cannot read the sync settings: {e}")),
+            Err(e) => Err(format!("Não foi possível ler as configurações de sincronização: {e}")),
         }
     }
 
     /// Writes through a temporary file, so a crash never leaves half a settings file.
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let parent = path.parent().ok_or("Invalid sync settings path")?;
+        let parent = path.parent().ok_or("Caminho das configurações de sincronização inválido")?;
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Cannot save the sync settings: {e}"))?;
+            .map_err(|e| format!("Não foi possível salvar as configurações de sincronização: {e}"))?;
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)
-            .map_err(|e| format!("Cannot save the sync settings: {e}"))?;
+            .map_err(|e| format!("Não foi possível salvar as configurações de sincronização: {e}"))?;
         temporary
             .write_all(&json)
             .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|e| format!("Cannot save the sync settings: {e}"))?;
+            .map_err(|e| format!("Não foi possível salvar as configurações de sincronização: {e}"))?;
         temporary
             .persist(path)
-            .map_err(|e| format!("Cannot save the sync settings: {}", e.error))?;
+            .map_err(|e| format!("Não foi possível salvar as configurações de sincronização: {}", e.error))?;
         Ok(())
     }
 }

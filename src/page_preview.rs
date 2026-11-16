@@ -238,9 +238,9 @@ impl Manager {
                             ui.make_persistent_id("open-link"),
                             egui::Sense::click(),
                         )
-                        .on_hover_text("Open link");
+                        .on_hover_text("Abrir link");
                     open.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Open link")
+                        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Abrir link")
                     });
                     theme::control_feedback(ui, &open);
                     theme::icon_image(theme::Icon::OpenLink, ui.visuals().weak_text_color())
@@ -292,7 +292,7 @@ impl Manager {
                     } else {
                         let missing = ui.add(
                             egui::Button::new(
-                                "This note has not been created yet. Click to create.",
+                                "Esta nota ainda não foi criada. Clique para criar.",
                             )
                             .wrap()
                             .frame_when_inactive(false),

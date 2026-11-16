@@ -153,7 +153,7 @@ impl NotesApp {
                     Ok(result) => Some(result),
                     Err(mpsc::TryRecvError::Empty) => None,
                     Err(mpsc::TryRecvError::Disconnected) => Some(Err(ConnectError::Local(
-                        "The connection attempt stopped unexpectedly.".into(),
+                        "A tentativa de conexão parou de forma inesperada.".into(),
                     ))),
                 });
         if let Some(outcome) = outcome {
@@ -174,9 +174,9 @@ impl NotesApp {
                     match (outcome, &self.sync.start_error) {
                         (_, Some(error)) => error.clone(),
                         (Outcome::Created, None) => {
-                            "Connected. This device created the vault key; other devices join with the same passphrase.".into()
+                            "Conectado. Este dispositivo criou a chave do cofre; os outros dispositivos entram com a mesma frase secreta.".into()
                         }
-                        (Outcome::Joined, None) => "Connected. This device joined the existing vault.".into(),
+                        (Outcome::Joined, None) => "Conectado. Este dispositivo entrou no cofre existente.".into(),
                     },
                 ));
             }
@@ -191,7 +191,7 @@ impl NotesApp {
 
     fn sync_connect(&mut self, ctx: &egui::Context) {
         let (Some(root), Some(files)) = (self.sync.root.clone(), self.sync.files.clone()) else {
-            self.sync.notice = Some((false, "Open a vault first.".into()));
+            self.sync.notice = Some((false, "Abra um cofre primeiro.".into()));
             return;
         };
         let credentials = Credentials {
@@ -216,7 +216,7 @@ impl NotesApp {
                 self.sync.notice = None;
             }
             Err(error) => {
-                self.sync.notice = Some((false, format!("Cannot start the connection: {error}")));
+                self.sync.notice = Some((false, format!("Não foi possível iniciar a conexão: {error}")));
             }
         }
     }
@@ -229,9 +229,9 @@ impl NotesApp {
         self.sync.notice = Some(match disconnect_vault(&files, &*self.sync.store, &root) {
             Ok(()) => (
                 true,
-                "Disconnected. The key and the token were deleted from the system credential store; your notes were not touched.".into(),
+                "Desconectado. A chave e o token foram apagados do cofre de credenciais do sistema; suas notas não foram mexidas.".into(),
             ),
-            Err(error) => (false, format!("Cannot disconnect: {error}")),
+            Err(error) => (false, format!("Não foi possível desconectar: {error}")),
         });
         self.sync.load_settings();
     }
@@ -239,7 +239,7 @@ impl NotesApp {
     /// The Sync page of Settings.
     pub(super) fn sync_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.sync.root.is_none() {
-            ui.weak("Open a vault to set up sync.");
+            ui.weak("Abra um cofre para configurar a sincronização.");
             return;
         }
         enum Action {
@@ -257,8 +257,8 @@ impl NotesApp {
             if !connected {
                 row(
                     ui,
-                    "Server address",
-                    "The nota-servidor, for example http://100.x.y.z:8443 (its Tailscale address).",
+                    "Endereço do servidor",
+                    "O nota-servidor, por exemplo http://100.x.y.z:8443 (o endereço dele no Tailscale).",
                     |ui| {
                         let response = ui.add(
                             TextEdit::singleline(&mut panel.form.server)
@@ -273,8 +273,8 @@ impl NotesApp {
                 ui.separator();
                 row(
                     ui,
-                    "Device name",
-                    "Names this device in the copies kept when two devices edit the same note.",
+                    "Nome do dispositivo",
+                    "Dá nome a este dispositivo nas cópias guardadas quando dois dispositivos editam a mesma nota.",
                     |ui| {
                         let response = ui.add(
                             TextEdit::singleline(&mut panel.form.device)
@@ -289,7 +289,7 @@ impl NotesApp {
                 row(
                     ui,
                     "Token",
-                    "This device's token, from `nota-servidor token novo`. Kept in the system credential store, never in a file.",
+                    "O token deste dispositivo, de `nota-servidor token novo`. Fica no cofre de credenciais do sistema, nunca em um arquivo.",
                     |ui| {
                         let response = ui.add(
                             TextEdit::singleline(&mut panel.form.token)
@@ -304,8 +304,8 @@ impl NotesApp {
                 ui.separator();
                 row(
                     ui,
-                    "Passphrase",
-                    "The first device creates the vault key with it; the others must type the same one. Used once and not kept: keep it in your password manager.",
+                    "Frase secreta",
+                    "O primeiro dispositivo cria a chave do cofre com ela; os outros precisam digitar a mesma. Usada uma vez e não guardada: guarde-a no seu gerenciador de senhas.",
                     |ui| {
                         let response = ui.add(
                             TextEdit::singleline(&mut panel.form.passphrase)
@@ -323,14 +323,14 @@ impl NotesApp {
                 ui.separator();
                 row(
                     ui,
-                    "Connect",
+                    "Conectar",
                     if connecting {
-                        "Connecting…"
+                        "Conectando…"
                     } else {
-                        "Checks the server, sets up the key and starts syncing this vault."
+                        "Confere o servidor, prepara a chave e começa a sincronizar este cofre."
                     },
                     |ui| {
-                        let response = ui.add_enabled(!connecting, egui::Button::new("Connect"));
+                        let response = ui.add_enabled(!connecting, egui::Button::new("Conectar"));
                         crate::ui_probe::record(ui.ctx(), "sync-connect", response.rect);
                         if response.clicked() {
                             action = Some(Action::Connect);
@@ -341,8 +341,8 @@ impl NotesApp {
             } else {
                 row(
                     ui,
-                    "Server",
-                    &format!("This device is “{}”.", panel.config.device),
+                    "Servidor",
+                    &format!("Este dispositivo é “{}”.", panel.config.device),
                     |ui| {
                         ui.label(&panel.config.server);
                         false
@@ -351,8 +351,8 @@ impl NotesApp {
                 ui.separator();
                 if toggle(
                     ui,
-                    "Sync this vault",
-                    "Off: nothing is sent or received. The key and the token stay in the credential store.",
+                    "Sincronizar este cofre",
+                    "Desligado: nada é enviado nem recebido. A chave e o token continuam no cofre de credenciais.",
                     "sync-enabled",
                     &mut panel.config.enabled,
                 ) {
@@ -360,13 +360,13 @@ impl NotesApp {
                 }
                 ui.separator();
                 row(ui, "Status", &panel.status.label().text, |ui| {
-                    let response = ui.button("Details");
+                    let response = ui.button("Detalhes");
                     crate::ui_probe::record(ui.ctx(), "sync-details", response.rect);
                     if response.clicked() {
                         action = Some(Action::Details);
                     }
                     let enabled = panel.runner.is_some();
-                    let response = ui.add_enabled(enabled, egui::Button::new("Sync now"));
+                    let response = ui.add_enabled(enabled, egui::Button::new("Sincronizar agora"));
                     crate::ui_probe::record(ui.ctx(), "sync-now", response.rect);
                     if response.clicked() {
                         action = Some(Action::SyncNow);
@@ -376,10 +376,10 @@ impl NotesApp {
                 ui.separator();
                 row(
                     ui,
-                    "Disconnect",
-                    "Deletes this device's key and token from the system credential store. Your notes and the server's copy stay.",
+                    "Desconectar",
+                    "Apaga a chave e o token deste dispositivo do cofre de credenciais do sistema. Suas notas e a cópia do servidor permanecem.",
                     |ui| {
-                        let response = ui.button("Disconnect");
+                        let response = ui.button("Desconectar");
                         crate::ui_probe::record(ui.ctx(), "sync-disconnect", response.rect);
                         if response.clicked() {
                             action = Some(Action::Disconnect);
@@ -442,7 +442,7 @@ impl NotesApp {
             let label = self.sync.status.label();
             (label.text, label.tone)
         } else if self.sync.start_error.is_some() {
-            ("Sync error".to_owned(), Tone::Bad)
+            ("Erro de sincronização".to_owned(), Tone::Bad)
         } else {
             return;
         };
@@ -457,7 +457,7 @@ impl NotesApp {
                     .sense(egui::Sense::click()),
             )
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text("Sync details");
+            .on_hover_text("Detalhes da sincronização");
         crate::ui_probe::record(ui.ctx(), "sync-status", response.rect);
         if response.clicked() {
             self.sync.details_open = true;
@@ -480,7 +480,7 @@ impl NotesApp {
         let running = self.sync.runner.is_some();
         let mut open = true;
         let mut action = None;
-        egui::Window::new("Sync")
+        egui::Window::new("Sincronização")
             .id(egui::Id::unique("sync-details-window"))
             .open(&mut open)
             .collapsible(false)
@@ -490,7 +490,7 @@ impl NotesApp {
             .show(ctx, |ui| {
                 ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                     if let Some(error) = &start_error {
-                        ui.colored_label(ui.visuals().error_fg_color, "Sync could not start");
+                        ui.colored_label(ui.visuals().error_fg_color, "A sincronização não pôde começar");
                         ui.add(egui::Label::new(error).selectable(true));
                         return;
                     }
@@ -498,7 +498,7 @@ impl NotesApp {
                     ui.strong(&label.text);
                     match status.phase {
                         Phase::Offline => {
-                            ui.weak("The server cannot be reached. Rustidian keeps working with this device's copy and tries again in a minute.");
+                            ui.weak("Não foi possível acessar o servidor. O Rustidian continua com a cópia deste dispositivo e tenta de novo em um minuto.");
                             if let Some(reason) = &status.offline_reason {
                                 ui.add(egui::Label::new(RichText::new(reason).weak()).selectable(true));
                             }
@@ -506,7 +506,7 @@ impl NotesApp {
                         Phase::Failed => {
                             if let Some(text) = status.mass_deletion_text() {
                                 ui.add(egui::Label::new(text).selectable(true));
-                                if ui.button("Allow this deletion once").clicked() {
+                                if ui.button("Permitir esta exclusão uma vez").clicked() {
                                     action = Some(Action::AllowDeletion);
                                 }
                             } else if let Some(error) = &status.error {
@@ -520,23 +520,23 @@ impl NotesApp {
                         }
                         Phase::Synced => {
                             if let Some(time) = status.last_sync {
-                                ui.weak(format!("Last sync {}", time.format("%Y-%m-%d %H:%M")));
+                                ui.weak(format!("Última sincronização {}", time.format("%Y-%m-%d %H:%M")));
                             }
                         }
                         Phase::Starting | Phase::Syncing => {}
                     }
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(running, egui::Button::new("Sync now")).clicked() {
+                        if ui.add_enabled(running, egui::Button::new("Sincronizar agora")).clicked() {
                             action = Some(Action::SyncNow);
                         }
-                        if ui.button("Settings").clicked() {
+                        if ui.button("Configurações").clicked() {
                             action = Some(Action::Settings);
                         }
                     });
                     if !status.conflicts.is_empty() {
                         ui.add_space(theme::space::M);
-                        ui.strong(format!("Conflicts ({})", status.conflicts.len()));
-                        ui.weak("Two devices edited the same note. The server's version kept the name; yours was saved as a copy. Merge by hand, then delete the copy.");
+                        ui.strong(format!("Conflitos ({})", status.conflicts.len()));
+                        ui.weak("Dois dispositivos editaram a mesma nota. A versão do servidor ficou com o nome; a sua foi salva como cópia. Una as duas à mão e depois apague a cópia.");
                         for name in &status.conflicts {
                             if ui.link(name).clicked() {
                                 action = Some(Action::Open(PathBuf::from(name)));
@@ -545,8 +545,8 @@ impl NotesApp {
                     }
                     if !status.refused.is_empty() {
                         ui.add_space(theme::space::M);
-                        ui.strong(format!("Left out ({})", status.refused.len()));
-                        ui.weak("These were not synced, and why.");
+                        ui.strong(format!("Ignorados ({})", status.refused.len()));
+                        ui.weak("Estes não foram sincronizados, e o motivo.");
                         for line in &status.refused {
                             ui.add(egui::Label::new(RichText::new(line).size(12.0)).selectable(true));
                         }

@@ -103,17 +103,17 @@ impl Watch {
 pub fn describe(error: &notify::Error) -> String {
     let reason = match &error.kind {
         ErrorKind::MaxFilesWatch => {
-            return "Some folders aren't watched for changes made outside Rustidian: the \
-                    system's file-watch limit is reached. Use Refresh vault to pick them up."
+            return "Algumas pastas não estão sendo observadas quanto a mudanças feitas fora do Rustidian: \
+                    o limite de observação de arquivos do sistema foi atingido. Use Atualizar cofre para incluí-las."
                 .into();
         }
         ErrorKind::Generic(message) => message.clone(),
         ErrorKind::Io(error) => error.to_string(),
-        ErrorKind::PathNotFound => "a folder disappeared while it was being watched".into(),
-        _ => "the file watcher stopped".into(),
+        ErrorKind::PathNotFound => "uma pasta sumiu enquanto era observada".into(),
+        _ => "o observador de arquivos parou".into(),
     };
     format!(
-        "Changes made outside Rustidian may not appear: {}.",
+        "Alterações feitas fora do Rustidian podem não aparecer: {}.",
         reason.trim_end_matches('.')
     )
 }

@@ -49,7 +49,7 @@ impl Config {
             || self.keep_days < 1.0
         {
             Err(
-                "Snapshot interval must be at least zero and history length at least one day."
+                "O intervalo entre versões deve ser de pelo menos zero e a duração do histórico, de pelo menos um dia."
                     .into(),
             )
         } else {
@@ -114,16 +114,16 @@ impl History {
 
     pub fn open(root: &Path) -> Result<Self> {
         let location = crate::paths::state_file(root, "recovery", "redb")
-            .ok_or("Cannot locate file recovery storage.")?;
+            .ok_or("Não foi possível localizar o armazenamento da recuperação de arquivos.")?;
         Ok(Self::at(location))
     }
 
     fn exists(&self) -> Result<bool> {
         match fs::symlink_metadata(&self.location) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
-            Ok(_) => Err("File recovery storage must be an ordinary file.".into()),
+            Ok(_) => Err("O armazenamento da recuperação de arquivos deve ser um arquivo comum.".into()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(format!("Cannot read file recovery storage: {error}")),
+            Err(error) => Err(format!("Não foi possível ler o armazenamento da recuperação de arquivos: {error}")),
         }
     }
 
@@ -133,7 +133,7 @@ impl History {
             let parent = self
                 .location
                 .parent()
-                .ok_or("Cannot locate file recovery storage.")?;
+                .ok_or("Não foi possível localizar o armazenamento da recuperação de arquivos.")?;
             let mut folders = fs::DirBuilder::new();
             folders.recursive(true);
             #[cfg(unix)]
@@ -168,7 +168,7 @@ impl History {
             };
             change(&mut database)
         };
-        operation().map_err(|error| format!("Cannot access local history: {error}"))
+        operation().map_err(|error| format!("Não foi possível acessar o histórico local: {error}"))
     }
 
     pub fn files(&self) -> Result<Vec<PathBuf>> {
@@ -215,14 +215,14 @@ impl History {
     pub fn content(&self, path: &Path, id: u64) -> Result<String> {
         let path = supported(path)?;
         if !self.exists()? {
-            return Err("This snapshot no longer exists.".into());
+            return Err("Esta versão não existe mais.".into());
         }
         self.access(|db| {
             let read = db.begin_read()?;
             let table = read.open_table(CONTENT)?;
             let text = table
                 .get_owned((path, id))?
-                .ok_or("This snapshot no longer exists.")?;
+                .ok_or("Esta versão não existe mais.")?;
             Ok(text.value().to_owned())
         })
     }
@@ -269,7 +269,7 @@ impl History {
                 let should_capture = if let Some((id, timestamp)) = latest {
                     let previous = contents
                         .get((path, id))?
-                        .ok_or("A saved snapshot's content is missing.")?;
+                        .ok_or("O conteúdo de uma versão salva está ausente.")?;
                     previous.value() != text
                         && (force
                             || now_ms < timestamp
@@ -284,7 +284,7 @@ impl History {
                         .map(|value| value.value())
                         .unwrap_or(0)
                         .checked_add(1)
-                        .ok_or("Snapshot identifiers are exhausted.")?;
+                        .ok_or("Os identificadores de versão se esgotaram.")?;
                     counters.insert("last-id", id)?;
                     versions.insert((path, id), (now_ms, text.len() as u64))?;
                     contents.insert((path, id), text)?;
@@ -312,7 +312,7 @@ impl History {
         config: &Config,
     ) -> Result<crate::vault::Document> {
         if expected.dirty() && (expected.saved_text().is_some() || !expected.text.is_empty()) {
-            return Err("Save or explicitly discard the current edits before restoring.".into());
+            return Err("Salve ou descarte as edições atuais antes de restaurar.".into());
         }
         let text = self.content(&expected.path, version)?;
         if let Some(text) = expected.saved_text() {
@@ -365,7 +365,7 @@ impl History {
             removed
         })();
         let _ = fs::remove_file(&lock_file);
-        result.map_err(|error| format!("Cannot delete local history: {error}"))
+        result.map_err(|error| format!("Não foi possível apagar o histórico local: {error}"))
     }
 
     pub fn clear(&self) -> Result<()> {
@@ -431,8 +431,8 @@ fn supported(path: &Path) -> Result<&str> {
             extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("canvas")
         });
     if !valid {
-        return Err("Choose a Markdown or Canvas file inside the vault.".into());
+        return Err("Escolha um arquivo Markdown ou Canvas dentro do cofre.".into());
     }
     path.to_str()
-        .ok_or_else(|| "This file name cannot be stored in local history.".into())
+        .ok_or_else(|| "Este nome de arquivo não pode ser guardado no histórico local.".into())
 }

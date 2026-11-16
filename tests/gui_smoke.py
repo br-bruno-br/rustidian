@@ -550,7 +550,7 @@ def main():
                 type_text("Move file to system Trash")
                 key("Return")
                 key("Return")
-                title_contains("New tab")
+                title_contains("Nova aba")
                 assert not second_path.exists()
                 assert any(path.read_bytes() == last_bytes for path in (base / "data/Trash/files").iterdir() if path.is_file())
                 assert startup_path.read_text() == expected
@@ -942,11 +942,11 @@ def main():
                 assert "Properties GUI" in xdo("getwindowname", window)
                 results.append("Global search shortcut focused its input and a tag/property query opened its matching note")
                 key("ctrl+t")
-                title_contains("New tab")
+                title_contains("Nova aba")
                 key("ctrl+shift+Tab")
                 title_contains("Properties GUI")
                 key("ctrl+Tab")
-                title_contains("New tab")
+                title_contains("Nova aba")
                 key("ctrl+w")
                 results.append("Ctrl+Shift+Tab moved backward independently from Ctrl+Tab across three tabs")
                 results.append("YAML properties rendered natively; alias quick-open found the file; adding a property preserved the exact body")
@@ -1390,7 +1390,7 @@ def main():
                 click_control("menu:D  Delete")
                 control_bounds("trash-target")  # Trash shows the file name, not an input
                 key("Return")
-                title_contains("New tab")
+                title_contains("Nova aba")
                 assert control_bounds("tab-full:Home.md")
                 assert not (fixture / "Menu renamed.md").exists()
                 assert any(p.read_bytes() == originals["Home.md"] for p in (base / "data/Trash/files").iterdir() if p.is_file())
@@ -2416,7 +2416,7 @@ def main():
                 hover_target();click_control("page-preview/task:0")
                 assert target.read_text()==target_original.replace("- [ ]","- [x]")
                 away(True);key("ctrl+w")
-                title_contains("Graph view")
+                title_contains("Visão de grafo")
                 key("ctrl+s");key("ctrl+w")
                 open_note("Preview target")
                 assert target.read_text()==target_original.replace("- [ ]","- [x]")
@@ -7545,7 +7545,7 @@ def main():
 
                 command("Go to previous tab");title_contains("Pinned second")
                 command("Go to next tab");title_contains("Pinned third")
-                command("New tab");title_contains("New tab")
+                command("New tab");title_contains("Nova aba")
                 command("Close current tab");title_contains("Pinned third")
                 expected_pins=pinned()
                 confirm_quit();app.wait(timeout=5)
@@ -7595,7 +7595,7 @@ def main():
                 command("Close current tab",available=False);key("Escape")
                 command("New tab");command("Toggle pin")
                 control_bounds("unpin-tab:")
-                key("ctrl+w");title_contains("New tab")
+                key("ctrl+w");title_contains("Nova aba")
                 assert control_bounds("unpin-tab:",required=False) is None
                 key("ctrl+w")
                 assert all((fixture/name).read_bytes()==data for name,data in notes.items())
@@ -8955,7 +8955,7 @@ def main():
                 capture("native-tab-restore-last.png")
                 results.append("After the final document view closed, the three saved views still reopened in order without an extra blank tab")
                 key("ctrl+w");removed=paths["Alpha"].with_suffix(".removed");paths["Alpha"].rename(removed)
-                key("ctrl+shift+t");title_contains("New tab")
+                key("ctrl+shift+t");title_contains("Nova aba")
                 assert not paths["Alpha"].exists() and removed.read_text()==originals["Alpha"]
                 command("Undo close tab",available=False);key("Escape")
                 capture("native-tab-restore-missing.png");removed.rename(paths["Alpha"]);time.sleep(.8)
@@ -10443,7 +10443,7 @@ def main():
                     else:key("BackSpace")
 
                 click_control("button:Open graph view", hold=.15)
-                title_contains("Graph view")
+                title_contains("Visão de grafo")
                 ready("global-graph", 9, 9)
                 filters("global-graph")
                 capture("native-graph-global-dark.png")
@@ -10512,7 +10512,7 @@ def main():
                 command("Undo close tab")
                 title_contains("Home")
                 assert control_bounds("tab-count")[0] == 2
-                key("ctrl+w");title_contains("Graph view");ready("global-graph", 9, 9)
+                key("ctrl+w");title_contains("Visão de grafo");ready("global-graph", 9, 9)
                 results.append("Undo close tab retained a sole fileless graph and restored the closed note alongside it")
 
                 # Two tabs may retain the same document path but different view types.
@@ -10526,7 +10526,7 @@ def main():
                 title_contains("Home")
                 assert control_bounds("tab-count")[0] == 2
                 assert control_bounds("global-graph:canvas", required=False) is None
-                key("ctrl+w");title_contains("Graph view");ready("global-graph", 9, 9)
+                key("ctrl+w");title_contains("Visão de grafo");ready("global-graph", 9, 9)
                 results.append("Restart restored the active document beside its same-path Graph tab; closing the document revealed the retained graph")
 
                 labels=graph_root/"StableLabels";labels.mkdir()
@@ -11506,7 +11506,7 @@ def main():
             # Exercise the generated new-tab icon rather than only its shortcut.
             click_control("new-tab")
             pause()
-            title_contains("New tab")
+            title_contains("Nova aba")
             capture("native-empty-tab.png")
             assert sorted(str(path.relative_to(fixture)) for path in fixture.rglob("*.md")) == original_files
             key("ctrl+w")
@@ -11519,7 +11519,7 @@ def main():
             key("alt+Right")
             title_contains("First steps")
             key("ctrl+w")
-            title_contains("New tab")
+            title_contains("Nova aba")
             results.append("Ordinary quick-open reused one tab; history navigated notes; closing left no extra tabs")
 
             open_note("Home")
@@ -11558,7 +11558,7 @@ def main():
             deleted_bytes = (fixture / "Moved/Renamed note.md").read_bytes()
             command("Move file to system Trash")
             key("Return")
-            title_contains("New tab")
+            title_contains("Nova aba")
             assert control_bounds("tab-full:Notes/First steps.md")
             assert control_bounds("editor", required=False) is None
             assert control_bounds("close-tab:Moved/Renamed note.md", required=False) is None

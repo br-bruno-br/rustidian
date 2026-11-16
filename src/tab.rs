@@ -160,7 +160,7 @@ impl Tab {
 
     pub fn title(&self) -> String {
         if self.view == View::Graph {
-            "Graph view".into()
+            "Visão de grafo".into()
         } else {
             self.document.title()
         }
@@ -195,7 +195,7 @@ impl Tab {
 
     pub fn open(&mut self, document: Document) -> Result<(), &'static str> {
         if self.document.dirty() {
-            return Err("Save this note before navigating away.");
+            return Err("Salve esta nota antes de sair daqui.");
         }
         self.history.visit(&document.path);
         self.replace(document);

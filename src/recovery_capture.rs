@@ -130,7 +130,7 @@ impl Recorder {
                             .versions(&path)?
                             .into_iter()
                             .next()
-                            .ok_or("Snapshot metadata disappeared.")?;
+                            .ok_or("Os metadados da versão sumiram.")?;
                         if history.content(&path, latest.id)? == entry.text {
                             return Ok(true);
                         }
@@ -193,7 +193,7 @@ impl Recorder {
         let (reply, receiver) = mpsc::channel();
         self.sender
             .try_send(Request::Clear(reply))
-            .map_err(|_| "Local history is busy; try again shortly.")?;
+            .map_err(|_| "O histórico local está ocupado; tente de novo em instantes.")?;
         Ok(receiver)
     }
 }

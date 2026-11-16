@@ -215,7 +215,11 @@ fn edge_button(
     let response = ui
         .interact(hit, id, egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(if column { "Add column" } else { "Add row" });
+        .on_hover_text(if column {
+            "Adicionar coluna"
+        } else {
+            "Adicionar linha"
+        });
     if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
         ui.painter().rect(
             rect,
@@ -896,7 +900,7 @@ impl Tables {
                                     let count = view.model.rows.len();
                                     if let Some(selection) = selected {
                                         let (rows, chosen) = selection.ranges(count, columns);
-                                        if ui.button("Copy selection").clicked() {
+                                        if ui.button("Copiar seleção").clicked() {
                                             ui.ctx().copy_text(view.model.copy(
                                                 &tab.document.text,
                                                 rows.clone(),
@@ -904,7 +908,7 @@ impl Tables {
                                             ));
                                             ui.close();
                                         }
-                                        if ui.button("Clear selection").clicked() {
+                                        if ui.button("Limpar seleção").clicked() {
                                             edit = Some((
                                                 table,
                                                 Action::Clear {
@@ -923,7 +927,7 @@ impl Tables {
                                          enabled: bool,
                                          value: Action| {
                                             let response =
-                                                ui.add_enabled(enabled, egui::Button::new(label));
+                                                ui.add_enabled(enabled, egui::Button::new(rustidian::i18n::t(label)));
                                             crate::ui_probe::record(
                                                 ui.ctx(),
                                                 format!("table-action:{label}"),
@@ -1135,7 +1139,7 @@ impl Tables {
                                 whole,
                                 format!("edit-table-column-grip:{table}:{column}"),
                             ) {
-                                let response = response.on_hover_text("Select column");
+                                let response = response.on_hover_text("Selecionar coluna");
                                 if response.clicked() || response.secondary_clicked() && !whole {
                                     picked = Some((true, column, true, response));
                                 } else if response.context_menu_opened()
@@ -1164,7 +1168,7 @@ impl Tables {
                                 whole,
                                 format!("edit-table-row-grip:{table}:{row}"),
                             ) {
-                                let response = response.on_hover_text("Select row");
+                                let response = response.on_hover_text("Selecionar linha");
                                 if response.clicked() || response.secondary_clicked() && !whole {
                                     picked = Some((false, row, true, response));
                                 } else if response.context_menu_opened()
@@ -1215,7 +1219,7 @@ impl Tables {
                                      enabled: bool,
                                      value: Option<Action>| {
                                         let response =
-                                            ui.add_enabled(enabled, egui::Button::new(label));
+                                            ui.add_enabled(enabled, egui::Button::new(rustidian::i18n::t(label)));
                                         crate::ui_probe::record(
                                             ui.ctx(),
                                             format!("table-action:{label}"),

@@ -113,7 +113,7 @@ impl SyncRunner {
             Ok(handle) => Some(handle),
             Err(error) => {
                 shared.lock().phase = Phase::Failed;
-                shared.lock().error = Some(format!("Cannot start the sync thread: {error}"));
+                shared.lock().error = Some(format!("Não foi possível iniciar a sincronização: {error}"));
                 None
             }
         };
@@ -196,7 +196,7 @@ fn run<R: Remoto>(
         Err(error) => {
             shared.update(wake, |s| {
                 s.phase = Phase::Failed;
-                s.error = Some(format!("Cannot start sync: {error}"));
+                s.error = Some(format!("Não foi possível iniciar a sincronização: {error}"));
             });
             return;
         }
@@ -280,7 +280,7 @@ fn cycle<R: Remoto>(
                 s.phase = Phase::Failed;
                 s.mass_deletion = None;
                 s.error = Some(
-                    "The server refused this device's token (401). Disconnect and connect again with a valid token."
+                    "O servidor recusou o token deste dispositivo (401). Desconecte e conecte de novo com um token válido."
                         .into(),
                 );
             }
@@ -298,7 +298,7 @@ fn cycle<R: Remoto>(
             }
             Err(_) => {
                 s.phase = Phase::Failed;
-                s.error = Some("The sync engine stopped unexpectedly; restart Rustidian.".into());
+                s.error = Some("O mecanismo de sincronização parou de forma inesperada; reinicie o Rustidian.".into());
             }
         }
     });
@@ -384,7 +384,7 @@ pub fn start_for_vault(
 ) -> Result<SyncRunner, String> {
     let config = SyncConfig::load(&files.config)?;
     if !config.connected {
-        return Err("This vault is not connected to a sync server.".into());
+        return Err("Este cofre não está conectado a um servidor de sincronização.".into());
     }
     let (key, token) = load_secrets(store, vault)?;
     let remote = RemotoHttp::novo(&Config {
@@ -394,7 +394,7 @@ pub fn start_for_vault(
     })?;
     if let Some(parent) = files.database.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Cannot create the sync state folder: {e}"))?;
+            .map_err(|e| format!("Não foi possível criar a pasta de estado da sincronização: {e}"))?;
     }
     Ok(SyncRunner::start(
         Opcoes {

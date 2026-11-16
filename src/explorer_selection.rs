@@ -151,14 +151,14 @@ pub fn menu(ui: &mut egui::Ui, action: &mut Option<crate::file_tree::FileAction>
     if count < 2 {
         return false;
     }
-    ui.label(format!("{count} selected"));
-    let move_items = ui.button("Move selected items…");
+    ui.label(format!("{count} selecionados"));
+    let move_items = ui.button("Mover itens selecionados…");
     crate::ui_probe::record(ui.ctx(), "explorer-move-selected", move_items.rect);
     if move_items.clicked() {
         *action = Some(FileAction::MoveMany(roots(ui.ctx())));
         ui.close();
     }
-    let trash = ui.button("Delete selected items…");
+    let trash = ui.button("Excluir itens selecionados…");
     crate::ui_probe::record(ui.ctx(), "explorer-trash-selected", trash.rect);
     if trash.clicked() {
         *action = Some(FileAction::TrashMany(roots(ui.ctx())));

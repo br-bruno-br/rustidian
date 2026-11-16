@@ -51,15 +51,15 @@ impl fmt::Display for ConnectError {
             }
             ConnectError::WrongPassphrase => write!(
                 f,
-                "Wrong passphrase: it does not open this server's vault key. Type the one chosen on the first device."
+                "Frase secreta incorreta: ela não abre a chave do cofre deste servidor. Digite a escolhida no primeiro dispositivo."
             ),
             ConnectError::Unauthorized => write!(
                 f,
-                "The server refused the token. Check that it is this device's token."
+                "O servidor recusou o token. Confira se é o token deste dispositivo."
             ),
-            ConnectError::Server(m) => write!(f, "Cannot reach the sync server: {m}"),
+            ConnectError::Server(m) => write!(f, "Não foi possível acessar o servidor de sincronização: {m}"),
             ConnectError::BadKeyFile(m) => {
-                write!(f, "The server's vault key file is unusable: {m}")
+                write!(f, "O arquivo da chave do cofre no servidor não pode ser usado: {m}")
             }
         }
     }
@@ -87,14 +87,14 @@ pub fn establish_key<R: Remoto>(
     passphrase: &str,
 ) -> Result<(ChaveCofre, Outcome), ConnectError> {
     if passphrase.is_empty() {
-        return Err(ConnectError::Passphrase("Type the passphrase.".into()));
+        return Err(ConnectError::Passphrase("Digite a frase secreta.".into()));
     }
     if let Some(wrapped) = remote.baixar_chave().map_err(remote_error)? {
         return Ok((unwrap_key(&wrapped, passphrase)?, Outcome::Joined));
     }
     if passphrase.chars().count() < MIN_NEW_PASSPHRASE_CHARS {
         return Err(ConnectError::Passphrase(format!(
-            "The server has no vault key yet, so this passphrase will protect a new one: use at least {MIN_NEW_PASSPHRASE_CHARS} characters."
+            "O servidor ainda não tem chave do cofre, então esta frase secreta vai proteger uma nova: use pelo menos {MIN_NEW_PASSPHRASE_CHARS} caracteres."
         )));
     }
     let key = ChaveCofre::nova();
@@ -108,7 +108,7 @@ pub fn establish_key<R: Remoto>(
             let theirs = remote
                 .baixar_chave()
                 .map_err(remote_error)?
-                .ok_or_else(|| ConnectError::Server("the vault key disappeared".into()))?;
+                .ok_or_else(|| ConnectError::Server("a chave do cofre sumiu".into()))?;
             Ok((unwrap_key(&theirs, passphrase)?, Outcome::Joined))
         }
     }
@@ -184,7 +184,7 @@ fn forget_sync_state(files: &SyncFiles) {
 /// K and the token of a connected vault, from the credential store.
 pub fn load_secrets(store: &dyn SecretStore, vault: &Path) -> Result<(ChaveCofre, String), String> {
     let missing = || {
-        "The sync key is missing from the system credential store. Disconnect and connect again."
+        "A chave de sincronização não está no cofre de credenciais do sistema. Desconecte e conecte de novo."
             .to_owned()
     };
     let key = store
@@ -194,8 +194,8 @@ pub fn load_secrets(store: &dyn SecretStore, vault: &Path) -> Result<(ChaveCofre
         .get(&account(vault, Secret::Token))?
         .ok_or_else(missing)?;
     let key =
-        ChaveCofre::de_bytes(&key).map_err(|_| "The stored sync key is damaged.".to_owned())?;
-    let token = String::from_utf8(token).map_err(|_| "The stored token is damaged.".to_owned())?;
+        ChaveCofre::de_bytes(&key).map_err(|_| "A chave de sincronização guardada está danificada.".to_owned())?;
+    let token = String::from_utf8(token).map_err(|_| "O token guardado está danificado.".to_owned())?;
     Ok((key, token))
 }
 
@@ -223,7 +223,7 @@ mod tests {
         establish_key(&mut first, "a long passphrase").unwrap();
         let error = establish_key(&mut second, "another passphrase").unwrap_err();
         assert_eq!(error, ConnectError::WrongPassphrase);
-        assert!(error.to_string().starts_with("Wrong passphrase"));
+        assert!(error.to_string().starts_with("Frase secreta incorreta"));
     }
 
     #[test]

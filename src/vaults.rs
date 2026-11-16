@@ -106,13 +106,13 @@ pub fn resolve_input(
 ) -> Result<(PathBuf, Option<PathBuf>), String> {
     let absolute = input
         .canonicalize()
-        .map_err(|error| format!("Cannot open {}: {error}", input.display()))?;
+        .map_err(|error| format!("Não foi possível abrir {}: {error}", input.display()))?;
     if absolute.is_dir() {
         return Ok((absolute, None));
     }
     if !absolute.is_file() || !crate::vault::is_text_document(&absolute) {
         return Err(
-            "Choose a vault folder or a supported Markdown, text or source-code file.".into(),
+            "Escolha uma pasta de cofre ou um arquivo Markdown, de texto ou de código-fonte compatível.".into(),
         );
     }
     let default_vault = default_vault.and_then(|vault| vault.canonicalize().ok());
@@ -131,7 +131,7 @@ pub fn resolve_input(
         .filter(|vault| absolute.starts_with(vault) && vault.is_dir())
         .max_by_key(|vault| vault.components().count())
         .or_else(|| absolute.parent().map(Path::to_path_buf))
-        .ok_or("Cannot determine the document's folder.")?;
+        .ok_or("Não foi possível determinar a pasta do documento.")?;
     let document = absolute
         .strip_prefix(&root)
         .map_err(|error| error.to_string())?
@@ -147,9 +147,9 @@ pub fn encloses(vault: &Path, default: Option<&Path>) -> bool {
 pub fn folder(path: &Path) -> Result<PathBuf, String> {
     let root = path
         .canonicalize()
-        .map_err(|error| format!("Cannot open folder: {error}"))?;
+        .map_err(|error| format!("Não foi possível abrir a pasta: {error}"))?;
     if !root.is_dir() {
-        return Err("Choose a folder for your vault.".into());
+        return Err("Escolha uma pasta para o seu cofre.".into());
     }
     Ok(root)
 }
@@ -163,17 +163,17 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, String> {
         || !matches!(components.next(), Some(Component::Normal(_)))
         || components.next().is_some()
     {
-        return Err("Enter a vault name without slashes or surrounding spaces.".into());
+        return Err("Digite um nome de cofre sem barras nem espaços nas pontas.".into());
     }
     let root = folder(parent)?.join(name);
-    std::fs::create_dir(&root).map_err(|error| format!("Cannot create vault: {error}"))?;
+    std::fs::create_dir(&root).map_err(|error| format!("Não foi possível criar o cofre: {error}"))?;
     Ok(root)
 }
 
 impl Vaults {
     pub fn open() -> Result<Self, String> {
         Self::load_pinned(
-            location().ok_or("Cannot locate the vault list.")?,
+            location().ok_or("Não foi possível localizar a lista de cofres.")?,
             default_pins(),
         )
     }
@@ -185,9 +185,9 @@ impl Vaults {
     pub fn load_pinned(location: PathBuf, pinned: Vec<PathBuf>) -> Result<Self, String> {
         let mut stored = match std::fs::read(&location) {
             Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|error| format!("Cannot read the vault list: {error}"))?,
+                .map_err(|error| format!("Não foi possível ler a lista de cofres: {error}"))?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Stored::default(),
-            Err(error) => return Err(format!("Cannot read the vault list: {error}")),
+            Err(error) => return Err(format!("Não foi possível ler a lista de cofres: {error}")),
         };
         pin_first(&mut stored.roots, &pinned);
         Ok(Self {
@@ -217,9 +217,9 @@ impl Vaults {
         let parent = self
             .location
             .parent()
-            .ok_or("Cannot locate the vault list.")?;
+            .ok_or("Não foi possível localizar a lista de cofres.")?;
         std::fs::create_dir_all(parent)
-            .map_err(|error| format!("Cannot save the vault list: {error}"))?;
+            .map_err(|error| format!("Não foi possível salvar a lista de cofres: {error}"))?;
         let _lock = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -230,7 +230,7 @@ impl Vaults {
                 file.lock()?;
                 Ok(file)
             })
-            .map_err(|error| format!("Cannot lock the vault list: {error}"))?;
+            .map_err(|error| format!("Não foi possível travar a lista de cofres: {error}"))?;
         let mut latest = Self::load_pinned(self.location.clone(), self.pinned.clone())?.stored;
         let before = latest.roots.clone();
         change(&mut latest.roots);
@@ -249,7 +249,7 @@ impl Vaults {
         let parent = self
             .location
             .parent()
-            .ok_or("Cannot locate the vault list.")?;
+            .ok_or("Não foi possível localizar a lista de cofres.")?;
         let save = || -> std::io::Result<()> {
             let mut file = tempfile::NamedTempFile::new_in(parent)?;
             file.write_all(&bytes)?;
@@ -257,7 +257,7 @@ impl Vaults {
             file.persist(&self.location)?;
             Ok(())
         };
-        save().map_err(|error| format!("Cannot save the vault list: {error}"))?;
+        save().map_err(|error| format!("Não foi possível salvar a lista de cofres: {error}"))?;
         self.stored = stored;
         Ok(())
     }
