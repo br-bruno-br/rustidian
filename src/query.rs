@@ -67,7 +67,7 @@ impl Query {
         };
         let expression = parser.or(None)?;
         if parser.position != parser.tokens.len() {
-            return Err("An unexpected closing parenthesis remains.".into());
+            return Err("Sobrou um parêntese de fechamento inesperado.".into());
         }
         Ok(Self {
             source: source.into(),
@@ -122,7 +122,7 @@ impl Term {
                 .case_insensitive(true)
                 .build()
                 .map(|regex| Self::Regex(regex, field.unwrap_or("content").into()))
-                .map_err(|error| format!("Invalid regular expression: {error}"));
+                .map_err(|error| format!("Expressão regular inválida: {error}"));
         }
         let value = value.to_lowercase();
         Ok(match field {
@@ -264,14 +264,14 @@ impl Parse {
             }
         }
         if terms.is_empty() {
-            return Err("Enter a search term on each side of OR and inside groups.".into());
+            return Err("Digite um termo de busca de cada lado de OR e dentro dos grupos.".into());
         }
         Ok(Expression::And(terms))
     }
     fn group(&mut self, default: Option<&str>) -> Result<Expression, String> {
         let group = self.or(default)?;
         if self.tokens.get(self.position) != Some(&Token::Close) {
-            return Err("Close the search group with a parenthesis.".into());
+            return Err("Feche o grupo da busca com um parêntese.".into());
         }
         self.position += 1;
         Ok(group)
@@ -342,13 +342,13 @@ fn tokenize(source: &str) -> Result<Vec<Token>, String> {
             next = characters.next();
         }
         if quote {
-            return Err("Close the quoted search phrase.".into());
+            return Err("Feche a frase da busca entre aspas.".into());
         }
         if bracket {
-            return Err("Close the property search with ].".into());
+            return Err("Feche a busca por propriedade com ].".into());
         }
         if regex {
-            return Err("Close the regular expression with /.".into());
+            return Err("Feche a expressão regular com /.".into());
         }
         if word == "OR" && !quoted {
             tokens.push(Token::Or);

@@ -77,7 +77,7 @@ fn relative(value: &str, empty: bool) -> Result<PathBuf> {
             .any(|part| !matches!(part, Component::Normal(_)))
         || crate::vault::is_ignored_path(path)
     {
-        return Err("Choose a visible relative path inside this vault.".into());
+        return Err("Escolha um caminho relativo visível dentro deste cofre.".into());
     }
     Ok(path.to_owned())
 }
@@ -121,11 +121,11 @@ impl Config {
 
     pub fn template_paths(&self, vault: &Vault) -> Result<Vec<PathBuf>> {
         if self.templates.folder.trim().is_empty() {
-            return Err("Set the template folder in Settings → Templates first.".into());
+            return Err("Defina antes a pasta de modelos em Configurações → Modelos.".into());
         }
         let folder = relative(&self.templates.folder, false)?;
         if !vault.folders.contains(&folder) {
-            return Err("The template folder does not exist in this vault.".into());
+            return Err("A pasta de modelos não existe neste cofre.".into());
         }
         Ok(vault
             .notes
@@ -201,7 +201,7 @@ impl Config {
             let path = self.unique_path(vault, now)?;
             let absolute = vault.safe_path(&path, false)?;
             if !absolute.parent().is_some_and(Path::is_dir) {
-                return Err("The unique-note folder does not exist in this vault.".into());
+                return Err("A pasta de notas únicas não existe neste cofre.".into());
             }
             let mut document = Document::new(path.clone());
             if !self.unique.template.trim().is_empty() {
@@ -221,7 +221,7 @@ impl Config {
 
     pub fn unique_link(&self, vault: &Vault, now: DateTime<FixedOffset>) -> Result<String> {
         let path = self.unique_path(vault, now)?;
-        let name = Path::new(path.file_name().ok_or("Invalid unique-note name.")?);
+        let name = Path::new(path.file_name().ok_or("Nome de nota única inválido.")?);
         Ok(format!("[[{}]]", crate::paths::wiki_destination(name)))
     }
 
@@ -233,7 +233,7 @@ impl Config {
             let name = moment_format(stamp, self.unique.format.trim(), "YYYYMMDDHHmm");
             if !tried.insert(name.clone()) {
                 return Err(format!(
-                    "Failed to generate a unique note with the format “{}”.",
+                    "Não foi possível gerar uma nota única com o formato “{}”.",
                     self.unique.format
                 ));
             }
@@ -244,7 +244,7 @@ impl Config {
             }
             stamp = stamp
                 .checked_add_signed(Duration::minutes(1))
-                .ok_or("Cannot advance the unique-note timestamp.")?;
+                .ok_or("Não foi possível avançar o carimbo de data e hora da nota única.")?;
         }
     }
 }

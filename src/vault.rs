@@ -250,9 +250,9 @@ impl Vault {
     ) -> Result<Self> {
         let root = root
             .canonicalize()
-            .map_err(|e| format!("Cannot open vault: {e}"))?;
+            .map_err(|e| format!("Não foi possível abrir o cofre: {e}"))?;
         if !root.is_dir() {
-            return Err("Choose a folder for your vault.".into());
+            return Err("Escolha uma pasta para o seu cofre.".into());
         }
         let mut vault = Self {
             loose: crate::vaults::encloses(&root, default),
@@ -281,7 +281,7 @@ impl Vault {
 
     fn refresh_cancellable(&mut self, cancelled: impl Fn() -> bool) -> Result<()> {
         if !self.root.is_dir() {
-            return Err("The vault folder is no longer available.".into());
+            return Err("A pasta do cofre não está mais disponível.".into());
         }
         let start = Instant::now();
         let mut notes = Vec::new();
@@ -297,7 +297,7 @@ impl Vault {
             });
         for entry in entries {
             if cancelled() {
-                return Err("Opening cancelled.".into());
+                return Err("Abertura cancelada.".into());
             }
             let entry = match entry {
                 Ok(entry) => entry,
@@ -339,7 +339,7 @@ impl Vault {
 
     pub(crate) fn safe_path(&self, relative: &Path, create_parents: bool) -> Result<PathBuf> {
         if !is_text_document(relative) {
-            return Err("Choose a supported Markdown, text or source-code file.".into());
+            return Err("Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into());
         }
         self.safe_file_path(relative, create_parents)
     }
@@ -350,7 +350,7 @@ impl Vault {
                 .components()
                 .any(|c| !matches!(c, Component::Normal(_)))
         {
-            return Err("Notes must stay inside the vault. Use a relative Markdown path.".into());
+            return Err("As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into());
         }
         let mut parent = self.root.clone();
         if let Some(parents) = relative.parent() {
@@ -358,10 +358,10 @@ impl Vault {
                 parent.push(part);
                 match fs::symlink_metadata(&parent) {
                     Ok(metadata) if metadata.file_type().is_symlink() => {
-                        return Err("Linked folders cannot be edited.".into());
+                        return Err("Pastas vinculadas não podem ser editadas.".into());
                     }
                     Ok(metadata) if !metadata.is_dir() => {
-                        return Err("A parent path is not a folder.".into());
+                        return Err("Um caminho pai não é uma pasta.".into());
                     }
                     Ok(_) => {}
                     Err(error)
@@ -374,9 +374,9 @@ impl Vault {
                         if error.kind() == std::io::ErrorKind::NotFound && create_parents =>
                     {
                         fs::create_dir(&parent)
-                            .map_err(|e| format!("Cannot create folder: {e}"))?;
+                            .map_err(|e| format!("Não foi possível criar a pasta: {e}"))?;
                     }
-                    Err(error) => return Err(format!("Cannot access folder: {error}")),
+                    Err(error) => return Err(format!("Não foi possível acessar a pasta: {error}")),
                 }
             }
         }
@@ -385,22 +385,22 @@ impl Vault {
             .map_err(|e| e.to_string())?
             .starts_with(&self.root)
         {
-            return Err("Path is outside this vault.".into());
+            return Err("O caminho está fora deste cofre.".into());
         }
         let absolute = self.root.join(relative);
         if let Ok(metadata) = fs::symlink_metadata(&absolute)
             && metadata.file_type().is_symlink()
         {
-            return Err("Linked files cannot be edited.".into());
+            return Err("Arquivos vinculados não podem ser editados.".into());
         }
         Ok(absolute)
     }
 
     pub fn read(&self, path: &Path) -> Result<Document> {
         let absolute = self.document_path(path, false)?;
-        let text = fs::read_to_string(absolute).map_err(|e| format!("Cannot read note: {e}"))?;
+        let text = fs::read_to_string(absolute).map_err(|e| format!("Não foi possível ler a nota: {e}"))?;
         if text.contains('\0') {
-            return Err("This file contains binary data and cannot be edited as text.".into());
+            return Err("Este arquivo contém dados binários e não pode ser editado como texto.".into());
         }
         Ok(Document {
             path: path.into(),
@@ -416,11 +416,11 @@ impl Vault {
             return self.read(path);
         }
         if !self.attachments.iter().any(|attachment| attachment == path) {
-            return Err("Choose an indexed note or image inside this vault.".into());
+            return Err("Escolha uma nota ou imagem indexada dentro deste cofre.".into());
         }
         let absolute = self.safe_file_path(path, false)?;
         if !absolute.is_file() {
-            return Err("This image no longer exists.".into());
+            return Err("Esta imagem não existe mais.".into());
         }
         Ok(Document {
             path: path.to_owned(),
@@ -435,7 +435,7 @@ impl Vault {
     /// the source file or an existing Markdown note. Relative links keep their base.
     pub fn import_html(&mut self, source: &Document) -> Result<Document> {
         if !crate::html_import::is_html(&source.path) || source.is_image() {
-            return Err("Choose an HTML file to convert to Markdown.".into());
+            return Err("Escolha um arquivo HTML para converter em Markdown.".into());
         }
         self.safe_file_path(&source.path, false)?;
         let text = crate::html_import::convert(&source.text)?;
@@ -443,7 +443,7 @@ impl Vault {
             .path
             .file_stem()
             .and_then(|name| name.to_str())
-            .ok_or("Invalid HTML file name.")?;
+            .ok_or("Nome de arquivo HTML inválido.")?;
         let parent = source.path.parent().unwrap_or(Path::new(""));
         for number in 0..u64::MAX {
             let name = if number == 0 {
@@ -466,7 +466,7 @@ impl Vault {
                 Err(error) => return Err(error),
             }
         }
-        Err("Cannot find an unused Markdown note name.".into())
+        Err("Não foi possível achar um nome de nota Markdown livre.".into())
     }
 
     /// Create an empty note without asking for a name or replacing an existing file.
@@ -481,9 +481,9 @@ impl Vault {
             self.folder_path(folder)?
         };
         let metadata = fs::symlink_metadata(&absolute)
-            .map_err(|error| format!("Cannot create a note in this folder: {error}"))?;
+            .map_err(|error| format!("Não foi possível criar uma nota nesta pasta: {error}"))?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err("Choose an existing folder inside this vault.".into());
+            return Err("Escolha uma pasta existente dentro deste cofre.".into());
         }
         for number in 0..u64::MAX {
             let name = if number == 0 {
@@ -506,12 +506,12 @@ impl Vault {
                 Err(error) => return Err(error),
             }
         }
-        Err("Cannot find an unused note name.".into())
+        Err("Não foi possível achar um nome de nota livre.".into())
     }
 
     pub fn save(&mut self, document: &mut Document) -> Result<()> {
         if document.is_image() {
-            return Err("Images cannot be edited as Markdown.".into());
+            return Err("Imagens não podem ser editadas como Markdown.".into());
         }
         if document.original.is_some() {
             let pending = self.prepare_save(document)?;
@@ -523,11 +523,11 @@ impl Vault {
         // A new note is also a write into the vault: it waits for a sync cycle's disk work.
         let _gate = crate::sync::gate::global().hold();
         if absolute.exists() {
-            return Err("A note already exists at this path. Choose a different name.".into());
+            return Err("Já existe uma nota neste caminho. Escolha outro nome.".into());
         }
         prepare_file(&absolute, document.text.as_bytes(), None)?
             .persist_noclobber(&absolute)
-            .map_err(|e| format!("Cannot create note: {}", e.error))?;
+            .map_err(|e| format!("Não foi possível criar a nota: {}", e.error))?;
         self.commit_save(document, document.text.clone());
         Ok(())
     }
@@ -536,12 +536,12 @@ impl Vault {
     /// `write` borrows nothing from the vault, so autosave runs it off the UI thread.
     pub fn prepare_save(&self, document: &Document) -> Result<PendingSave> {
         if document.is_image() {
-            return Err("Images cannot be edited as Markdown.".into());
+            return Err("Imagens não podem ser editadas como Markdown.".into());
         }
         let original = document
             .original
             .clone()
-            .ok_or("This note is not on disk yet.")?;
+            .ok_or("Esta nota ainda não está no disco.")?;
         Ok(PendingSave {
             absolute: self.document_path(&document.path, false)?,
             path: document.path.clone(),
@@ -568,14 +568,14 @@ impl Vault {
             return self.safe_path(path, create_parents);
         }
         if !self.guests.contains(path) {
-            return Err("Notes must stay inside the vault. Use a relative Markdown path.".into());
+            return Err("As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into());
         }
         match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                Err("Linked files cannot be edited.".into())
+                Err("Arquivos vinculados não podem ser editados.".into())
             }
             Ok(metadata) if metadata.is_file() => Ok(path.to_owned()),
-            _ => Err("This file no longer exists.".into()),
+            _ => Err("Este arquivo não existe mais.".into()),
         }
     }
 
@@ -584,12 +584,12 @@ impl Vault {
     pub fn open_guest(&mut self, file: &Path) -> Result<Document> {
         let absolute = file
             .canonicalize()
-            .map_err(|error| format!("Cannot open {}: {error}", file.display()))?;
+            .map_err(|error| format!("Não foi possível abrir {}: {error}", file.display()))?;
         if absolute.starts_with(&self.root) {
-            return Err("This file belongs to the open vault.".into());
+            return Err("Este arquivo pertence ao cofre aberto.".into());
         }
         if !is_text_document(&absolute) {
-            return Err("Choose a supported Markdown, text or source-code file.".into());
+            return Err("Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into());
         }
         self.guests.insert(absolute.clone());
         let document = self.read(&absolute);
@@ -629,11 +629,11 @@ impl Vault {
 
     pub fn duplicate_file(&mut self, from: &Path) -> Result<PathBuf> {
         if is_ignored_path(from) || !(is_text_document(from) || crate::assets::is_image(from)) {
-            return Err("Choose a visible note or supported image inside this vault.".into());
+            return Err("Escolha uma nota visível ou uma imagem compatível dentro deste cofre.".into());
         }
         let source = self.safe_file_path(from, false)?;
         let bytes =
-            fs::read(&source).map_err(|error| format!("Cannot read the file to copy: {error}"))?;
+            fs::read(&source).map_err(|error| format!("Não foi possível ler o arquivo a copiar: {error}"))?;
         let text = is_text_document(from)
             .then(|| {
                 std::str::from_utf8(&bytes)
@@ -644,11 +644,11 @@ impl Vault {
         let stem = from
             .file_stem()
             .and_then(|value| value.to_str())
-            .ok_or("Invalid file name.")?;
+            .ok_or("Nome de arquivo inválido.")?;
         let extension = from
             .extension()
             .and_then(|value| value.to_str())
-            .ok_or("Add a filename extension before copying this file.")?;
+            .ok_or("Adicione uma extensão ao nome do arquivo antes de copiá-lo.")?;
         let parent = from.parent().unwrap_or(Path::new(""));
         for counter in 1_u64.. {
             let path = parent.join(format!("{stem} {counter}.{extension}"));
@@ -670,10 +670,10 @@ impl Vault {
                     return Ok(path);
                 }
                 Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(format!("Cannot create the copy: {}", error.error)),
+                Err(error) => return Err(format!("Não foi possível criar a cópia: {}", error.error)),
             }
         }
-        Err("Cannot find an available copy name.".into())
+        Err("Não foi possível achar um nome de cópia livre.".into())
     }
 
     pub(crate) fn rebuild_lookup(&mut self) {
@@ -695,12 +695,12 @@ impl Vault {
             || is_ignored_path(name)
             || !crate::assets::is_image(name)
         {
-            return Err("Choose a supported image file.".into());
+            return Err("Escolha um arquivo de imagem compatível.".into());
         }
         let stem = name
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or("Invalid image name.")?;
+            .ok_or("Nome de imagem inválido.")?;
         let extension = name
             .extension()
             .and_then(|s| s.to_str())
@@ -715,7 +715,7 @@ impl Vault {
             match fs::symlink_metadata(&absolute) {
                 Ok(_) => continue,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(format!("Cannot access attachment: {error}")),
+                Err(error) => return Err(format!("Não foi possível acessar o anexo: {error}")),
             }
             let absolute = self.safe_file_path(&relative, false)?;
             let temporary = prepare_file(&absolute, bytes, None)?;
@@ -725,10 +725,10 @@ impl Vault {
                     return Ok(relative);
                 }
                 Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(format!("Cannot save attachment: {error}")),
+                Err(error) => return Err(format!("Não foi possível salvar o anexo: {error}")),
             }
         }
-        Err("Cannot find an available image name.".into())
+        Err("Não foi possível achar um nome de imagem livre.".into())
     }
 
     pub fn query(&self, query: &str) -> Result<Vec<&Note>> {
@@ -842,16 +842,16 @@ impl Vault {
                 .components()
                 .all(|part| matches!(part, Component::Normal(_)))
         {
-            return Err("Use a note name inside this vault.".into());
+            return Err("Use o nome de uma nota deste cofre.".into());
         }
         if !is_markdown(&path) {
             let decoded = crate::paths::decode(target).unwrap_or_else(|| target.to_owned());
             if crate::assets::is_image(Path::new(&decoded)) {
-                return Err("This image does not exist in the vault.".into());
+                return Err("Esta imagem não existe no cofre.".into());
             }
             if self.root.join(&path).is_file() {
                 return Err(
-                    "This link points to an attachment rather than a Markdown note.".into(),
+                    "Este link aponta para um anexo, não para uma nota Markdown.".into(),
                 );
             }
             let mut name = path.into_os_string();
@@ -865,7 +865,7 @@ impl Vault {
             .count()
             > 1
         {
-            return Err("Several notes share this name. Use the full vault-relative path.".into());
+            return Err("Várias notas têm este nome. Use o caminho completo a partir do cofre.".into());
         }
         let mut document = Document::new(path);
         document.text = format!("# {}\n\n", document.title());
@@ -1008,10 +1008,10 @@ impl PendingSave {
         // The sync cycle and the editor take turns on the vault's files (see `sync::gate`).
         let _gate = crate::sync::gate::global().hold();
         let current = fs::read_to_string(&self.absolute).map_err(|e| {
-            format!("Note was removed or cannot be read. Your changes are still open: {e}")
+            format!("A nota foi removida ou não pode ser lida. Suas alterações continuam abertas: {e}")
         })?;
         if current != self.original {
-            return Err("This note changed outside Rustidian. Save your edits to a new note, or keep them here while reviewing the disk version. Nothing was overwritten.".into());
+            return Err("Esta nota mudou fora do Rustidian. Salve suas edições em uma nova nota ou mantenha-as aqui enquanto confere a versão do disco. Nada foi sobrescrito.".into());
         }
         let permissions = fs::metadata(&self.absolute)
             .map_err(|e| e.to_string())?
@@ -1020,12 +1020,12 @@ impl PendingSave {
         // Recheck after writing the temporary file to catch changes during a long write.
         if fs::read_to_string(&self.absolute).ok().as_ref() != Some(&self.original) {
             return Err(
-                "This note changed outside Rustidian during save. Nothing was overwritten.".into(),
+                "Esta nota mudou fora do Rustidian durante o salvamento. Nada foi sobrescrito.".into(),
             );
         }
         temporary
             .persist(&self.absolute)
-            .map_err(|e| format!("Cannot finish save: {}", e.error))?;
+            .map_err(|e| format!("Não foi possível concluir o salvamento: {}", e.error))?;
         Ok(())
     }
 }
@@ -1035,12 +1035,12 @@ fn prepare_file(
     bytes: &[u8],
     permissions: Option<fs::Permissions>,
 ) -> Result<NamedTempFile> {
-    let parent = absolute.parent().ok_or("Invalid note path")?;
+    let parent = absolute.parent().ok_or("Caminho de nota inválido")?;
     let mut temporary =
-        NamedTempFile::new_in(parent).map_err(|e| format!("Cannot prepare save: {e}"))?;
+        NamedTempFile::new_in(parent).map_err(|e| format!("Não foi possível preparar o salvamento: {e}"))?;
     temporary
         .write_all(bytes)
-        .map_err(|e| format!("Cannot write note: {e}"))?;
+        .map_err(|e| format!("Não foi possível gravar a nota: {e}"))?;
     if let Some(permissions) = permissions {
         temporary
             .as_file()
@@ -1050,7 +1050,7 @@ fn prepare_file(
     temporary
         .as_file()
         .sync_all()
-        .map_err(|e| format!("Cannot flush note: {e}"))?;
+        .map_err(|e| format!("Não foi possível gravar a nota no disco: {e}"))?;
     Ok(temporary)
 }
 

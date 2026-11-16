@@ -23,7 +23,7 @@ pub fn reveal(path: &Path) -> Result<(), String> {
         .raw_arg(format!("/select,\"{}\"", path.display()))
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("Cannot open the system file manager: {error}"))
+        .map_err(|error| format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}"))
 }
 
 /// Select an item in its parent using the desktop file-manager interface.
@@ -49,12 +49,12 @@ pub fn reveal(path: &Path) -> Result<(), String> {
             "string:",
         ])
         .output()
-        .map_err(|error| format!("Cannot open the system file manager: {error}"))?;
+        .map_err(|error| format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}"))?;
     if output.status.success() {
         Ok(())
     } else {
         Err(format!(
-            "Cannot open the system file manager: {}",
+            "Não foi possível abrir o gerenciador de arquivos do sistema: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ))
     }
@@ -80,7 +80,7 @@ impl Picker {
 
     pub fn start(&mut self, kind: Kind, initial: Option<&Path>, title: &str) -> Result<(), String> {
         if self.active() {
-            return Err("A file browser is already open. Finish or cancel it first.".into());
+            return Err("Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into());
         }
         let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(initial) = initial.filter(|path| !path.as_os_str().is_empty()) {
@@ -97,13 +97,13 @@ impl Picker {
         if kind == Kind::File {
             dialog = dialog
                 .add_filter(
-                    "Notes and source code",
+                    "Notas e código-fonte",
                     &[
                         "md", "txt", "rs", "py", "js", "ts", "json", "toml", "yaml", "yml", "html",
                         "css", "c", "cpp", "h", "sh",
                     ],
                 )
-                .add_filter("All files", &["*"]);
+                .add_filter("Todos os arquivos", &["*"]);
         }
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::Builder::new()
@@ -115,7 +115,7 @@ impl Picker {
                 };
                 let _ = sender.send(chosen);
             })
-            .map_err(|error| format!("Cannot open the file browser: {error}"))?;
+            .map_err(|error| format!("Não foi possível abrir o navegador de arquivos: {error}"))?;
         self.pending = Some(receiver);
         self.kind = kind;
         Ok(())
@@ -132,7 +132,7 @@ impl Picker {
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => {
                 self.pending = None;
-                Some(Err("The file browser failed.".into()))
+                Some(Err("O navegador de arquivos falhou.".into()))
             }
         }
     }
@@ -169,8 +169,8 @@ impl Picker {
             }
             Kind::File => {
                 command.args([
-                    "--file-filter=Notes and source code | *.md *.MD *.txt *.TXT *.rs *.py *.js *.ts *.json *.toml *.yaml *.yml *.html *.css *.c *.cpp *.h *.sh",
-                    "--file-filter=All files | *",
+                    "--file-filter=Notas e código-fonte | *.md *.MD *.txt *.TXT *.rs *.py *.js *.ts *.json *.toml *.yaml *.yml *.html *.css *.c *.cpp *.h *.sh",
+                    "--file-filter=Todos os arquivos | *",
                 ]);
             }
         }
@@ -182,14 +182,14 @@ impl Picker {
 
     fn spawn(&mut self, kind: Kind, command: &mut Command) -> Result<(), String> {
         if self.active() {
-            return Err("A file browser is already open. Finish or cancel it first.".into());
+            return Err("Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into());
         }
         self.child = Some(
             command
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .map_err(|error| format!("Cannot open the file browser: {error}"))?,
+                .map_err(|error| format!("Não foi possível abrir o navegador de arquivos: {error}"))?,
         );
         self.kind = kind;
         Ok(())
@@ -202,7 +202,7 @@ impl Picker {
             Ok(None) => return None,
             Err(error) => {
                 self.cancel();
-                return Some(Err(format!("Cannot read the file browser: {error}")));
+                return Some(Err(format!("Não foi possível ler o navegador de arquivos: {error}")));
             }
         };
         let mut child = self.child.take()?;
@@ -210,23 +210,23 @@ impl Picker {
             return Some(Ok(None));
         }
         if !status.success() {
-            return Some(Err(format!("The file browser failed ({status}).")));
+            return Some(Err(format!("O navegador de arquivos falhou ({status}).")));
         }
         Some((|| {
             let mut result = String::new();
             child
                 .stdout
                 .take()
-                .ok_or("The file browser returned no path.")?
+                .ok_or("O navegador de arquivos não devolveu nenhum caminho.")?
                 .take(16_385)
                 .read_to_string(&mut result)
-                .map_err(|error| format!("Cannot read the selected path: {error}"))?;
+                .map_err(|error| format!("Não foi possível ler o caminho selecionado: {error}"))?;
             if result.len() > 16_384 {
-                return Err("The selected path is too long.".into());
+                return Err("O caminho selecionado é longo demais.".into());
             }
             let path = result.strip_suffix('\n').unwrap_or(&result);
             if path.is_empty() {
-                return Err("The file browser returned an empty path.".into());
+                return Err("O navegador de arquivos devolveu um caminho vazio.".into());
             }
             Ok(Some(PathBuf::from(path)))
         })())
