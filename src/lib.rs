@@ -26,6 +26,7 @@ pub mod structure;
 pub mod sync;
 pub mod tab;
 pub mod tables;
+pub mod unlinked;
 #[cfg(all(feature = "agente", not(target_os = "linux")))]
 compile_error!(
     "A feature `agente` só funciona no Linux por enquanto: o terminal usa PTY e sinais POSIX (a tabela de R2 do plano do fork)."

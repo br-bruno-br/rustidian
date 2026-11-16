@@ -43,7 +43,48 @@ pub struct LinkedMention {
     pub after: String,
 }
 
+/// Most unlinked mentions listed for one note.
+pub const UNLINKED_LIMIT: usize = 200;
+
 impl LinkedMention {
+    /// The mention of `text[range]` in the note at `from`, with up to 50 chars before and 70
+    /// after it on the same line.
+    fn at(from: &Path, text: &str, range: std::ops::Range<usize>) -> Self {
+        let line_start = text[..range.start].rfind('\n').map_or(0, |start| start + 1);
+        let line_end = text[range.end..]
+            .find('\n')
+            .map_or(text.len(), |end| range.end + end);
+        let prefix = &text[line_start..range.start];
+        let suffix = text[range.end..line_end].trim_end_matches('\r');
+        let mut before: String = prefix
+            .chars()
+            .rev()
+            .take(50)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        if prefix.chars().count() > 50 {
+            before.insert(0, '…');
+        }
+        let mut after: String = suffix.chars().take(70).collect();
+        if suffix.chars().count() > 70 {
+            after.push('…');
+        }
+        LinkedMention {
+            path: from.to_owned(),
+            line: text[..range.start]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1,
+            link: text[range.clone()].into(),
+            range,
+            before,
+            after,
+        }
+    }
+
     /// Visible link text, while `link` and `range` retain the exact source for navigation.
     pub fn label(&self) -> String {
         let raw = self.link.strip_prefix('!').unwrap_or(&self.link);
@@ -853,39 +894,7 @@ impl Vault {
                 if self.resolve_destination(&from, &target).as_deref() != Some(path) {
                     continue;
                 }
-                let line_start = text[..range.start].rfind('\n').map_or(0, |start| start + 1);
-                let line_end = text[range.end..]
-                    .find('\n')
-                    .map_or(text.len(), |end| range.end + end);
-                let prefix = &text[line_start..range.start];
-                let suffix = text[range.end..line_end].trim_end_matches('\r');
-                let mut before: String = prefix
-                    .chars()
-                    .rev()
-                    .take(50)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
-                if prefix.chars().count() > 50 {
-                    before.insert(0, '…');
-                }
-                let mut after: String = suffix.chars().take(70).collect();
-                if suffix.chars().count() > 70 {
-                    after.push('…');
-                }
-                mentions.push(LinkedMention {
-                    path: from.clone(),
-                    line: text[..range.start]
-                        .bytes()
-                        .filter(|byte| *byte == b'\n')
-                        .count()
-                        + 1,
-                    link: text[range.clone()].into(),
-                    range,
-                    before,
-                    after,
-                });
+                mentions.push(LinkedMention::at(&from, text, range));
             }
         }
         mentions.sort_by(|a, b| {
@@ -894,6 +903,62 @@ impl Vault {
                 .then_with(|| a.range.start.cmp(&b.range.start))
         });
         mentions
+    }
+
+    /// Plain-text mentions of `path`'s title or aliases in other notes, outside their links,
+    /// using open drafts instead of their saved copies. `link` holds the matched text. At most
+    /// `UNLINKED_LIMIT` mentions, so a common name cannot flood the panel.
+    pub fn unlinked_mentions(&self, path: &Path, open: &[(&Path, &str)]) -> Vec<LinkedMention> {
+        let mut names = vec![file_title(path)];
+        if let Some(note) = self
+            .paths
+            .get(path)
+            .and_then(|&index| self.notes.get(index))
+        {
+            names.extend(note.aliases.iter().cloned());
+        }
+        let mut sources: std::collections::BTreeMap<PathBuf, &str> = self
+            .notes
+            .iter()
+            .map(|note| (note.path.clone(), note.text.as_str()))
+            .collect();
+        for &(from, text) in open {
+            if !from.as_os_str().is_empty() && sources.contains_key(from) {
+                sources.insert(from.to_owned(), text);
+            }
+        }
+        let mut mentions = Vec::new();
+        for (from, text) in sources {
+            if from == path {
+                continue;
+            }
+            let links: Vec<_> = reference_spans(text)
+                .into_iter()
+                .map(|(range, _)| range)
+                .collect();
+            for range in crate::unlinked::spans(text, &names, &links) {
+                mentions.push(LinkedMention::at(&from, text, range));
+                if mentions.len() >= UNLINKED_LIMIT {
+                    return mentions;
+                }
+            }
+        }
+        mentions
+    }
+
+    /// The wikilink target `from` would use for `path`: its title when that resolves to it,
+    /// else its vault path without the Markdown extension.
+    pub fn link_target(&self, from: &Path, path: &Path) -> String {
+        let title = file_title(path);
+        if self.resolve(from, &title).as_deref() == Some(path) {
+            return title;
+        }
+        let relative = if is_markdown(path) {
+            path.with_extension("")
+        } else {
+            path.to_owned()
+        };
+        relative.to_string_lossy().replace('\\', "/")
     }
 
     pub fn backlinks(&self, path: &Path) -> Vec<&Note> {
@@ -1117,7 +1182,7 @@ pub fn file_title(path: &Path) -> String {
     .into_owned()
 }
 
-fn prose_lines(text: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn prose_lines(text: &str) -> impl Iterator<Item = &str> {
     let mut fence: Option<(char, usize)> = None;
     text.lines().filter(move |line| {
         let trimmed = line.trim_start();

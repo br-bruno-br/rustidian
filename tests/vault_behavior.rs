@@ -492,3 +492,41 @@ fn backlink_labels_hide_encoded_destinations_and_keep_exact_navigation_ranges() 
         assert_eq!(&source[mention.range], mention.link);
     }
 }
+
+#[test]
+fn unlinked_mentions_find_title_and_aliases_outside_links_and_prefer_open_drafts() {
+    let folder = tempdir().unwrap();
+    fs::write(
+        folder.path().join("Loja Replay.md"),
+        "---\naliases: [Replay]\n---\n# Loja\n",
+    )
+    .unwrap();
+    let saved = "Fui na loja replay hoje.\n[[Loja Replay]] já tem link.\nA Replay abre às 9h.\n`Replay` em código.\n";
+    fs::write(folder.path().join("Diario.md"), saved).unwrap();
+    fs::write(folder.path().join("Outra.md"), "Replays não contam.\n").unwrap();
+    let vault = Vault::open(folder.path()).unwrap();
+    let target = Path::new("Loja Replay.md");
+    let mentions = vault.unlinked_mentions(target, &[]);
+    assert_eq!(
+        mentions.iter().map(|m| m.link.as_str()).collect::<Vec<_>>(),
+        ["loja replay", "Replay"]
+    );
+    for mention in &mentions {
+        assert_eq!(mention.path, Path::new("Diario.md"));
+        assert_eq!(&saved[mention.range.clone()], mention.link);
+    }
+    assert_eq!(mentions[1].line, 3);
+    let draft = "Rascunho sem a loja.\nReplay no rascunho.\n";
+    let mentions = vault.unlinked_mentions(target, &[(Path::new("Diario.md"), draft)]);
+    assert_eq!(
+        mentions
+            .iter()
+            .map(|m| &draft[m.range.clone()])
+            .collect::<Vec<_>>(),
+        ["Replay"]
+    );
+    assert_eq!(
+        vault.link_target(Path::new("Diario.md"), target),
+        "Loja Replay"
+    );
+}
