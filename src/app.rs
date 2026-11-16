@@ -2490,8 +2490,8 @@ impl NotesApp {
                             egui::Popup::menu(&sort).show(|ui| {
                                 theme::menu_style(ui);
                                 for (descending, label, probe) in [
-                                    (false, "File name (A to Z)", "sort-ascending"),
-                                    (true, "File name (Z to A)", "sort-descending"),
+                                    (false, "Nome do arquivo (A a Z)", "sort-ascending"),
+                                    (true, "Nome do arquivo (Z a A)", "sort-descending"),
                                 ] {
                                     let response = ui.selectable_label(
                                         self.sort_descending == descending,
@@ -2524,7 +2524,7 @@ impl NotesApp {
                 } else if self.searching {
                     let input = ui.add(theme::text_field(
                         TextEdit::singleline(&mut self.search)
-                            .hint_text("Search your notes…")
+                            .hint_text("Buscar nas suas notas…")
                             .desired_width(f32::INFINITY),
                     ));
                     crate::ui_probe::record(ui.ctx(), "search-input", input.rect);
@@ -2547,8 +2547,8 @@ impl NotesApp {
                         }
                         ui.label(
                             RichText::new(match results.len() {
-                                1 => "1 result".to_owned(),
-                                count => format!("{count} results"),
+                                1 => "1 resultado".to_owned(),
+                                count => format!("{count} resultados"),
                             })
                             .small()
                             .weak(),
@@ -2669,7 +2669,7 @@ impl NotesApp {
                             self.vault
                                 .as_ref()
                                 .map(Vault::name)
-                                .unwrap_or("No vault".into()),
+                                .unwrap_or("Nenhum cofre".into()),
                         )
                         .size(12.0)
                         .strong()
@@ -2747,7 +2747,7 @@ impl NotesApp {
                             .vault
                             .as_ref()
                             .map(Vault::name)
-                            .unwrap_or_else(|| "Open vault…".into());
+                            .unwrap_or_else(|| "Abrir cofre…".into());
                         // A row as tall as its controls, clear of the status bar: a plain
                         // `horizontal` row is shorter, and the controls spilled under the bar.
                         ui.add_space(theme::space::XS);
