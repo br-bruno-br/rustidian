@@ -1,0 +1,10 @@
+[package]
+name = "nota-cripto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Chave do cofre e cifra de arquivos e nomes (XChaCha20-Poly1305, Argon2id, HKDF)"
+license = "MIT"
+publish = false
+
+[dependencies]
