@@ -361,29 +361,130 @@ pub const ALL: &[Command] = &[
     },
 ];
 
+/// The name shown to the user. The English `name` stays the command's identity (dispatch, the
+/// screen test's probe ids); the palette shows this and matches a query against either.
+pub fn label(name: &str) -> &str {
+    match name {
+        ADD_UNIQUE_LINK => "Criador de nota única: Adicionar link interno único",
+        DUPLICATE_FILE => "Fazer uma cópia do arquivo atual",
+        MOVE_FILE => "Mover o arquivo atual para outra pasta",
+        UNDO_CLOSE_TAB => "Reabrir aba fechada",
+        CLOSE_OTHER_TABS => "Fechar todas as outras abas",
+        OPEN_FILE => "Abrir arquivo…",
+        OPEN_FOLDER => "Abrir pasta…",
+        OPEN_GRAPH => "Visão de grafo: Abrir visão de grafo",
+        OPEN_LOCAL_GRAPH => "Visão de grafo: Abrir grafo local",
+        INCREASE_FONT_SIZE => "Aumentar tamanho da fonte",
+        DECREASE_FONT_SIZE => "Diminuir tamanho da fonte",
+        "Agent: Open agent tab" => "Agente: Abrir aba do agente",
+        "Toggle pin" => "Fixar ou desafixar aba",
+        "New tab" => "Nova aba",
+        "Close current tab" => "Fechar aba atual",
+        "Go to next tab" => "Ir para a próxima aba",
+        "Go to previous tab" => "Ir para a aba anterior",
+        "Unique note creator: Create new unique note" => "Criador de nota única: Criar nota única",
+        "Random note: Open random note" => "Nota aleatória: Abrir nota aleatória",
+        "File recovery: Open local history" => "Recuperação de arquivo: Abrir histórico local",
+        "Workspaces: Manage workspace layouts" => {
+            "Espaços de trabalho: Gerenciar layouts de espaço de trabalho"
+        }
+        "Workspaces: Load workspace layout" => {
+            "Espaços de trabalho: Carregar layout de espaço de trabalho"
+        }
+        "Workspaces: Save layout" => "Espaços de trabalho: Salvar layout",
+        "Workspaces: Save and load another layout" => {
+            "Espaços de trabalho: Salvar e carregar outro layout"
+        }
+        "New note" => "Nova nota",
+        "New folder" => "Nova pasta",
+        "Daily notes: Open today's daily note" => "Notas diárias: Abrir a nota diária de hoje",
+        "Templates: Insert template" => "Modelos: Inserir modelo",
+        "Templates: Insert current date" => "Modelos: Inserir data atual",
+        "Templates: Insert current time" => "Modelos: Inserir hora atual",
+        "Open a file" => "Abrir um arquivo",
+        "Open vault" => "Abrir cofre",
+        "Open another vault" => "Abrir outro cofre",
+        "Create new vault" => "Criar novo cofre",
+        "Save note" => "Salvar nota",
+        "Save a copy" => "Salvar uma cópia",
+        "Reading view" => "Modo de leitura",
+        "Live preview" => "Pré-visualização ao vivo",
+        "Source editing" => "Edição do código-fonte",
+        "Split source and preview" => "Dividir código-fonte e pré-visualização",
+        "Add property" => "Adicionar propriedade",
+        "Highlight Cyan" => "Destacar em ciano",
+        "Highlight Green" => "Destacar em verde",
+        "Highlight Orange" => "Destacar em laranja",
+        "Highlight Red" => "Destacar em vermelho",
+        "Highlight Yellow" => "Destacar em amarelo",
+        "Toggle blue highlight" => "Alternar destaque azul",
+        "Toggle green highlight" => "Alternar destaque verde",
+        "Toggle orange highlight" => "Alternar destaque laranja",
+        "Toggle purple highlight" => "Alternar destaque roxo",
+        "Toggle red highlight" => "Alternar destaque vermelho",
+        "Toggle yellow highlight" => "Alternar destaque amarelo",
+        "Highlight selection" => "Destacar seleção",
+        "Rename or move file" => "Renomear ou mover arquivo",
+        "Move file to system Trash" => "Mover arquivo para a Lixeira",
+        "Bookmark current file" => "Favoritar o arquivo atual",
+        "Show bookmarks" => "Mostrar favoritos",
+        "Toggle left sidebar" => "Alternar painel lateral esquerdo",
+        "Toggle right sidebar" => "Alternar painel lateral direito",
+        "Switch appearance" => "Alternar aparência",
+        "Refresh vault" => "Atualizar cofre",
+        "Open settings" => "Abrir configurações",
+        other => other,
+    }
+}
+
 pub fn ranked(query: &str, scope: Scope) -> Vec<&'static Command> {
     let query = query.trim();
-    let mut matches: Vec<_> = Pattern::new(
+    let pattern = Pattern::new(
         query,
         CaseMatching::Ignore,
         Normalization::Smart,
         AtomKind::Fuzzy,
-    )
-    .match_list(
-        ALL.iter().filter(|command| scope.includes(command.scope)),
-        &mut Matcher::new(Config::DEFAULT),
-    )
-    .into_iter()
-    .map(|(command, _)| command)
-    .collect();
-    if let Some(index) = matches
-        .iter()
-        .position(|command| command.name.eq_ignore_ascii_case(query))
-    {
+    );
+    let mut matcher = Matcher::new(Config::DEFAULT);
+    let available = || ALL.iter().filter(|command| scope.includes(command.scope));
+    // A query matches the identifying (English) name, fuzzily, or the name shown (Portuguese),
+    // by whole pieces: a fuzzy match on the longer Portuguese text would find too much.
+    let shown_pattern = Pattern::new(
+        query,
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        AtomKind::Substring,
+    );
+    let mut scored: Vec<(&'static Command, u32)> = pattern
+        .match_list(available(), &mut matcher)
+        .into_iter()
+        .collect();
+    for (shown, score) in shown_pattern.match_list(available().map(Shown), &mut matcher) {
+        match scored
+            .iter_mut()
+            .find(|(known, _)| std::ptr::eq(*known, shown.0))
+        {
+            Some(entry) => entry.1 = entry.1.max(score),
+            None => scored.push((shown.0, score)),
+        }
+    }
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut matches: Vec<_> = scored.into_iter().map(|(command, _)| command).collect();
+    if let Some(index) = matches.iter().position(|command| {
+        command.name.eq_ignore_ascii_case(query) || label(command.name).eq_ignore_ascii_case(query)
+    }) {
         let exact = matches.remove(index);
         matches.insert(0, exact);
     }
     matches
+}
+
+struct Shown(&'static Command);
+
+impl AsRef<str> for Shown {
+    fn as_ref(&self) -> &str {
+        label(self.0.name)
+    }
 }
 
 #[cfg(test)]
