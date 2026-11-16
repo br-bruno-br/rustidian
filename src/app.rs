@@ -4496,12 +4496,12 @@ impl NotesApp {
                         theme::dialog_style(ui);
                         ui.set_width(400.0);
                         ui.heading(match kind {
-                            rustidian::native_picker::Kind::File => "Open file",
-                            rustidian::native_picker::Kind::Folder => "Open folder",
+                            rustidian::native_picker::Kind::File => "Abrir arquivo",
+                            rustidian::native_picker::Kind::Folder => "Abrir pasta",
                         });
-                        ui.label("Choose an existing item in the file browser.");
+                        ui.label("Escolha um item existente no navegador de arquivos.");
                         ui.add_space(theme::space::L);
-                        let button = ui.button("Cancel");
+                        let button = ui.button("Cancelar");
                         crate::ui_probe::record(ctx, "system-open-cancel", button.rect);
                         crate::ui_probe::record(ctx, "system-open-picker", ui.max_rect());
                         cancel = button.clicked();
