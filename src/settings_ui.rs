@@ -563,13 +563,13 @@ impl NotesApp {
                                     "Pasta que contém seus modelos.",
                                     "settings-template-folder",
                                     &mut self.note_aids.templates.folder,
-                                    "Choose a vault folder",
+                                    "Escolha uma pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Date format",
-                                    "Format for the date variable.",
+                                    "Formato da data",
+                                    "Formato da variável de data.",
                                     "settings-template-date",
                                     &mut self.note_aids.templates.date_format,
                                     "YYYY-MM-DD",
@@ -577,8 +577,8 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Time format",
-                                    "Format for the time variable.",
+                                    "Formato da hora",
+                                    "Formato da variável de hora.",
                                     "settings-template-time",
                                     &mut self.note_aids.templates.time_format,
                                     "HH:mm",
