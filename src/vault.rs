@@ -687,6 +687,36 @@ impl Vault {
         }
     }
 
+    /// The indexed note at `path`, found without scanning the notes.
+    pub fn note(&self, path: &Path) -> Option<&Note> {
+        self.notes.get(*self.paths.get(path)?)
+    }
+
+    /// Re-read the notes at `paths` (vault-relative) after an edit made outside Rustidian and
+    /// update only their entries. Returns the paths whose text changed, or `None` when any path
+    /// is not an indexed note that is still a readable file: a new, removed, renamed, unreadable
+    /// or non-note path needs the full index, and nothing is changed then.
+    pub fn refresh_changed(&mut self, paths: &[PathBuf]) -> Option<Vec<PathBuf>> {
+        let mut changed = Vec::new();
+        for path in paths {
+            let index = *self.paths.get(path)?;
+            let absolute = self.root.join(path);
+            let metadata = fs::symlink_metadata(&absolute).ok()?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return None;
+            }
+            let text = fs::read_to_string(&absolute).ok()?;
+            if self.notes.get(index)?.text != text {
+                changed.push((path.clone(), text));
+            }
+        }
+        let paths = changed.iter().map(|(path, _)| path.clone()).collect();
+        for (path, text) in changed {
+            self.index_note(path, text);
+        }
+        Some(paths)
+    }
+
     pub fn duplicate_file(&mut self, from: &Path) -> Result<PathBuf> {
         if is_ignored_path(from) || !(is_text_document(from) || crate::assets::is_image(from)) {
             return Err("Choose a visible note or supported image inside this vault.".into());

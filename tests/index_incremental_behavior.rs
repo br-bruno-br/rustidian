@@ -162,3 +162,55 @@ fn creating_a_note_still_matches_a_full_index() {
     edit(&mut vault, "Novo.md", "[[Gamma]]\n");
     same_as_full_index(&vault, "editing the new note");
 }
+
+#[test]
+fn external_edits_refresh_only_the_changed_notes() {
+    let folder = tempdir().unwrap();
+    let mut vault = vault_with_notes(folder.path());
+    assert_eq!(vault.backlinks(Path::new("Alpha.md")).len(), 2);
+    write(folder.path(), "Gamma.md", "Agora [[Alpha]] e [[Beta]].\n");
+    write(folder.path(), "Dir/Zeta.md", "[[Gamma]]\n");
+    let paths = [
+        PathBuf::from("Gamma.md"),
+        PathBuf::from("Dir/Zeta.md"),
+        PathBuf::from("Beta.md"),
+    ];
+    let mut changed = vault.refresh_changed(&paths).unwrap();
+    changed.sort();
+    assert_eq!(
+        changed,
+        [PathBuf::from("Dir/Zeta.md"), PathBuf::from("Gamma.md")]
+    );
+    same_as_full_index(&vault, "an external edit");
+    // Nothing changed since: nothing to report.
+    assert_eq!(vault.refresh_changed(&paths).unwrap(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn external_changes_that_are_not_edits_need_the_full_index() {
+    let folder = tempdir().unwrap();
+    let mut vault = vault_with_notes(folder.path());
+    write(folder.path(), "Alpha.md", "[[Gamma]] mudou\n");
+    // A new file, a missing one and a folder are not edits of an indexed note, and the
+    // edited note is left alone when any of them comes along.
+    write(folder.path(), "Nova.md", "oi\n");
+    assert!(vault.refresh_changed(&[PathBuf::from("Nova.md")]).is_none());
+    assert!(
+        vault
+            .refresh_changed(&[PathBuf::from("Alpha.md"), PathBuf::from("Nova.md")])
+            .is_none()
+    );
+    assert!(vault.refresh_changed(&[PathBuf::from("Dir")]).is_none());
+    fs::remove_file(folder.path().join("Gamma.md")).unwrap();
+    assert!(
+        vault
+            .refresh_changed(&[PathBuf::from("Gamma.md")])
+            .is_none()
+    );
+    let alpha = vault
+        .notes
+        .iter()
+        .find(|note| note.path == Path::new("Alpha.md"))
+        .unwrap();
+    assert_eq!(alpha.text, "# Alpha\nVai para [[Beta]] e [[Gamma]].\n");
+}
