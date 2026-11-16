@@ -10,5 +10,12 @@
 #![forbid(unsafe_code)]
 
 pub mod caminhos;
+pub mod http;
+pub mod memoria;
 pub mod motor;
 pub mod protocolo;
+pub mod remoto;
+
+pub use http::{Config, RemotoHttp};
+pub use memoria::RemotoMemoria;
+pub use remoto::{ErroRemoto, Remoto};
