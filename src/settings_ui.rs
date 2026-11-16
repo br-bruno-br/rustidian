@@ -133,8 +133,8 @@ impl NotesApp {
         group(ui, |ui| {
             changed |= choice(
                 ui,
-                "Default view for new tabs",
-                "The default view that a new Markdown tab gets opened in.",
+                "Modo padrão para novas abas",
+                "O modo em que uma nova aba Markdown é aberta.",
                 "settings-default-view",
                 &mut self.editor_preferences.reading_view,
                 ["Editing view", "Reading view"],
@@ -142,8 +142,8 @@ impl NotesApp {
             ui.separator();
             changed |= choice(
                 ui,
-                "Default editing mode",
-                "The default editing mode a new tab will start with.",
+                "Modo de edição padrão",
+                "O modo de edição com que uma nova aba começa.",
                 "settings-editing-mode",
                 &mut self.editor_preferences.source_mode,
                 ["Live Preview", "Source mode"],
@@ -151,40 +151,40 @@ impl NotesApp {
             ui.separator();
             changed |= toggle(
                 ui,
-                "Show editing mode in status bar",
-                "Show the editing mode in the status bar.",
+                "Mostrar o modo de edição na barra de status",
+                "Mostra o modo de edição na barra de status.",
                 "settings-show-mode",
                 &mut self.editor_preferences.show_mode,
             );
         });
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Display");
+        ui.strong("Exibição");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Inline title",
-                "Display the filename as an editable title inline with the file contents.",
+                "Título embutido",
+                "Mostra o nome do arquivo como um título editável junto ao conteúdo.",
                 "settings-inline-title",
                 &mut self.editor_preferences.inline_title,
             );
             ui.separator();
             changed |= toggle(
                 ui,
-                "Readable line length",
-                "Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable.",
+                "Largura de linha confortável",
+                "Limita a largura máxima das linhas. Cabe menos conteúdo na tela, mas blocos longos de texto ficam mais legíveis.",
                 "settings-readable-line-length",
                 &mut self.editor_preferences.readable_line_length,
             );
         });
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Privacy");
+        ui.strong("Privacidade");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Load images from the internet",
-                "Off: notes with web images (http or https) make no network request; a marker stands in and a click loads that one image.",
+                "Carregar imagens da internet",
+                "Desligado: notas com imagens da web (http ou https) não fazem nenhum pedido de rede; um marcador toma o lugar e um clique carrega aquela imagem.",
                 "settings-remote-images",
                 &mut self.editor_preferences.remote_images,
             );
@@ -194,13 +194,13 @@ impl NotesApp {
         ui.add_space(crate::theme::space::S);
         changed |= self.spelling_settings(ui);
         ui.add_space(crate::theme::space::XL);
-        ui.strong("Saving");
+        ui.strong("Salvamento");
         ui.add_space(crate::theme::space::S);
         group(ui, |ui| {
             changed |= toggle(
                 ui,
-                "Autosave",
-                "Save changes after 600 ms without typing.",
+                "Salvar automaticamente",
+                "Salva as alterações após 600 ms sem digitar.",
                 "settings-autosave",
                 &mut self.autosave_enabled,
             );
