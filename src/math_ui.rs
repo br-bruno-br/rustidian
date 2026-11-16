@@ -62,10 +62,10 @@ struct Renderer {
 
 fn check_size(width: f32, height: f32) -> Result<egui::Vec2, String> {
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-        return Err("The formula has invalid or empty dimensions.".into());
+        return Err("A fórmula tem dimensões inválidas ou vazias.".into());
     }
     if width > MAX_WIDTH || height > MAX_HEIGHT || width * height > MAX_PIXELS {
-        return Err("The formula is too large to render safely.".into());
+        return Err("A fórmula é grande demais para ser exibida com segurança.".into());
     }
     Ok(egui::vec2(width, height))
 }
@@ -76,11 +76,11 @@ fn render(key: &Key) -> Result<(String, egui::Vec2), String> {
     use ratex_types::{color::Color, math_style::MathStyle};
 
     if key.source.len() > MAX_SOURCE_BYTES {
-        return Err("The formula exceeds the 4096-byte rendering limit.".into());
+        return Err("A fórmula passa do limite de 4096 bytes para exibição.".into());
     }
     let font_size = f32::from_bits(key.font_bits);
     if !font_size.is_finite() || font_size <= 0.0 {
-        return Err("The formula font size is invalid.".into());
+        return Err("O tamanho da fonte da fórmula é inválido.".into());
     }
     let ast = ratex_parser::parse(&key.source).map_err(|error| error.to_string())?;
     let style = if key.display {
@@ -108,11 +108,11 @@ fn render(key: &Key) -> Result<(String, egui::Vec2), String> {
     let items = to_display_list(&boxed);
     let svg = render_to_svg_with_color_syntax(&items, &svg_options, SvgColorSyntax::Rgb);
     if svg.len() > MAX_SVG_BYTES {
-        return Err("The formula exceeds the SVG rendering limit.".into());
+        return Err("A fórmula passa do limite de exibição em SVG.".into());
     }
     // Missing outlines otherwise silently become text requiring external fonts.
     if svg.contains("<text") || svg.contains("<image") {
-        return Err("This formula contains a glyph without a vector outline.".into());
+        return Err("Esta fórmula contém um glifo sem contorno vetorial.".into());
     }
     let tree =
         usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())?;
@@ -163,7 +163,7 @@ impl Renderer {
                 }
             })
             .err()
-            .map(|error| format!("Unable to start the math renderer: {error}"));
+            .map(|error| format!("Não foi possível iniciar o renderizador de matemática: {error}"));
         Self {
             jobs,
             cache,
@@ -194,7 +194,7 @@ impl Renderer {
             // A queued job's completion repaints; no timer or idle polling is needed.
             Err(TrySendError::Full(_)) => return State::Pending,
             Err(TrySendError::Disconnected(_)) => {
-                State::Failed("The math renderer is unavailable.".into())
+                State::Failed("O renderizador de matemática não está disponível.".into())
             }
         };
         if cache.len() >= CACHE_ENTRIES
@@ -223,13 +223,13 @@ pub fn image(
 ) -> Result<Option<Formula>, String> {
     // Reject oversized input before copying it into a cache key or starting a worker.
     if source.len() > MAX_SOURCE_BYTES {
-        return Err("The formula exceeds the 4096-byte rendering limit.".into());
+        return Err("A fórmula passa do limite de 4096 bytes para exibição.".into());
     }
     if source.trim().is_empty() {
-        return Err("The formula is empty.".into());
+        return Err("A fórmula está vazia.".into());
     }
     if !font_size.is_finite() || font_size <= 0.0 {
-        return Err("The formula font size is invalid.".into());
+        return Err("O tamanho da fonte da fórmula é inválido.".into());
     }
     let renderer = ui.ctx().data_mut(|data| {
         Arc::clone(
@@ -301,17 +301,17 @@ mod tests {
         assert!(
             render(&key(&"x".repeat(MAX_SOURCE_BYTES + 1)))
                 .unwrap_err()
-                .contains("4096-byte")
+                .contains("4096 bytes")
         );
         assert!(
             render(&key(r"\rule{500em}{2em}"))
                 .unwrap_err()
-                .contains("too large")
+                .contains("grande demais")
         );
         assert!(
             render(&key(r"\rule{200em}{200em}"))
                 .unwrap_err()
-                .contains("too large")
+                .contains("grande demais")
         );
     }
 }
