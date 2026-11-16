@@ -654,7 +654,7 @@ fn center_rows(galley: &mut Arc<egui::Galley>) {
 /// One image of a paragraph, at its original size up to its `|width` hint and the page width.
 fn show_image(ui: &mut egui::Ui, item: &RowImage) -> egui::Response {
     if let Some(target) = item.uri.strip_prefix("rust-missing-image:") {
-        return ui.weak(format!("Image unavailable: {target}"));
+        return ui.weak(format!("Imagem indisponível: {target}"));
     }
     if let Some(url) = item
         .uri
@@ -1010,7 +1010,7 @@ fn reading_menu(
     .show(|ui| {
         crate::theme::menu_style(ui);
         ui.set_min_width(240.0);
-        let copy = ui.add_enabled(selected, egui::Button::new("Copy").shortcut_text("Ctrl+C"));
+        let copy = ui.add_enabled(selected, egui::Button::new("Copiar").shortcut_text("Ctrl+C"));
         crate::ui_probe::record(ui.ctx(), "reading-menu:Copy", copy.rect);
         ui.ctx()
             .data_mut(|data| data.insert_temp(menu.with("copy"), copy.rect));
@@ -1021,7 +1021,7 @@ fn reading_menu(
             }
             ui.close();
         }
-        let all = ui.add(egui::Button::new("Select all").shortcut_text("Ctrl+A"));
+        let all = ui.add(egui::Button::new("Selecionar tudo").shortcut_text("Ctrl+A"));
         crate::ui_probe::record(ui.ctx(), "reading-menu:Select all", all.rect);
         if all.clicked() {
             *select_all = true;
@@ -1245,7 +1245,7 @@ fn show_blocks(
                             );
                             response.context_menu(|ui| {
                                 crate::theme::menu_style(ui);
-                                if ui.button("Copy LaTeX").clicked() {
+                                if ui.button("Copiar LaTeX").clicked() {
                                     ui.ctx().copy_text(part.text.clone());
                                     ui.close();
                                 }
@@ -1549,7 +1549,7 @@ fn show_blocks(
                 egui::WidgetInfo::labeled(
                     egui::Role::Button,
                     true,
-                    format!("{} {title}", if collapsed { "Expand" } else { "Collapse" }),
+                    format!("{} {title}", if collapsed { "Expandir" } else { "Recolher" }),
                 )
             });
             crate::ui_probe::record(ui.ctx(), format!("fold:{index}"), rect);
@@ -1562,9 +1562,9 @@ fn show_blocks(
                 crate::theme::disclosure(ui, if collapsed { 0.0 } else { 1.0 }, &toggle);
             }
             toggle.on_hover_text(if collapsed {
-                "Expand section"
+                "Expandir seção"
             } else {
-                "Collapse section"
+                "Recolher seção"
             });
             if collapsed {
                 folded_level = Some(block.heading);
