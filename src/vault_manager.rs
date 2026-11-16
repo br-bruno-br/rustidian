@@ -100,15 +100,15 @@ impl Manager {
             return;
         }
         let title = if self.page == Page::Create {
-            "Choose vault location"
+            "Escolher o local do cofre"
         } else {
-            "Open folder as vault"
+            "Abrir pasta como cofre"
         };
         if let Err(error) = self
             .picker
             .start(Kind::Folder, Some(Path::new(&self.folder)), title)
         {
-            self.error = Some(format!("{error}. Enter a folder path below."));
+            self.error = Some(format!("{error}. Digite abaixo o caminho de uma pasta."));
         }
     }
 
@@ -160,7 +160,7 @@ impl Manager {
             // Area remembers its last measured size. Give scrolling content room
             // to grow naturally instead of trapping it in the previous height.
             ui.set_max_height((ctx.content_rect().height() - 96.0).max(160.0));
-            let button = theme::dialog_header(ui, "Open another vault", "Close vault chooser");
+            let button = theme::dialog_header(ui, "Abrir outro cofre", "Fechar seletor de cofre");
             ui_probe::record(ctx, "vault-manager-close", button.rect);
             close |= button.clicked();
             let busy = loading || self.picker.active();
@@ -180,7 +180,7 @@ impl Manager {
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.add_enabled_ui(!busy, |ui| {
-                        ui.label(RichText::new("Recent vaults").strong());
+                        ui.label(RichText::new("Cofres recentes").strong());
                         ScrollArea::vertical()
                             .id_salt("recent-vaults")
                             .max_height(208.0)
@@ -190,7 +190,7 @@ impl Manager {
                                 if let Ok(list) = &self.list {
                                     if list.roots().is_empty() {
                                         ui.label(
-                                            RichText::new("No vaults opened yet.").small().weak(),
+                                            RichText::new("Nenhum cofre aberto ainda.").small().weak(),
                                         );
                                     }
                                     for root in list.roots() {
@@ -207,7 +207,7 @@ impl Manager {
                                                         |ui| {
                                                             theme::menu_style(ui);
                                                             let remove =
-                                                                ui.button("Remove from list");
+                                                                ui.button("Remover da lista");
                                                             ui_probe::record(
                                                                 ctx,
                                                                 format!(
@@ -293,9 +293,9 @@ impl Manager {
                                     .show(ui, |ui| {
                                         if action_row(
                                             ui,
-                                            "Open a folder",
-                                            "Use an existing folder of notes.",
-                                            "Open",
+                                            "Abrir uma pasta",
+                                            "Use uma pasta de notas que já existe.",
+                                            "Abrir",
                                             "vault-open",
                                         ) {
                                             self.page = Page::Open;
@@ -305,9 +305,9 @@ impl Manager {
                                         ui.separator();
                                         if action_row(
                                             ui,
-                                            "Create a vault",
-                                            "Start a new folder for your notes.",
-                                            "Create",
+                                            "Criar um cofre",
+                                            "Comece uma nova pasta para suas notas.",
+                                            "Criar",
                                             "vault-create",
                                         ) {
                                             self.page = Page::Create;
@@ -325,25 +325,25 @@ impl Manager {
                                 let creating = self.page == Page::Create;
                                 ui.label(
                                     RichText::new(if creating {
-                                        "Create a vault"
+                                        "Criar um cofre"
                                     } else {
-                                        "Open a folder"
+                                        "Abrir uma pasta"
                                     })
                                     .strong(),
                                 );
                                 if creating {
-                                    ui.label("Vault name");
+                                    ui.label("Nome do cofre");
                                     self.focus =
                                         text_field(ui, "vault-name", &mut self.name, self.focus);
                                 }
-                                ui.label(if creating { "Location" } else { "Folder" });
+                                ui.label(if creating { "Local" } else { "Pasta" });
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(ui.available_width(), 32.0),
                                     Layout::right_to_left(Align::Center),
                                     |ui| {
                                         let browse = ui.add_sized(
                                             [96.0, crate::theme::space::CONTROL],
-                                            egui::Button::new("Browse…"),
+                                            egui::Button::new("Procurar…"),
                                         );
                                         ui_probe::record(ctx, "vault-browse", browse.rect);
                                         if browse.clicked() {
@@ -365,7 +365,7 @@ impl Manager {
                                     ui.add(
                                         egui::Label::new(
                                             RichText::new(format!(
-                                                "New vault: {}",
+                                                "Novo cofre: {}",
                                                 destination.display()
                                             ))
                                             .small()
@@ -378,7 +378,7 @@ impl Manager {
                                 ui.horizontal(|ui| {
                                     let confirm = ui.add_sized(
                                         [96.0, crate::theme::space::CONTROL],
-                                        egui::Button::new(if creating { "Create" } else { "Open" }),
+                                        egui::Button::new(if creating { "Criar" } else { "Abrir" }),
                                     );
                                     ui_probe::record(ctx, "vault-confirm", confirm.rect);
                                     let enter = ui.is_enabled()
@@ -401,7 +401,7 @@ impl Manager {
                                     }
                                     let back = ui.add_sized(
                                         [96.0, crate::theme::space::CONTROL],
-                                        egui::Button::new("Back"),
+                                        egui::Button::new("Voltar"),
                                     );
                                     ui_probe::record(ctx, "vault-back", back.rect);
                                     if back.clicked() {
@@ -426,7 +426,7 @@ impl Manager {
                     |ui| {
                         let cancel = ui.add_sized(
                             [96.0, crate::theme::space::CONTROL],
-                            egui::Button::new("Cancel"),
+                            egui::Button::new("Cancelar"),
                         );
                         ui_probe::record(ctx, "vault-cancel", cancel.rect);
                         close |= cancel.clicked();
@@ -435,9 +435,9 @@ impl Manager {
                             ui_probe::record(ctx, "vault-loading-spinner", spinner.rect);
                             ui.label(
                                 RichText::new(if loading {
-                                    "Opening your notes…"
+                                    "Abrindo suas notas…"
                                 } else {
-                                    "Choose a folder in the file browser…"
+                                    "Escolha uma pasta no navegador de arquivos…"
                                 })
                                 .small()
                                 .weak(),
