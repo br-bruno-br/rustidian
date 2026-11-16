@@ -25,6 +25,8 @@ pub mod search;
 pub mod structure;
 pub mod tab;
 pub mod tables;
+/// Aba do agente: desligada por padrão (revisão de segurança de 15/11/2026).
+#[cfg(feature = "agente")]
 pub mod terminal;
 pub mod vault;
 pub mod vaults;

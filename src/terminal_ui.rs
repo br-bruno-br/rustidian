@@ -1058,7 +1058,9 @@ pub fn write_note_context(ctx: &egui::Context, root: &Path) {
     if last.as_deref() == Some(current.as_str()) {
         return;
     }
-    let file = rustidian::terminal::context_file(root);
+    let Some(file) = rustidian::terminal::context_file(root) else {
+        return;
+    };
     let saved = file
         .parent()
         .map_or(Ok(()), std::fs::create_dir_all)

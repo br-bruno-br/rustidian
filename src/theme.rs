@@ -1087,6 +1087,7 @@ pub fn icon_toggle(ui: &mut egui::Ui, icon: Icon, tooltip: &str, selected: bool)
 
 /// A toolbar button showing a symbol of the interface font, for an action
 /// that has no artwork of its own.
+#[cfg(feature = "agente")]
 pub fn glyph_button(ui: &mut egui::Ui, glyph: &str, tooltip: &str) -> egui::Response {
     toolbar_button(ui, tooltip, false, |ui, rect, color| {
         ui.painter().text(

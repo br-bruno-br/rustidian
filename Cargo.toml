@@ -20,7 +20,7 @@ default = ["desktop"]
 desktop = []
 # Aba do agente (terminal com Codex/Claude/Elpis dentro do cofre). Desligada por padrão no fork:
 # manda trechos da nota a um CLI externo (revisão de segurança de 15/11/2026). Só Linux por enquanto.
-agente = []
+agente = ["dep:portable-pty", "dep:vt100"]
 
 [[bin]]
 name = "rustidian"
@@ -59,8 +59,8 @@ usvg = { version = "=0.45.1", default-features = false, features = ["text"] }
 redb = "=4.4.0"
 imara-diff = { version = "=0.2.0", default-features = false }
 fastrand = "=2.5.0"
-portable-pty = "0.9"
-vt100 = "0.16"
+portable-pty = { version = "0.9", optional = true }
+vt100 = { version = "0.16", optional = true }
 htmd = "=0.5.6"
 
 [target.'cfg(windows)'.dependencies]

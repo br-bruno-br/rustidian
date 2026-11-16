@@ -65,6 +65,8 @@ struct PreparedVault {
 }
 
 const ATTENTION_DELAY: Duration = Duration::from_millis(1500);
+/// Last right-sidebar tab: the Agent tab (3) exists only with the `agente` feature.
+pub(crate) const LAST_RIGHT_TAB: u8 = if cfg!(feature = "agente") { 3 } else { 2 };
 
 type SharedWatch = Arc<Mutex<rustidian::watcher::Watch>>;
 
@@ -98,6 +100,7 @@ pub struct NotesApp {
     pub(crate) show_left: bool,
     pub(crate) show_right: bool,
     pub(crate) dark: bool,
+    #[cfg(feature = "agente")]
     agent: crate::terminal_ui::Panel,
     page_pan: crate::page_pan::PagePan,
     pub(crate) appearance: theme::Appearance,
@@ -216,6 +219,7 @@ impl NotesApp {
             show_left: true,
             show_right: false,
             dark: cc.egui_ctx.theme() == egui::Theme::Dark,
+            #[cfg(feature = "agente")]
             agent: Default::default(),
             page_pan: Default::default(),
             appearance: theme::palette::app_wide_appearance(),
@@ -427,7 +431,10 @@ impl NotesApp {
 
     fn load_vault(&mut self, root: &Path) {
         self.settle_saves();
-        self.agent = Default::default();
+        #[cfg(feature = "agente")]
+        {
+            self.agent = Default::default();
+        }
         self.page_pan = Default::default();
         self.persist_session();
         self.loading_root = Some(root.to_owned());
@@ -1737,9 +1744,11 @@ impl NotesApp {
             return;
         }
         if self.dialog.is_none() {
+            // Ctrl+Shift+A só abre a aba do agente com a feature `agente`; sem ela nada acontece.
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::A)
             }) {
+                #[cfg(feature = "agente")]
                 if self.show_right
                     && self.right_tab == 3
                     && ctx.memory(|memory| memory.has_focus(crate::terminal_ui::focus_id()))
@@ -2292,7 +2301,7 @@ impl NotesApp {
                 self.active = restored.active;
                 self.show_left = layout.left;
                 self.show_right = layout.right;
-                self.right_tab = layout.right_tab.min(3);
+                self.right_tab = layout.right_tab.min(LAST_RIGHT_TAB);
                 self.sidebar_widths = [
                     layout.left_width.clamp(180.0, 450.0),
                     layout.right_width.clamp(170.0, 420.0),
@@ -2842,7 +2851,7 @@ impl NotesApp {
     }
 
     fn details(&mut self, ui: &mut egui::Ui) {
-        let agent_tab = self.right_tab == 3;
+        let agent_tab = cfg!(feature = "agente") && self.right_tab == 3;
         // The user opened the Agent on purpose; it stays until the editor would lose its minimum.
         let minimum = if agent_tab { 480.0 } else { 700.0 };
         if !self.show_right || ui.available_width() < minimum || self.view() == View::Graph {
@@ -2872,6 +2881,7 @@ impl NotesApp {
                 vault.backlink_mentions(&document.path, &open)
             })
             .unwrap_or_default();
+        #[cfg(feature = "agente")]
         let root = agent_tab
             .then(|| self.vault.as_ref().map(|vault| vault.root.clone()))
             .flatten();
@@ -2895,6 +2905,7 @@ impl NotesApp {
                         (0, "Outline", "outline"),
                         (1, "Backlinks", "backlinks"),
                         (2, "Outgoing", "outgoing"),
+                        #[cfg(feature = "agente")]
                         (3, "Agent", "agent"),
                     ] {
                         let response = ui.selectable_value(
@@ -2907,6 +2918,7 @@ impl NotesApp {
                 });
                 ui.add_space(theme::space::S);
                 if agent_tab {
+                    #[cfg(feature = "agente")]
                     match &root {
                         Some(root) => {
                             // The editor's code font.
@@ -3489,6 +3501,7 @@ impl NotesApp {
             let mut state =
                 egui::widgets::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
             state.share_undoer_with(&shared);
+            #[cfg(feature = "agente")]
             crate::terminal_ui::note_context(
                 ui.ctx(),
                 &vault.root,
@@ -4241,20 +4254,23 @@ impl NotesApp {
                         if toggle.clicked() {
                             self.show_right = !self.show_right;
                         }
-                        let showing = self.show_right && self.right_tab == 3;
-                        let agent = ui
-                            .add_enabled_ui(self.vault.is_some(), |ui| {
-                                ui.selectable_label(showing, RichText::new("Agent").size(13.0))
-                                    .on_hover_text("Agent terminal")
-                                    .on_disabled_hover_text("Open a vault first.")
-                            })
-                            .inner;
-                        crate::ui_probe::record(ui.ctx(), "toggle-agent", agent.rect);
-                        if agent.clicked() {
-                            if showing {
-                                self.show_right = false;
-                            } else {
-                                self.open_agent();
+                        #[cfg(feature = "agente")]
+                        {
+                            let showing = self.show_right && self.right_tab == 3;
+                            let agent = ui
+                                .add_enabled_ui(self.vault.is_some(), |ui| {
+                                    ui.selectable_label(showing, RichText::new("Agent").size(13.0))
+                                        .on_hover_text("Agent terminal")
+                                        .on_disabled_hover_text("Open a vault first.")
+                                })
+                                .inner;
+                            crate::ui_probe::record(ui.ctx(), "toggle-agent", agent.rect);
+                            if agent.clicked() {
+                                if showing {
+                                    self.show_right = false;
+                                } else {
+                                    self.open_agent();
+                                }
                             }
                         }
                     });
@@ -5539,6 +5555,7 @@ impl NotesApp {
             return;
         }
         match command {
+            #[cfg(feature = "agente")]
             rustidian::commands::OPEN_AGENT => self.open_agent(),
             rustidian::commands::OPEN_GRAPH => self.open_global_graph(),
             rustidian::commands::OPEN_LOCAL_GRAPH if self.local_graph_available() => {
@@ -5929,6 +5946,7 @@ impl NotesApp {
 
 impl eframe::App for NotesApp {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(feature = "agente")]
         self.agent.raw_input(ctx, raw);
         self.system_theme.update(ctx, raw, self.appearance);
         self.page_pan.raw_input(
@@ -6051,6 +6069,7 @@ impl eframe::App for NotesApp {
         // Only an agent reads the context file, so a vault without one gets no
         // `.rustidian` folder (on 3 Nov it appeared in ~/Desktop and changed notes
         // the GUI checks protect).
+        #[cfg(feature = "agente")]
         if let Some(vault) = &self.vault
             && self.agent.running()
         {
@@ -6275,6 +6294,7 @@ impl eframe::App for NotesApp {
 
 impl NotesApp {
     /// The Agent terminal lives in the right sidebar beside the open note.
+    #[cfg(feature = "agente")]
     fn open_agent(&mut self) {
         if self.vault.is_none() {
             self.error = Some("Open a vault before using the agent.".into());
