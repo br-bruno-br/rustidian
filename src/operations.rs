@@ -767,12 +767,20 @@ impl Vault {
                 ));
             }
         }
-        #[cfg(target_os = "linux")]
         {
-            use std::os::unix::fs::MetadataExt;
             let metadata = std::fs::symlink_metadata(&original)
                 .map_err(|error| format!("Cannot read source: {error}"))?;
-            if metadata.dev() != plan.metadata.dev() || metadata.ino() != plan.metadata.ino() {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if metadata.dev() != plan.metadata.dev() || metadata.ino() != plan.metadata.ino() {
+                    return Err(
+                        "The source was replaced outside the app. Nothing was renamed.".into(),
+                    );
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            if metadata.file_type().is_symlink() {
                 return Err("The source was replaced outside the app. Nothing was renamed.".into());
             }
             if image
@@ -788,11 +796,27 @@ impl Vault {
             } else {
                 self.safe_path(&plan.to, true)?
             };
+            #[cfg(target_os = "linux")]
             rename_noreplace(&original, &destination)
                 .map_err(|error| format!("Cannot rename file or folder: {error}"))?;
+            // `std::fs::rename` replaces an existing file on Windows and has no no-replace
+            // flag, so look first: the destination must be free, or be the source itself
+            // under another capitalisation ("a.md" to "A.md"). A file created in that gap
+            // would be replaced; Linux closes it with an atomic rename.
+            #[cfg(not(target_os = "linux"))]
+            {
+                if std::fs::symlink_metadata(&destination).is_ok()
+                    && !std::fs::canonicalize(&original)
+                        .ok()
+                        .zip(std::fs::canonicalize(&destination).ok())
+                        .is_some_and(|(from, to)| from == to)
+                {
+                    return Err("A file or folder with that name already exists.".into());
+                }
+                std::fs::rename(&original, &destination)
+                    .map_err(|error| format!("Cannot rename file or folder: {error}"))?;
+            }
         }
-        #[cfg(not(target_os = "linux"))]
-        return Err("Guarded renaming is currently available on Linux.".into());
         for note in &mut self.notes {
             note.path = moved_path(&note.path, &plan.from, &plan.to, folder);
         }
