@@ -203,7 +203,7 @@ pub fn color(value: &str) -> Option<[u8; 4]> {
                 rgba[index] = digit.to_digit(16)? as u8 * 17;
             }
         } else {
-            for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+            for (index, pair) in hex.as_bytes().as_chunks::<2>().0.iter().enumerate() {
                 rgba[index] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
             }
         }

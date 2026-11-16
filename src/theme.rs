@@ -1347,7 +1347,9 @@ mod tests {
                 .map(|vertex| vertex.pos)
                 .collect();
             let rectangles: Vec<_> = vertices
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|vertices| {
                     vertices.iter().fold(egui::Rect::NOTHING, |rect, &point| {
                         rect.union(egui::Rect::from_pos(point))
