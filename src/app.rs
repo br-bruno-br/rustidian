@@ -3520,7 +3520,7 @@ impl NotesApp {
                                     {
                                         let response = ui.selectable_label(
                                             self.tabs[self.active].image_scale == scale,
-                                            label,
+                                            rustidian::i18n::t(label),
                                         );
                                         crate::ui_probe::record(
                                             ui.ctx(),
@@ -3541,7 +3541,7 @@ impl NotesApp {
                                             let activated = if dialog == Dialog::TrashNote {
                                                 theme::delete_menu_item(ui, label).1
                                             } else {
-                                                ui.button(label).clicked()
+                                                ui.button(rustidian::i18n::t(label)).clicked()
                                             };
                                             if activated {
                                                 self.ask_file(
@@ -3571,11 +3571,11 @@ impl NotesApp {
                                 let more = icon_button(ui, Icon::More, "More options");
                                 egui::Popup::menu(&more).show(|ui| {
                                     theme::menu_style(ui);
-                                    if ui.button("Save · Ctrl+S").clicked() {
+                                    if ui.button("Salvar · Ctrl+S").clicked() {
                                         self.save(self.active);
                                         ui.close();
                                     }
-                                    if ui.button("Save a copy…").clicked() {
+                                    if ui.button("Salvar uma cópia…").clicked() {
                                         self.ask(Dialog::SaveCopy);
                                         ui.close();
                                     }
@@ -3587,7 +3587,7 @@ impl NotesApp {
                                         let (response, activated) = if dialog == Dialog::TrashNote {
                                             theme::delete_menu_item(ui, label)
                                         } else {
-                                            let response = ui.button(label);
+                                            let response = ui.button(rustidian::i18n::t(label));
                                             let activated = response.clicked();
                                             (response, activated)
                                         };
@@ -3606,10 +3606,10 @@ impl NotesApp {
                                     }
                                     ui.separator();
                                     for (label, view) in [
-                                        ("Reading view", View::Read),
-                                        ("Live preview", View::Live),
-                                        ("Source editing", View::Source),
-                                        ("Split source and preview", View::Split),
+                                        ("Modo de leitura", View::Read),
+                                        ("Pré-visualização ao vivo", View::Live),
+                                        ("Edição do código-fonte", View::Source),
+                                        ("Dividir código-fonte e pré-visualização", View::Split),
                                     ] {
                                         if ui.selectable_label(self.view() == view, label).clicked()
                                         {
