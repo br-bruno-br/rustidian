@@ -6348,7 +6348,7 @@ impl eframe::App for NotesApp {
         if crate::table_layout::take_changed(&ctx)
             && let Err(error) = self.write_session()
         {
-            self.error = Some(format!("Table widths weren’t saved: {error}"));
+            self.error = Some(format!("As larguras da tabela não foram salvas: {error}"));
         }
         self.shortcuts(&ctx);
         let title = format!(
@@ -6356,7 +6356,7 @@ impl eframe::App for NotesApp {
             self.tabs
                 .get(self.active)
                 .map(Tab::title)
-                .unwrap_or("New tab".into()),
+                .unwrap_or("Nova aba".into()),
             self.vault.as_ref().map(Vault::name).unwrap_or_default(),
             rustidian::APP_NAME
         );
@@ -6390,7 +6390,7 @@ impl eframe::App for NotesApp {
                             .get(self.active)
                             .is_some_and(|tab| tab.document.is_image() && tab.view != View::Graph)
                         {
-                            ui.label(RichText::new("Image").size(11.0).weak());
+                            ui.label(RichText::new("Imagem").size(11.0).weak());
                             return;
                         }
                         if self.editor_preferences.show_mode {
@@ -6401,7 +6401,7 @@ impl eframe::App for NotesApp {
                         {
                             ui.label(
                                 RichText::new(format!(
-                                    "{} words   {} characters",
+                                    "{} palavras   {} caracteres",
                                     document.text.split_whitespace().count(),
                                     document.text.chars().count()
                                 ))
@@ -6410,7 +6410,7 @@ impl eframe::App for NotesApp {
                             );
                             if document.dirty() {
                                 ui.label(
-                                    RichText::new("Unsaved").size(11.0).color(theme::accent(ui)),
+                                    RichText::new("Não salvo").size(11.0).color(theme::accent(ui)),
                                 );
                             }
                         }
@@ -6444,7 +6444,7 @@ impl eframe::App for NotesApp {
                                     .get(self.active)
                                     .is_some_and(|tab| tab.document.dirty())
                                 {
-                                    let copy = ui.button("Save a copy…");
+                                    let copy = ui.button("Salvar uma cópia…");
                                     crate::ui_probe::record(ui.ctx(), "error-save-copy", copy.rect);
                                     if copy.clicked() {
                                         self.ask(Dialog::SaveCopy);
@@ -6477,7 +6477,7 @@ impl eframe::App for NotesApp {
             && (self.graph.take_changed() || local_graph_open != self.graph.local_open)
             && let Err(error) = self.write_session()
         {
-            self.error = Some(format!("Graph settings weren’t saved: {error}"));
+            self.error = Some(format!("As configurações do grafo não foram salvas: {error}"));
         }
         self.show_page_preview(&ctx);
         self.dialogs(&ctx);
@@ -6523,7 +6523,7 @@ impl NotesApp {
     #[cfg(feature = "agente")]
     fn open_agent(&mut self) {
         if self.vault.is_none() {
-            self.error = Some("Open a vault before using the agent.".into());
+            self.error = Some("Abra um cofre antes de usar o agente.".into());
             return;
         }
         self.show_right = true;
