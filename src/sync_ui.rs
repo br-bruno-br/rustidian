@@ -412,7 +412,11 @@ impl NotesApp {
                     runner.sync_now();
                 }
             }
-            Some(Action::Details) => self.sync.details_open = true,
+            Some(Action::Details) => {
+                // The settings dialog is modal and would cover the details window.
+                self.dialog = None;
+                self.sync.details_open = true;
+            }
             Some(Action::Toggle) => {
                 if let Some(files) = self.sync.files.clone()
                     && let Err(error) = self.sync.config.save(&files.config)
