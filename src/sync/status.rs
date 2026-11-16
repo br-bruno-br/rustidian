@@ -54,12 +54,12 @@ impl SyncStatus {
     /// One short phrase for the status bar. Priority: syncing, error, offline, conflicts, synced.
     pub fn label(&self) -> Label {
         let (text, tone) = match self.phase {
-            Phase::Starting | Phase::Syncing => ("Syncing…".to_owned(), Tone::Busy),
-            Phase::Failed => ("Sync error".to_owned(), Tone::Bad),
-            Phase::Offline => ("Offline".to_owned(), Tone::Attention),
+            Phase::Starting | Phase::Syncing => ("Sincronizando…".to_owned(), Tone::Busy),
+            Phase::Failed => ("Erro de sincronização".to_owned(), Tone::Bad),
+            Phase::Offline => ("Sem conexão".to_owned(), Tone::Attention),
             Phase::Synced if !self.conflicts.is_empty() => (
                 format!(
-                    "{} conflict{}",
+                    "{} conflito{}",
                     self.conflicts.len(),
                     if self.conflicts.len() == 1 { "" } else { "s" }
                 ),
@@ -67,8 +67,8 @@ impl SyncStatus {
             ),
             Phase::Synced => (
                 match self.last_sync {
-                    Some(time) => format!("Synced {}", time.format("%H:%M")),
-                    None => "Synced".to_owned(),
+                    Some(time) => format!("Sincronizado {}", time.format("%H:%M")),
+                    None => "Sincronizado".to_owned(),
                 },
                 Tone::Good,
             ),
@@ -80,7 +80,7 @@ impl SyncStatus {
     pub fn mass_deletion_text(&self) -> Option<String> {
         self.mass_deletion.map(|(deletions, files)| {
             format!(
-                "This sync would delete {deletions} of {files} synced files from the server. The vault looks empty or its drive is not mounted, so nothing was sent. If you really deleted them, allow it once."
+                "Esta sincronização apagaria {deletions} de {files} arquivos sincronizados do servidor. O cofre parece vazio ou o disco dele não está montado, então nada foi enviado. Se você apagou mesmo, permita uma vez."
             )
         })
     }
@@ -100,24 +100,24 @@ mod tests {
     #[test]
     fn labels_follow_the_priority() {
         let mut status = SyncStatus::default();
-        assert_eq!(status.label().text, "Syncing…");
+        assert_eq!(status.label().text, "Sincronizando…");
         status.phase = Phase::Synced;
         status.last_sync = at(9, 5);
-        assert_eq!(status.label().text, "Synced 09:05");
+        assert_eq!(status.label().text, "Sincronizado 09:05");
         assert_eq!(status.label().tone, Tone::Good);
         status.conflicts = vec!["a (conflito pc 2026-11-15 0905).md".into()];
-        assert_eq!(status.label().text, "1 conflict");
+        assert_eq!(status.label().text, "1 conflito");
         status
             .conflicts
             .push("b (conflito pc 2026-11-15 0905).md".into());
-        assert_eq!(status.label().text, "2 conflicts");
+        assert_eq!(status.label().text, "2 conflitos");
         status.phase = Phase::Offline;
-        assert_eq!(status.label().text, "Offline");
+        assert_eq!(status.label().text, "Sem conexão");
         status.phase = Phase::Failed;
-        assert_eq!(status.label().text, "Sync error");
+        assert_eq!(status.label().text, "Erro de sincronização");
         assert_eq!(status.label().tone, Tone::Bad);
         status.phase = Phase::Syncing;
-        assert_eq!(status.label().text, "Syncing…");
+        assert_eq!(status.label().text, "Sincronizando…");
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
             ..SyncStatus::default()
         };
         let text = status.mass_deletion_text().unwrap();
-        assert!(text.contains("25 of 30") && text.contains("nothing was sent"));
+        assert!(text.contains("25 de 30") && text.contains("nada foi enviado"));
         assert!(SyncStatus::default().mass_deletion_text().is_none());
     }
 }
