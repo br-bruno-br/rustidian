@@ -1286,7 +1286,7 @@ impl NotesApp {
                 self.editor.jump = Some(character);
             }
         } else {
-            self.error = Some(format!("Cannot find heading or block: {fragment}"));
+            self.error = Some(format!("Não foi possível encontrar o título ou bloco: {fragment}"));
         }
     }
 
@@ -1390,7 +1390,7 @@ impl NotesApp {
     /// What follows a note's bytes reaching the disk.
     fn saved(&mut self, index: usize) {
         let tab = &mut self.tabs[index];
-        self.status = format!("Saved {}", tab.document.path.display());
+        self.status = format!("{} salvo", tab.document.path.display());
         // Text typed while an autosave was writing still needs its own save.
         if !tab.document.dirty() {
             tab.edited_at = None;
@@ -1451,7 +1451,7 @@ impl NotesApp {
                         .template_paths(vault)
                         .map(rustidian::search::FileMatcher::new)
                 })
-                .unwrap_or_else(|| Err("Open a vault first.".into()));
+                .unwrap_or_else(|| Err("Abra um cofre primeiro.".into()));
         }
         if matches!(dialog, Dialog::SaveCopy | Dialog::AddProperty) && self.view() == View::Graph {
             return;
@@ -1462,7 +1462,7 @@ impl NotesApp {
                 .get(self.active)
                 .is_some_and(|tab| tab.document.is_image())
         {
-            self.error = Some("Choose a Markdown note for this action.".into());
+            self.error = Some("Escolha uma nota Markdown para esta ação.".into());
             return;
         }
         self.editor.focus = false;
@@ -1643,7 +1643,7 @@ impl NotesApp {
                 }
                 self.vault
                     .as_ref()
-                    .ok_or_else(|| "Open a vault before reopening a tab.".to_owned())
+                    .ok_or_else(|| "Abra um cofre antes de reabrir uma aba.".to_owned())
                     .and_then(|vault| vault.open_document(closed.path()))
             });
         match document {
