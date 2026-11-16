@@ -6069,6 +6069,7 @@ impl eframe::App for NotesApp {
                 }
             }
         }
+        rustidian::assets::set_remote_images(self.editor_preferences.remote_images);
         self.dark = ctx.theme() == egui::Theme::Dark;
         crate::ui_probe::metric(
             &ctx,

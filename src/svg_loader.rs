@@ -32,6 +32,35 @@ pub fn svg_options() -> usvg::Options<'static> {
     }
 }
 
+/// The last gate before the network: asked before every other loader, it refuses any web
+/// image the reader has not allowed ("Load images from the internet" is off by default), so
+/// no loader below it, not even egui's HTTP one, sees the address.
+pub struct RemoteImageGuard;
+
+impl egui::load::BytesLoader for RemoteImageGuard {
+    fn id(&self) -> &str {
+        egui::generate_loader_id!(RemoteImageGuard)
+    }
+
+    fn load(&self, _: &egui::Context, uri: &str) -> egui::load::BytesLoadResult {
+        if rustidian::assets::is_remote(uri) && !rustidian::assets::remote_image_allowed(uri) {
+            Err(LoadError::Loading(
+                "web image blocked: loading images from the internet is off".into(),
+            ))
+        } else {
+            Err(LoadError::NotSupported)
+        }
+    }
+
+    fn forget(&self, _: &str) {}
+
+    fn forget_all(&self) {}
+
+    fn byte_size(&self) -> usize {
+        0
+    }
+}
+
 type Entry = Result<Arc<egui::ColorImage>, String>;
 
 enum State {
@@ -205,6 +234,48 @@ mod tests {
         ));
         assert!(is_svg(None, b"<?xml version=\"1.0\"?>\n<svg/>"));
         assert!(!is_svg(None, b"\x89PNG\r\n"));
+    }
+
+    /// Counts the requests that get past the guard, as egui's HTTP loader would make them.
+    struct Spy(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl egui::load::BytesLoader for Spy {
+        fn id(&self) -> &str {
+            egui::generate_loader_id!(Spy)
+        }
+
+        fn load(&self, _: &egui::Context, _: &str) -> egui::load::BytesLoadResult {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(egui::load::BytesPoll::Pending { size: None })
+        }
+
+        fn forget(&self, _: &str) {}
+
+        fn forget_all(&self) {}
+
+        fn byte_size(&self) -> usize {
+            0
+        }
+    }
+
+    #[test]
+    fn a_web_image_never_reaches_the_network_loaders_until_allowed() {
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ctx = egui::Context::default();
+        ctx.add_bytes_loader(Arc::new(Spy(requests.clone())));
+        ctx.add_bytes_loader(Arc::new(RemoteImageGuard));
+        let blocked = ctx.try_load_bytes("http://exemplo.invalido/x.png");
+        assert!(matches!(blocked, Err(LoadError::Loading(_))));
+        let blocked = ctx.try_load_bytes("https://exemplo.invalido/y.svg");
+        assert!(matches!(blocked, Err(LoadError::Loading(_))));
+        assert_eq!(requests.load(std::sync::atomic::Ordering::Relaxed), 0);
+        // Local files are not the guard's business.
+        assert!(ctx.try_load_bytes("file:///vault/a.png").is_ok());
+        assert_eq!(requests.load(std::sync::atomic::Ordering::Relaxed), 1);
+        // A click on the marker allows that one address.
+        rustidian::assets::allow_remote_image("http://liberada.invalido/z.png");
+        assert!(ctx.try_load_bytes("http://liberada.invalido/z.png").is_ok());
+        assert_eq!(requests.load(std::sync::atomic::Ordering::Relaxed), 2);
     }
 
     #[test]

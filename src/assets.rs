@@ -1,6 +1,47 @@
 //! Resolve indexed image attachments without granting access outside a vault.
 use crate::{paths, vault::Vault};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether images named by `http://` and `https://` addresses may be downloaded. Off by default:
+/// opening a note must not make a request to a server the note names (security review of
+/// 15 Nov 2026). The setting is "Load images from the internet".
+static REMOTE_IMAGES: AtomicBool = AtomicBool::new(false);
+
+/// Web images the reader chose to load one by one, until the app closes.
+fn allowed_remote() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static ALLOWED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    ALLOWED.get_or_init(Default::default)
+}
+
+/// URI scheme under which a blocked web image is drawn as a clickable marker.
+pub const BLOCKED_IMAGE_SCHEME: &str = "rust-blocked-image:";
+
+pub fn set_remote_images(allowed: bool) {
+    REMOTE_IMAGES.store(allowed, Ordering::Relaxed);
+}
+
+pub fn is_remote(target: &str) -> bool {
+    target.starts_with("https://") || target.starts_with("http://")
+}
+
+/// Let one web image load although the setting is off.
+pub fn allow_remote_image(url: &str) {
+    allowed_remote()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(url.to_owned());
+}
+
+/// Whether the web image at `url` may be requested now.
+pub fn remote_image_allowed(url: &str) -> bool {
+    REMOTE_IMAGES.load(Ordering::Relaxed)
+        || allowed_remote()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(url)
+}
 
 #[derive(Clone, Debug)]
 pub struct EmbeddedImage {
@@ -136,8 +177,9 @@ pub fn prepare_images(markdown: &str, resolve: impl Fn(&str) -> Option<String>) 
     let mut display = markdown.to_owned();
     for image in embedded_images(markdown).into_iter().rev() {
         let destination = resolve(&image.target).unwrap_or_else(|| {
-            if image.target.starts_with("https://") || image.target.starts_with("http://") {
-                image.target
+            if is_remote(&image.target) {
+                // `resolve` gave no address: the web image is blocked, so nothing is requested.
+                format!("{BLOCKED_IMAGE_SCHEME}{}", image.target)
             } else {
                 format!("rust-missing-image:{}", image.target)
             }
@@ -180,8 +222,18 @@ pub fn is_image(path: &Path) -> bool {
 }
 
 pub fn image_uri(vault: Option<&Vault>, from: &Path, target: &str) -> Option<String> {
-    if target.starts_with("https://") || target.starts_with("http://") {
-        return Some(target.into());
+    image_uri_with(vault, from, target, remote_image_allowed(target))
+}
+
+/// `image_uri` with the web-image decision made by the caller.
+pub fn image_uri_with(
+    vault: Option<&Vault>,
+    from: &Path,
+    target: &str,
+    remote_allowed: bool,
+) -> Option<String> {
+    if is_remote(target) {
+        return remote_allowed.then(|| target.into());
     }
     if target.starts_with("data:") {
         return data_image_uri(target);
@@ -326,5 +378,50 @@ mod tests {
         });
         assert!(!display.contains("rust-missing-image:"), "{display}");
         assert!(image_uri(None, Path::new("note.md"), "data:text/html,<b>x</b>").is_none());
+    }
+
+    #[test]
+    fn web_images_are_not_requested_unless_allowed() {
+        use std::cell::Cell;
+        let note = "![logo](http://exemplo.invalido/x.png) e <img src=\"https://exemplo.invalido/y.png\" alt=\"y\">";
+        let asked = Cell::new(Vec::<String>::new());
+        let display = prepare_images(note, |target| {
+            let mut seen = asked.take();
+            seen.push(target.into());
+            asked.set(seen);
+            image_uri_with(None, Path::new("note.md"), target, false)
+        });
+        // Both images are drawn as blocked markers: no web address is left as a destination.
+        assert_eq!(
+            display.matches(BLOCKED_IMAGE_SCHEME).count(),
+            2,
+            "{display}"
+        );
+        assert!(!display.contains("](<http"), "{display}");
+        assert!(!display.contains("src=\"http"), "{display}");
+        assert_eq!(
+            image_uri_with(
+                None,
+                Path::new("note.md"),
+                "http://exemplo.invalido/x.png",
+                false
+            ),
+            None
+        );
+        // With the setting on, the address passes through as before.
+        assert_eq!(
+            image_uri_with(
+                None,
+                Path::new("note.md"),
+                "https://exemplo.invalido/y.png",
+                true
+            )
+            .as_deref(),
+            Some("https://exemplo.invalido/y.png")
+        );
+        // One image can be allowed alone.
+        allow_remote_image("http://so-esta.invalido/z.png");
+        assert!(remote_image_allowed("http://so-esta.invalido/z.png"));
+        assert!(!remote_image_allowed("http://outra.invalido/z.png"));
     }
 }

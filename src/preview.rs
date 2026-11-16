@@ -656,6 +656,30 @@ fn show_image(ui: &mut egui::Ui, item: &RowImage) -> egui::Response {
     if let Some(target) = item.uri.strip_prefix("rust-missing-image:") {
         return ui.weak(format!("Image unavailable: {target}"));
     }
+    if let Some(url) = item
+        .uri
+        .strip_prefix(rustidian::assets::BLOCKED_IMAGE_SCHEME)
+    {
+        // A web image the setting keeps off: a marker, and a click loads this one image.
+        let alt = item
+            .alt
+            .rsplit_once('|')
+            .map_or(item.alt.as_str(), |(alt, _)| alt);
+        let text = if alt.is_empty() {
+            "imagem da internet bloqueada (clique para carregar)".to_owned()
+        } else {
+            format!("imagem da internet bloqueada (clique para carregar): {alt}")
+        };
+        let response = ui
+            .add(egui::Label::new(egui::RichText::new(text).weak()).sense(egui::Sense::click()))
+            .on_hover_text(url)
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            rustidian::assets::allow_remote_image(url);
+            ui.ctx().request_repaint();
+        }
+        return response;
+    }
     let width = item
         .alt
         .rsplit('|')

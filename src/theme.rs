@@ -869,6 +869,11 @@ pub fn install_icons(ctx: &egui::Context) {
     if !ctx.is_loader_installed(egui::generate_loader_id!(DataImageLoader)) {
         ctx.add_bytes_loader(std::sync::Arc::new(DataImageLoader));
     }
+    // Last, so it is asked first: no web image is requested unless the reader allowed it.
+    use crate::svg_loader::RemoteImageGuard;
+    if !ctx.is_loader_installed(egui::generate_loader_id!(RemoteImageGuard)) {
+        ctx.add_bytes_loader(std::sync::Arc::new(RemoteImageGuard));
+    }
     for icon in Icon::ALL {
         let (uri, bytes) = icon.asset();
         ctx.include_bytes(uri, egui::load::Bytes::Static(bytes));
