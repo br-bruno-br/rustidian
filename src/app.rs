@@ -165,6 +165,14 @@ pub struct NotesApp {
     pub(crate) bookmarks: rustidian::bookmarks::Bookmarks,
     pub(crate) show_bookmarks: bool,
     pub(crate) right_tab: u8,
+    /// Backlinks panel: the unlinked mentions section is open, and its last result with
+    /// the note it was for and when it was computed (seconds of UI time).
+    unlinked_open: bool,
+    unlinked_cache: Option<(
+        std::path::PathBuf,
+        f64,
+        Vec<rustidian::vault::LinkedMention>,
+    )>,
     pub(crate) ui_zoom: f32,
     pub(crate) document_font_size: u8,
     pub(crate) fonts: theme::fonts::Fonts,
@@ -274,6 +282,8 @@ impl NotesApp {
             bookmarks: Default::default(),
             show_bookmarks: false,
             right_tab: 0,
+            unlinked_open: false,
+            unlinked_cache: None,
             ui_zoom: 1.0,
             document_font_size: theme::DEFAULT_DOCUMENT_FONT_SIZE,
             fonts: Default::default(),
@@ -2887,6 +2897,30 @@ impl NotesApp {
                 vault.backlink_mentions(&document.path, &open)
             })
             .unwrap_or_default();
+        let now = self.ctx.input(|input| input.time);
+        let unlinked = if self.right_tab == 1 && self.unlinked_open {
+            let path = document.map(|document| document.path.clone());
+            let stale = match (&self.unlinked_cache, &path) {
+                (Some((cached, at, _)), Some(path)) => cached != path || now - at > 2.0,
+                _ => true,
+            };
+            if stale && let (Some(path), Some(vault)) = (path, self.vault.as_ref()) {
+                let open: Vec<_> = self
+                    .tabs
+                    .iter()
+                    .map(|tab| (tab.document.path.as_path(), tab.document.text.as_str()))
+                    .collect();
+                let found = vault.unlinked_mentions(&path, &open);
+                self.unlinked_cache = Some((path, now, found));
+            }
+            self.unlinked_cache
+                .as_ref()
+                .map(|(_, _, found)| found.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut link_unlinked = None;
         #[cfg(feature = "agente")]
         let root = agent_tab
             .then(|| self.vault.as_ref().map(|vault| vault.root.clone()))
@@ -3048,6 +3082,85 @@ impl NotesApp {
                             }
                             ui.add_space(theme::space::XS);
                         }
+                        ui.add_space(theme::space::M);
+                        let title = if self.unlinked_open {
+                            format!("▾ {} unlinked mentions", unlinked.len())
+                        } else {
+                            "▸ Unlinked mentions".to_owned()
+                        };
+                        let header = ui.add(
+                            egui::Button::new(RichText::new(title).size(12.0).weak())
+                                .frame_when_inactive(false),
+                        );
+                        crate::ui_probe::record(
+                            ui.ctx(),
+                            "unlinked-toggle".to_owned(),
+                            header.rect,
+                        );
+                        if header.clicked() {
+                            self.unlinked_open = !self.unlinked_open;
+                            self.unlinked_cache = None;
+                        }
+                        if self.unlinked_open {
+                            let mut previous_source = None;
+                            for mention in unlinked {
+                                if previous_source.as_ref() != Some(&mention.path) {
+                                    ui.add_space(theme::space::S);
+                                    ui.label(
+                                        RichText::new(rustidian::paths::display_path(
+                                            &mention.path,
+                                        ))
+                                        .size(13.0)
+                                        .strong(),
+                                    );
+                                    previous_source = Some(mention.path.clone());
+                                }
+                                let format = egui::TextFormat {
+                                    font_id: egui::FontId::proportional(12.0),
+                                    color: ui.visuals().text_color(),
+                                    ..Default::default()
+                                };
+                                let mut job = egui::text::LayoutJob::default();
+                                job.wrap.max_width = (ui.available_width() - 56.0).max(24.0);
+                                job.append(
+                                    &format!("{}: {}", mention.line, mention.before),
+                                    0.0,
+                                    format.clone(),
+                                );
+                                job.append(
+                                    &mention.link,
+                                    0.0,
+                                    egui::TextFormat {
+                                        underline: egui::Stroke::new(1.0, theme::accent(ui)),
+                                        ..format.clone()
+                                    },
+                                );
+                                job.append(&mention.after, 0.0, format);
+                                ui.horizontal(|ui| {
+                                    let row = ui
+                                        .add(egui::Button::new(job).frame_when_inactive(false))
+                                        .on_hover_text(mention.path.display().to_string());
+                                    let link = ui
+                                        .small_button("Link")
+                                        .on_hover_text("Turn this mention into a [[link]]");
+                                    crate::ui_probe::record(
+                                        ui.ctx(),
+                                        format!(
+                                            "unlinked:{}:{}",
+                                            mention.path.display(),
+                                            mention.range.start
+                                        ),
+                                        link.rect,
+                                    );
+                                    if link.clicked() {
+                                        link_unlinked = Some(mention.clone());
+                                    } else if theme::link_clicked(&row) {
+                                        selected_backlink = Some(mention);
+                                    }
+                                });
+                                ui.add_space(theme::space::XS);
+                            }
+                        }
                     }
                     if self.right_tab == 2 {
                         ui.label(RichText::new("Outgoing links").size(14.0).strong());
@@ -3089,8 +3202,60 @@ impl NotesApp {
         if let Some(mention) = selected_backlink {
             self.open_linked_mention(mention);
         }
+        if let Some(mention) = link_unlinked {
+            self.link_unlinked_mention(mention);
+        }
         if let Some(target) = follow {
             self.follow_link(&target);
+        }
+    }
+
+    /// Replace an unlinked mention with a wikilink to the active note: in its open tab when the
+    /// note is open (undo and autosave cover it), else straight on disk.
+    fn link_unlinked_mention(&mut self, mention: rustidian::vault::LinkedMention) {
+        self.unlinked_cache = None;
+        let Some(target) = self
+            .tabs
+            .get(self.active)
+            .map(|tab| tab.document.path.clone())
+        else {
+            return;
+        };
+        let Some(vault) = self.vault.as_mut() else {
+            return;
+        };
+        let link = rustidian::unlinked::link_text(
+            &vault.link_target(&mention.path, &target),
+            &mention.link,
+        );
+        let changed = "The mention changed. It is listed again with its current text.";
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.document.path == mention.path)
+        {
+            if tab.document.text.get(mention.range.clone()) != Some(mention.link.as_str()) {
+                self.error = Some(changed.into());
+                return;
+            }
+            tab.document.text.replace_range(mention.range, &link);
+            tab.edited();
+            return;
+        }
+        let mut document = match vault.open_document(&mention.path) {
+            Ok(document) => document,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+        if document.text.get(mention.range.clone()) != Some(mention.link.as_str()) {
+            self.error = Some(changed.into());
+            return;
+        }
+        document.text.replace_range(mention.range, &link);
+        if let Err(error) = vault.save(&mut document) {
+            self.error = Some(error.to_string());
         }
     }
 
