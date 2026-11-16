@@ -307,7 +307,7 @@ impl NotesApp {
                         ui.set_min_height(height - 24.0);
                         let input = ui.add(
                             TextEdit::singleline(&mut self.dialog_input)
-                                .hint_text("Search settings…")
+                                .hint_text("Buscar configurações…")
                                 .desired_width(f32::INFINITY),
                         );
                         crate::ui_probe::record(ctx, "dialog-input", input.rect);
@@ -333,12 +333,12 @@ impl NotesApp {
                             .show(ui, |ui| {
                                 for page in Page::ALL {
                                     if page == Page::Appearance {
-                                        ui.weak("Options");
+                                        ui.weak("Opções");
                                         ui.add_space(crate::theme::space::XS);
                                     }
                                     if page == Page::Daily {
                                         ui.add_space(crate::theme::space::M);
-                                        ui.weak("Core plugins");
+                                        ui.weak("Plugins essenciais");
                                         ui.add_space(crate::theme::space::XS);
                                     }
                                     if page.matches(&query) {
@@ -362,13 +362,13 @@ impl NotesApp {
                 ui.set_width((ui.available_width() - 24.0).max(140.0));
                 ui.set_min_height(height);
                 ui.add_space(crate::theme::space::XL);
-                let button = theme::dialog_header(ui, "Settings", "Close settings");
+                let button = theme::dialog_header(ui, "Configurações", "Fechar configurações");
                 crate::ui_probe::record(ctx, "settings-close", button.rect);
                 *close |= button.clicked();
                 ui.add_space(crate::theme::space::M);
                 let query = self.dialog_input.to_lowercase();
                 if !self.settings_page.matches(&query) {
-                    ui.weak("No settings found.");
+                    ui.weak("Nenhuma configuração encontrada.");
                     return;
                 }
                 ctx.data_mut(|data| data.insert_temp(egui::Id::unique("settings-query"), query.clone()));
