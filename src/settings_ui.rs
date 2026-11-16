@@ -481,8 +481,8 @@ impl NotesApp {
                             Page::Interface => {
                                 changed |= row(
                                     ui,
-                                    "Zoom level",
-                                    "Scale the interface and document together.",
+                                    "Nível de zoom",
+                                    "Redimensiona a interface e o documento juntos.",
                                     |ui| {
                                         let response = theme::slider(
                                             ui,
@@ -503,16 +503,16 @@ impl NotesApp {
                             Page::Files => {
                                 changed |= toggle(
                                     ui,
-                                    "Automatically update internal links",
-                                    "Update links when moving or renaming files.",
+                                    "Atualizar links internos automaticamente",
+                                    "Atualiza os links ao mover ou renomear arquivos.",
                                     "settings-update-move-links",
                                     &mut self.always_update_links,
                                 );
                                 ui.separator();
                                 changed |= toggle(
                                     ui,
-                                    "Confirm before moving to Trash",
-                                    "Show a confirmation before moving files or folders to the system Trash.",
+                                    "Confirmar antes de mover para a Lixeira",
+                                    "Mostra uma confirmação antes de mover arquivos ou pastas para a Lixeira.",
                                     "settings-confirm-trash",
                                     &mut self.confirm_trash,
                                 );
