@@ -265,7 +265,10 @@ pub(crate) fn write(
     }
     let hash = writer.hash;
     writer.inner.write_all(&hash.to_le_bytes())?;
-    let temporary = writer.inner.into_inner().map_err(io::IntoInnerError::into_error)?;
+    let temporary = writer
+        .inner
+        .into_inner()
+        .map_err(io::IntoInnerError::into_error)?;
     temporary.persist(location).map_err(|error| error.error)?;
     Ok(())
 }

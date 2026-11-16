@@ -108,7 +108,10 @@ fn the_first_open_writes_the_photo_and_the_second_reads_no_note() {
     as_if_without_photo(&first);
     let second = open(folder.path(), &photo);
     assert!(second.photo.found && !second.photo.written);
-    assert_eq!((second.photo.reused, second.photo.read, second.photo.gone), (24, 0, 0));
+    assert_eq!(
+        (second.photo.reused, second.photo.read, second.photo.gone),
+        (24, 0, 0)
+    );
     as_if_without_photo(&second);
     assert_eq!(answers(&first), answers(&second));
     // Without a photo nothing is written and nothing is reused.
@@ -133,7 +136,11 @@ fn a_note_with_the_recorded_size_and_time_is_reused_without_reading() {
     set_time(&target, time);
     let reused = open(folder.path(), &photo);
     assert_eq!(reused.photo.reused, 24);
-    let note = reused.notes.iter().find(|n| n.path.ends_with("Nota 01.md")).unwrap();
+    let note = reused
+        .notes
+        .iter()
+        .find(|n| n.path.ends_with("Nota 01.md"))
+        .unwrap();
     assert_eq!(note.text, original);
     // A different size or time is read.
     fs::write(&target, format!("{same_size}mais\n")).unwrap();
@@ -158,7 +165,11 @@ fn changed_new_and_removed_notes_match_opening_without_the_photo() {
     open(folder.path(), &photo);
     write(folder.path(), "Dir/Nota 01.md", "[[Nota 02]] mudou\n");
     write(folder.path(), "Nota 02.md", "[[Nova]]\n");
-    write(folder.path(), "Nova.md", "---\naliases: [Recém]\n---\n[[Nota 00]]\n");
+    write(
+        folder.path(),
+        "Nova.md",
+        "---\naliases: [Recém]\n---\n[[Nota 00]]\n",
+    );
     write(folder.path(), "Dir/Nova dentro.md", "dentro\n");
     fs::remove_file(folder.path().join("Nota 04.md")).unwrap();
     fs::remove_file(folder.path().join("Dir/Sub/Nota 06.md")).unwrap();
@@ -229,8 +240,18 @@ fn a_missing_or_damaged_photo_opens_normally_and_is_replaced() {
         ("an enormous count", {
             // The entry count follows the magic, layout, version and root.
             let mut other = good.clone();
-            let at = 8 + 4 + 8 + env!("CARGO_PKG_VERSION").len() + 8
-                + folder.path().canonicalize().unwrap().to_str().unwrap().len();
+            let at = 8
+                + 4
+                + 8
+                + env!("CARGO_PKG_VERSION").len()
+                + 8
+                + folder
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .len();
             other[at..at + 8].copy_from_slice(&u64::MAX.to_le_bytes());
             other
         }),

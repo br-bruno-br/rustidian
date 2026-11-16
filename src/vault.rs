@@ -1,3 +1,4 @@
+use crate::index_photo::{self, IndexPhoto, PhotoReport, Stamp};
 use std::{
     collections::HashMap,
     fs,
@@ -5,7 +6,6 @@ use std::{
     path::{Component, Path, PathBuf},
     time::{Duration, Instant, SystemTime},
 };
-use crate::index_photo::{self, IndexPhoto, PhotoReport, Stamp};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
@@ -379,7 +379,12 @@ impl Vault {
             let relative: PathBuf = entry.path().strip_prefix(&self.root).unwrap().into();
             let stamp = location
                 .is_some()
-                .then(|| entry.metadata().ok().and_then(|metadata| Stamp::of(&metadata)))
+                .then(|| {
+                    entry
+                        .metadata()
+                        .ok()
+                        .and_then(|metadata| Stamp::of(&metadata))
+                })
                 .flatten();
             // A note with the size and time the photo recorded is not read.
             if let Some(stamp) = stamp

@@ -60,7 +60,11 @@ fn edit(vault: &mut Vault, name: &str, text: &str) {
 }
 
 fn vault_with_notes(root: &Path) -> Vault {
-    write(root, "Alpha.md", "# Alpha\nVai para [[Beta]] e [[Gamma]].\n");
+    write(
+        root,
+        "Alpha.md",
+        "# Alpha\nVai para [[Beta]] e [[Gamma]].\n",
+    );
     write(
         root,
         "Beta.md",
@@ -183,7 +187,10 @@ fn external_edits_refresh_only_the_changed_notes() {
     );
     same_as_full_index(&vault, "an external edit");
     // Nothing changed since: nothing to report.
-    assert_eq!(vault.refresh_changed(&paths).unwrap(), Vec::<PathBuf>::new());
+    assert_eq!(
+        vault.refresh_changed(&paths).unwrap(),
+        Vec::<PathBuf>::new()
+    );
 }
 
 #[test]
