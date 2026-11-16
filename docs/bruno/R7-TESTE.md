@@ -1,8 +1,8 @@
 # R7a: roteiro de teste no celular
 
-Dois aplicativos de teste, feitos só para descobrir **qual deles digita melhor com o Gboard**. Eles não mexem nas suas notas: cada um grava um único arquivo `nota.md` dentro da própria pasta privada.
+Aplicativos de teste, feitos só para descobrir **qual deles digita melhor com o Gboard**. Eles não mexem nas suas notas: cada um grava um único arquivo `nota.md` dentro da própria pasta privada.
 
-- `rustidian-proto-egui.apk` (o mesmo desenho do Rustidian do PC)
+- `rustidian-proto-egui-v2.apk` (o mesmo desenho do Rustidian do PC; **v2** corrige os três problemas achados no primeiro teste: Enter, arrastar para rolar e emoji). O `rustidian-proto-egui.apk` antigo não precisa mais ser testado: a v2 instala por cima dele.
 - `rustidian-proto-dioxus.apk` (uma página web dentro do app)
 
 Os dois têm a mesma tela: um botão **Salvar**, uma linha de status, um campo grande de texto e uma linha pequena embaixo com o número de caracteres.
@@ -28,16 +28,17 @@ Use o **Gboard** com o **autocorretor ligado** (Configurações do Gboard, Corre
    - Para o `ç`: segure o `c` e escolha o `ç`. Funciona?
 4. **Autocorretor e sugestões.** Digite `voce` e depois um espaço. O Gboard troca por `você`? Digite `nao ` e veja se vira `não `. As sugestões aparecem na faixa acima do teclado e, ao tocar numa, a palavra é trocada de verdade no texto?
 5. **Apagar.** Apague uma letra com a tecla de apagar. Segure a tecla para apagar várias. Apague uma palavra inteira que acabou de corrigir. Anote se apagou a mais, a menos, ou nada.
-6. **Linha nova.** Toque em Enter. Cria uma linha nova? Digite uma segunda linha.
+6. **Linha nova.** Toque em Enter. Cria uma linha nova? Digite uma segunda linha. Aperte Enter no meio de uma palavra: quebra ali?
 7. **Colocar o cursor.** Toque no meio de uma palavra. O cursor vai para lá? Digite uma letra: ela entra onde está o cursor (e não no fim do texto)?
-8. **Selecionar com o dedo.** Segure o dedo sobre uma palavra (toque longo) ou toque duas vezes. A palavra fica selecionada? Aparecem as alças para esticar a seleção e o menu Copiar/Colar? Arraste uma alça. Digite por cima: substitui a seleção?
-9. **Rolar.** Cole ou digite texto até passar de uma tela cheia (uns 30 linhas curtas). Arraste o dedo para cima e para baixo sobre o texto. Rola, ou em vez de rolar ele seleciona texto? Anote.
+8. **Selecionar com o dedo.** Segure o dedo parado sobre uma palavra por meio segundo (toque longo) ou toque duas vezes. A palavra fica selecionada? (No **Proto egui v2**, ao segurar parado, arrastar em seguida estica a seleção; arrastar logo de cara rola o texto.) Aparecem as alças para esticar a seleção e o menu Copiar/Colar? Arraste uma alça. Digite por cima: substitui a seleção?
+9. **Rolar.** Cole ou digite texto até passar de uma tela cheia (uns 30 linhas curtas). Arraste o dedo para cima e para baixo sobre o texto. Rola, ou em vez de rolar ele seleciona texto? Anote. Toque curto no meio do texto deve só pôr o cursor, sem selecionar nada.
 10. **Teclado cobrindo o texto.** Role para o fim do texto e toque na última linha. A linha em que você está digitando fica visível acima do teclado, ou fica escondida atrás dele? Digite mais linhas e veja se continua visível.
 11. **Girar a tela.** Gire o celular para deitado e depois em pé. O texto continua lá? O app não reinicia e não perde o que digitou? O teclado continua funcionando?
 12. **Salvar.** Toque em **Salvar**. A linha de status deve dizer "Salvo: N bytes ... em /data/...". Feche o app de verdade (recentes, deslize para cima) e abra de novo: o texto voltou? A linha de status deve dizer "Lido de ...".
-13. **Sensação.** Digite um parágrafo de umas 5 linhas rápido, como escreveria uma nota. Tem atraso entre tocar e a letra aparecer? Algum travamento?
+13. **Emoji.** Abra os emojis do Gboard e toque em alguns (por exemplo 😀 👍 ❤️). Eles aparecem no texto? Colorido ou só um risquinho/quadrado? Apague o emoji com a tecla de apagar: some inteiro? No egui v2 a linha pequena de baixo diz "emoji colorido: ..." com o nome da fonte que achou; anote o que está escrito.
+14. **Sensação.** Digite um parágrafo de umas 5 linhas rápido, como escreveria uma nota. Tem atraso entre tocar e a letra aparecer? Algum travamento?
 
-Só no **Proto egui**: na linha pequena de baixo aparece "eventos do teclado: N | último: ...". Anote se o número sobe quando você digita. Se ficar em 0 mesmo digitando e aparecendo letras, o teclado está entrando por outro caminho; se ficar em 0 e **nada** aparece, o app de egui não recebeu o texto do Gboard.
+Só no **Proto egui**: na linha pequena de baixo aparece "eventos do teclado: N | último: ... | tecla: ...". Anote se o número sobe quando você digita e o que aparece em "tecla" depois de apertar Enter ou apagar. Se ficar em 0 mesmo digitando e aparecendo letras, o teclado está entrando por outro caminho; se ficar em 0 e **nada** aparece, o app de egui não recebeu o texto do Gboard.
 
 ## 3. O que anotar
 
@@ -57,7 +58,8 @@ Copie a tabela e preencha com **OK**, **falhou** ou **mais ou menos**, mais uma 
 | 10 Teclado não cobre o texto | | |
 | 11 Girar a tela | | |
 | 12 Salvar e reabrir | | |
-| 13 Sensação (atraso, travada) | | |
+| 13 Emoji | | |
+| 14 Sensação (atraso, travada) | | |
 
 Informe também: modelo do celular, versão do Android e se o teclado é mesmo o Gboard.
 
