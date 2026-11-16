@@ -616,6 +616,21 @@ impl Vault {
             return;
         }
         self.attachments.retain(|attachment| attachment != &path);
+        // A note already in the index keeps its place, its path and its name: only what depends
+        // on its text changes, so only that is updated. A new note shifts every index after it
+        // and takes the full rebuild (creating, deleting and renaming stay on that path).
+        let existing = self
+            .paths
+            .get(&path)
+            .copied()
+            .filter(|&index| self.notes.get(index).is_some_and(|note| note.path == path));
+        if let Some(index) = existing {
+            // The path as the index spells it, which may differ from `path` in its separators.
+            let note = Note::new(self.notes[index].path.clone(), text);
+            let old = std::mem::replace(&mut self.notes[index], note);
+            self.update_incoming(index, &old.text);
+            return;
+        }
         let note = Note::new(path.clone(), text);
         if let Some(existing) = self.notes.iter_mut().find(|note| note.path == path) {
             *existing = note;
@@ -625,6 +640,51 @@ impl Vault {
                 .sort_by_key(|note| note.path.to_string_lossy().to_lowercase());
         }
         self.rebuild_lookup();
+    }
+
+    /// The notes `text`, as the text of the note at `from`, links to; never `from` itself.
+    fn link_targets(&self, from: &Path, text: &str) -> std::collections::HashSet<PathBuf> {
+        let mut targets = std::collections::HashSet::new();
+        for (_, link) in reference_spans(text) {
+            if let Some(target) = self.resolve_destination(from, &link)
+                && target != from
+            {
+                targets.insert(target);
+            }
+        }
+        targets
+    }
+
+    /// The note at `index` changed text in place (`old` is the previous one). When the backlinks
+    /// are already computed, move this note between the targets it stopped and started linking
+    /// to; when they are not, the first request computes them from the current notes. The lists
+    /// stay in note order, as the full computation leaves them.
+    fn update_incoming(&mut self, index: usize, old: &str) {
+        if self.incoming.get().is_none() {
+            return;
+        }
+        let note = &self.notes[index];
+        let before = self.link_targets(&note.path, old);
+        let after = self.link_targets(&note.path, &note.text);
+        let Some(incoming) = self.incoming.get_mut() else {
+            return;
+        };
+        for target in before.difference(&after) {
+            if let Some(sources) = incoming.get_mut(target) {
+                if let Ok(at) = sources.binary_search(&index) {
+                    sources.remove(at);
+                }
+                if sources.is_empty() {
+                    incoming.remove(target);
+                }
+            }
+        }
+        for target in after.difference(&before) {
+            let sources = incoming.entry(target.clone()).or_default();
+            if let Err(at) = sources.binary_search(&index) {
+                sources.insert(at, index);
+            }
+        }
     }
 
     pub fn duplicate_file(&mut self, from: &Path) -> Result<PathBuf> {
@@ -965,15 +1025,7 @@ impl Vault {
         let incoming = self.incoming.get_or_init(|| {
             let mut incoming: HashMap<PathBuf, Vec<usize>> = HashMap::new();
             for (index, note) in self.notes.iter().enumerate() {
-                let mut targets = std::collections::HashSet::new();
-                for (_, link) in reference_spans(&note.text) {
-                    if let Some(target) = self.resolve_destination(&note.path, &link)
-                        && target != note.path
-                    {
-                        targets.insert(target);
-                    }
-                }
-                for target in targets {
+                for target in self.link_targets(&note.path, &note.text) {
                     incoming.entry(target).or_default().push(index);
                 }
             }
