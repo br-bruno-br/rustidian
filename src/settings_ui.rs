@@ -587,26 +587,26 @@ impl NotesApp {
                             Page::Unique => {
                                 changed |= text(
                                     ui,
-                                    "New file location",
-                                    "Folder for unique notes.",
+                                    "Local dos novos arquivos",
+                                    "Pasta das notas únicas.",
                                     "settings-unique-folder",
                                     &mut self.note_aids.unique.folder,
-                                    "Vault folder",
+                                    "Pasta do cofre",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Template file location",
-                                    "A note to use as the template.",
+                                    "Local do arquivo de modelo",
+                                    "Uma nota para usar como modelo.",
                                     "settings-unique-template",
                                     &mut self.note_aids.unique.template,
-                                    "Optional template note",
+                                    "Nota de modelo (opcional)",
                                 );
                                 ui.separator();
                                 changed |= text(
                                     ui,
-                                    "Unique prefix format",
-                                    "Date format for unique note names.",
+                                    "Formato do prefixo único",
+                                    "Formato da data nos nomes das notas únicas.",
                                     "settings-unique-format",
                                     &mut self.note_aids.unique.format,
                                     "YYYYMMDDHHmm",
