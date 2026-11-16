@@ -13,6 +13,8 @@ license = "MIT"
 [workspace]
 members = [".", "crates/*"]
 default-members = ["."]
+# Protótipos Android (R7a): cada um tem o próprio `[workspace]` e não entra no build do app.
+exclude = ["prototipos/android-egui", "prototipos/android-dioxus"]
 resolver = "3"
 
 [features]
