@@ -154,7 +154,7 @@ impl NotesApp {
             default_sidebars()
         };
         self.restore_sidebars = [true; 2];
-        self.right_tab = session.right_tab.min(3);
+        self.right_tab = session.right_tab.min(crate::app::LAST_RIGHT_TAB);
         self.palette = theme::palette::open_with(session.palette);
         theme::palette::select(ctx, self.palette);
         self.ui_zoom = if session.ui_zoom.is_finite() {
@@ -288,7 +288,8 @@ mod tests {
         let mut vault = Vault::open(root.path()).unwrap();
         let state: Session = serde_json::from_str(&format!(
             r#"{{"tabs":[["Home.md","Live"],["{}","Live"]],"active":1,"left":true,"right":false,"dark":true}}"#,
-            guest.display()
+            // A Windows path holds backslashes, which JSON needs doubled.
+            guest.display().to_string().replace('\\', "\\\\")
         ))
         .unwrap();
         let (tabs, active) = state.restore_tabs(&mut vault);

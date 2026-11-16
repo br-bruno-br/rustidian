@@ -137,14 +137,18 @@ impl Term {
         match self {
             Self::Text(value) => {
                 folded.contains(value)
-                    || note.path.to_string_lossy().to_lowercase().contains(value)
+                    || crate::paths::slashed(&note.path)
+                        .to_lowercase()
+                        .contains(value)
                     || note
                         .aliases
                         .iter()
                         .any(|alias| alias.to_lowercase().contains(value))
             }
             Self::Content(value) => folded.contains(value),
-            Self::Path(value) => note.path.to_string_lossy().to_lowercase().contains(value),
+            Self::Path(value) => crate::paths::slashed(&note.path)
+                .to_lowercase()
+                .contains(value),
             Self::File(value) => note.title().to_lowercase().contains(value),
             Self::Tag(value) => note.tags.iter().any(|tag| {
                 let tag = tag.to_lowercase();
@@ -152,7 +156,7 @@ impl Term {
             }),
             Self::Regex(regex, field) => match field.as_str() {
                 "file" => regex.is_match(&note.title()),
-                "path" => regex.is_match(&note.path.to_string_lossy()),
+                "path" => regex.is_match(&crate::paths::slashed(&note.path)),
                 "tag" => note.tags.iter().any(|tag| regex.is_match(tag)),
                 _ => regex.is_match(text),
             },

@@ -63,6 +63,98 @@ fn settings_import_is_read_only_and_vault_history_locations_are_distinct() {
 }
 
 #[test]
+fn history_keeps_one_day_by_default_and_reads_old_settings_without_the_new_switch() {
+    let config = Config::default();
+    assert_eq!(config.keep_days, 1.0);
+    assert!(config.enabled);
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("vault");
+    fs::create_dir_all(root.join(".obsidian")).unwrap();
+    fs::write(
+        root.join(".obsidian/file-recovery.json"),
+        b"{\"intervalMinutes\":2}",
+    )
+    .unwrap();
+    let imported = Config::from_obsidian(&root).unwrap();
+    assert_eq!(imported.keep_days, 1.0);
+    assert!(imported.enabled);
+    // An entry older than a day is gone at the next write; one from earlier today stays.
+    let store = history(base.path());
+    let path = Path::new("Home.md");
+    let day = 86_400_000;
+    let fast = Config {
+        interval_minutes: 0.0,
+        ..config
+    };
+    assert!(store.record(path, "yesterday", 0, &fast, false).unwrap());
+    assert!(store.record(path, "today", day / 2, &fast, false).unwrap());
+    assert_eq!(store.versions(path).unwrap().len(), 2);
+    assert!(
+        store
+            .record(path, "later", day + day / 4, &fast, false)
+            .unwrap()
+    );
+    let kept: Vec<_> = store
+        .versions(path)
+        .unwrap()
+        .iter()
+        .map(|version| store.content(path, version.id).unwrap())
+        .collect();
+    assert_eq!(kept, ["later", "today"]);
+}
+
+#[test]
+fn turning_history_off_records_nothing_and_deletes_the_file() {
+    use std::time::{Duration, Instant};
+    let base = tempfile::tempdir().unwrap();
+    let store = history(base.path());
+    let location = base.path().join("history/snapshots.redb");
+    let path = Path::new("Home.md");
+    let on = Config {
+        interval_minutes: 0.0,
+        ..Config::default()
+    };
+    assert!(store.record(path, "kept", 1_000, &on, false).unwrap());
+    assert!(location.is_file());
+    let off = Config {
+        enabled: false,
+        ..on.clone()
+    };
+    // Off: nothing new is written, and the existing file goes away.
+    assert!(!store.record(path, "secret", 2_000, &off, true).unwrap());
+    assert!(
+        location.is_file(),
+        "recording while off leaves the file alone"
+    );
+    store.prune(3_000, &off).unwrap();
+    assert!(!location.exists());
+    assert!(!location.with_extension("lock").exists());
+    assert!(store.files().unwrap().is_empty());
+    assert!(!store.record(path, "secret", 4_000, &off, true).unwrap());
+    assert!(
+        !location.exists(),
+        "an off history never recreates the file"
+    );
+    // The background recorder does the same when the switch is flipped while it runs.
+    assert!(store.record(path, "again", 5_000, &on, false).unwrap());
+    let (sender, events) = std::sync::mpsc::channel();
+    let mut recorder =
+        rustidian::recovery_capture::Recorder::start(store.clone(), on.clone(), move || {
+            let _ = sender.send(());
+        });
+    assert!(recorder.configure(&off));
+    let until = Instant::now() + Duration::from_secs(5);
+    while location.exists() {
+        assert!(Instant::now() < until, "the history file was not deleted");
+        let _ = events.recv_timeout(Duration::from_millis(20));
+    }
+    assert!(recorder.capture(path, "private", &off));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!location.exists());
+    assert!(recorder.errors.try_recv().is_err());
+}
+
+#[test]
 fn lowering_the_interval_releases_a_deferred_capture_without_another_edit() {
     use std::time::{Duration, Instant};
     let base = tempfile::tempdir().unwrap();
@@ -328,6 +420,7 @@ fn retention_prunes_expired_versions_and_clock_rollback_does_not_lose_an_edit() 
     let config = Config {
         interval_minutes: 0.0,
         keep_days: 1.0,
+        ..Config::default()
     };
     assert!(store.record(path, "old", 0, &config, false).unwrap());
     assert!(
@@ -427,6 +520,7 @@ fn invalid_paths_settings_and_corrupt_storage_preserve_existing_bytes() {
     let invalid = Config {
         interval_minutes: f64::NAN,
         keep_days: 7.0,
+        ..Config::default()
     };
     assert!(
         store

@@ -20,7 +20,7 @@ default = ["desktop"]
 desktop = []
 # Aba do agente (terminal com Codex/Claude/Elpis dentro do cofre). Desligada por padrão no fork:
 # manda trechos da nota a um CLI externo (revisão de segurança de 15/11/2026). Só Linux por enquanto.
-agente = []
+agente = ["dep:portable-pty", "dep:vt100"]
 
 [[bin]]
 name = "rustidian"
@@ -42,7 +42,6 @@ ratex-types = "=0.1.15"
 ratex-svg = { version = "=0.1.15", default-features = false, features = ["embed-fonts"] }
 notify = "8.2"
 nucleo-matcher = "0.3"
-rustix = { version = "1.1", features = ["event", "fs", "process"] }
 trash = "5.2"
 base64 = "0.22"
 percent-encoding = "2.3"
@@ -59,12 +58,19 @@ usvg = { version = "=0.45.1", default-features = false, features = ["text"] }
 redb = "=4.4.0"
 imara-diff = { version = "=0.2.0", default-features = false }
 fastrand = "=2.5.0"
-portable-pty = "0.9"
-vt100 = "0.16"
+portable-pty = { version = "0.9", optional = true }
+vt100 = { version = "0.16", optional = true }
 htmd = "=0.5.6"
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.15", default-features = false }
+# MoveFileExW: a rename that never replaces the destination (src/operations.rs). Already in the
+# lock through rfd and glutin; no new crate.
+windows-sys = { version = "0.59", default-features = false, features = ["Win32_Storage_FileSystem"] }
+
+# Signals, poll and the no-replace rename are Unix code (src/window.rs, src/operations.rs).
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["event", "fs", "process"] }
 
 # A launch's activation token raises the running window (src/window.rs).
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -5,6 +5,8 @@ use rustidian::{
 };
 use std::{fs, path::Path};
 
+// Linux only: it expects a POSIX file URI; the Windows form (`file:///C:/...`) is not built yet.
+#[cfg(target_os = "linux")]
 #[test]
 fn existing_file_links_use_encoded_desktop_uris_without_creating_or_escaping_notes() {
     let base = tempfile::tempdir().unwrap();
@@ -127,7 +129,8 @@ fn registered_vaults_keep_nested_files_and_do_not_match_neighbouring_names() {
     let alias = inner.join(".");
     let roots = [outer.clone(), alias];
     let (root, document) = resolve_input(&file, Some(&outer), &roots).unwrap();
-    assert_eq!(root, inner);
+    // Roots are canonical (`\\?\C:\...` on Windows).
+    assert_eq!(root, inner.canonicalize().unwrap());
     assert_eq!(document.as_deref(), Some(Path::new("Notes/Note.md")));
     let vault = Vault::open(&root).unwrap();
     let note = vault.open_document(document.as_deref().unwrap()).unwrap();
@@ -138,7 +141,7 @@ fn registered_vaults_keep_nested_files_and_do_not_match_neighbouring_names() {
     let file = neighbour.join("Note.md");
     fs::write(&file, "Original").unwrap();
     let (root, document) = resolve_input(&file, Some(&outer), &roots).unwrap();
-    assert_eq!(root, neighbour);
+    assert_eq!(root, neighbour.canonicalize().unwrap());
     assert_eq!(document.as_deref(), Some(Path::new("Note.md")));
     assert_eq!(fs::read_to_string(file).unwrap(), "Original");
 }

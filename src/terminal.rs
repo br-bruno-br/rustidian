@@ -55,12 +55,21 @@ impl Backend {
 }
 
 /// Where Rustidian tells the agent which note Masih has open; kept current as he moves.
-pub fn context_file(root: &Path) -> PathBuf {
-    root.join(".rustidian").join("agent-context.md")
+/// It lives in the app's state folder, never inside the vault (security review of 15 Nov 2026:
+/// a file in the vault would be synced and could hold text selected from private notes).
+pub fn context_file(root: &Path) -> Option<PathBuf> {
+    crate::paths::state_file(root, "agent-context", "md")
 }
 
 /// The standing instruction each agent gets at launch, so "this note" means the open one.
 pub fn context_instruction(root: &Path) -> String {
+    let Some(file) = context_file(root) else {
+        return format!(
+            "You are running inside Rustidian, Masih's Markdown notes app; your working folder is \
+             his vault at {}.",
+            root.display()
+        );
+    };
     format!(
         "You are running inside Rustidian, Masih's Markdown notes app; your working folder is \
          his vault at {}. The file {} always names the note he has open, the line his cursor \
@@ -68,7 +77,7 @@ pub fn context_instruction(root: &Path) -> String {
          \"this note\", \"this file\", \"this article\" or asks about what he is reading, read that \
          file first and then the note it names.",
         root.display(),
-        context_file(root).display()
+        file.display()
     )
 }
 
@@ -496,10 +505,13 @@ mod tests {
         let root = Path::new("/vault");
         let claude = Backend::Claude.context_args(root);
         assert_eq!(claude[0], "--append-system-prompt");
+        let context = context_file(root).expect("a state folder");
+        // The context file is outside the vault.
+        assert!(!context.starts_with(root));
         assert!(
             claude[1]
                 .to_string_lossy()
-                .contains("/vault/.rustidian/agent-context.md")
+                .contains(&context.display().to_string())
         );
         for backend in [Backend::Elpis, Backend::Codex] {
             let args = backend.context_args(root);

@@ -30,16 +30,45 @@ pub fn read_obsidian<T: serde::de::DeserializeOwned + Default>(
     serde_json::from_slice(&bytes).map_err(|error| format!("Cannot import note settings: {error}"))
 }
 
+/// The user's home folder: `HOME`, or `USERPROFILE` on Windows.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| {
+            cfg!(windows)
+                .then(|| std::env::var_os("USERPROFILE"))
+                .flatten()
+        })
+        .map(PathBuf::from)
+}
+
+/// Where the app keeps per-user state (sessions, recovery history, the agent's context file):
+/// `XDG_STATE_HOME` or `~/.local/state`, and `%LOCALAPPDATA%` on Windows.
+pub fn state_base() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    }
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".local/state")))
+}
+
+/// Where the app keeps per-user data (the vault list): `XDG_DATA_HOME` or `~/.local/share`,
+/// and `%LOCALAPPDATA%` on Windows.
+pub fn data_base() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    }
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".local/share")))
+}
+
 pub fn state_file(root: &Path, group: &str, extension: &str) -> Option<PathBuf> {
     use std::{
         collections::hash_map::DefaultHasher,
         hash::{Hash, Hasher},
     };
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })?;
+    let base = state_base()?;
     let mut hash = DefaultHasher::new();
     root.hash(&mut hash);
     Some(
@@ -69,17 +98,28 @@ pub fn app_directory(base: &Path) -> PathBuf {
     current
 }
 
+/// A relative path as it is written in links and searched: components joined with `/` on every
+/// system. On Windows the separator is `\`, which a wiki link cannot hold; on Linux a `\` is an
+/// ordinary character of a name and stays.
+pub fn slashed(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
+
 pub fn wiki_destination(path: &Path) -> String {
     if crate::vault::is_markdown(path) {
         let stem = path.with_extension("");
         if crate::assets::is_image(&stem) {
-            path.display().to_string()
+            slashed(path)
         } else {
-            stem.display().to_string()
+            slashed(&stem)
         }
     } else {
-        path.display()
-            .to_string()
+        slashed(path)
             .replace('%', "%25")
             .replace('#', "%23")
             .replace('|', "%7C")
@@ -93,19 +133,20 @@ pub fn wiki_destination(path: &Path) -> String {
 
 pub fn display_path(path: &Path) -> String {
     if crate::vault::is_markdown(path) {
-        path.with_extension("").display().to_string()
+        slashed(&path.with_extension(""))
     } else {
-        path.display().to_string()
+        slashed(path)
     }
 }
 
 pub fn wiki_path_supported(path: &Path) -> bool {
-    let Some(raw) = path.to_str() else {
+    if path.to_str().is_none() {
         return false;
-    };
+    }
     if !crate::vault::is_markdown(path) {
         return true;
     }
+    let raw = slashed(path);
     let name = &raw[..raw.len() - 3];
     !name.is_empty()
         && name.trim() == name

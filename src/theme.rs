@@ -869,6 +869,11 @@ pub fn install_icons(ctx: &egui::Context) {
     if !ctx.is_loader_installed(egui::generate_loader_id!(DataImageLoader)) {
         ctx.add_bytes_loader(std::sync::Arc::new(DataImageLoader));
     }
+    // Last, so it is asked first: no web image is requested unless the reader allowed it.
+    use crate::svg_loader::RemoteImageGuard;
+    if !ctx.is_loader_installed(egui::generate_loader_id!(RemoteImageGuard)) {
+        ctx.add_bytes_loader(std::sync::Arc::new(RemoteImageGuard));
+    }
     for icon in Icon::ALL {
         let (uri, bytes) = icon.asset();
         ctx.include_bytes(uri, egui::load::Bytes::Static(bytes));
@@ -1082,6 +1087,7 @@ pub fn icon_toggle(ui: &mut egui::Ui, icon: Icon, tooltip: &str, selected: bool)
 
 /// A toolbar button showing a symbol of the interface font, for an action
 /// that has no artwork of its own.
+#[cfg(feature = "agente")]
 pub fn glyph_button(ui: &mut egui::Ui, glyph: &str, tooltip: &str) -> egui::Response {
     toolbar_button(ui, tooltip, false, |ui, rect, color| {
         ui.painter().text(
@@ -1347,7 +1353,9 @@ mod tests {
                 .map(|vertex| vertex.pos)
                 .collect();
             let rectangles: Vec<_> = vertices
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|vertices| {
                     vertices.iter().fold(egui::Rect::NOTHING, |rect, &point| {
                         rect.union(egui::Rect::from_pos(point))

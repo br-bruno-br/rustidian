@@ -8,6 +8,9 @@ pub(crate) struct EditorPreferences {
     pub show_mode: bool,
     pub inline_title: bool,
     pub readable_line_length: bool,
+    /// Download images that notes name by web address. Off by default: opening a note must not
+    /// call a server the note names.
+    pub remote_images: bool,
 }
 
 impl Default for EditorPreferences {
@@ -18,6 +21,7 @@ impl Default for EditorPreferences {
             show_mode: true,
             inline_title: true,
             readable_line_length: true,
+            remote_images: false,
         }
     }
 }
@@ -85,14 +89,14 @@ impl Page {
             }
             Self::Interface => "interface zoom",
             Self::Editor => {
-                "editor editing files save autosave default view source live preview inline title readable line length status mode"
+                "editor editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load"
             }
             Self::Files => "files and links automatically update move folder",
             Self::Hotkeys => "hotkeys keyboard shortcuts commands",
             Self::Daily => "daily notes date format folder template new file location",
             Self::Templates => "templates date time format folder location",
             Self::Unique => "unique notes prefix format folder template new file location",
-            Self::Recovery => "file recovery snapshots history interval length days",
+            Self::Recovery => "file recovery snapshots history interval length days keep",
         };
         query.split_whitespace().all(|word| terms.contains(word))
     }
@@ -146,6 +150,18 @@ impl NotesApp {
                 "Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable.",
                 "settings-readable-line-length",
                 &mut self.editor_preferences.readable_line_length,
+            );
+        });
+        ui.add_space(crate::theme::space::XL);
+        ui.strong("Privacy");
+        ui.add_space(crate::theme::space::S);
+        group(ui, |ui| {
+            changed |= toggle(
+                ui,
+                "Load images from the internet",
+                "Off: notes with web images (http or https) make no network request; a marker stands in and a click loads that one image.",
+                "settings-remote-images",
+                &mut self.editor_preferences.remote_images,
             );
         });
         ui.add_space(crate::theme::space::XL);
@@ -511,6 +527,14 @@ impl NotesApp {
                                 );
                             }
                             Page::Recovery => {
+                                changed |= toggle(
+                                    ui,
+                                    "Keep file recovery history",
+                                    "Off: nothing is recorded, and the history already saved is deleted.",
+                                    "settings-recovery-enabled",
+                                    &mut self.recovery_config.enabled,
+                                );
+                                ui.separator();
                                 changed |= row(
                                     ui,
                                     "Snapshot interval",

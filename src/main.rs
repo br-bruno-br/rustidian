@@ -24,6 +24,7 @@ mod svg_loader;
 mod syntax;
 mod table_layout;
 mod table_ui;
+#[cfg(feature = "agente")]
 mod terminal_ui;
 mod theme;
 mod title_ui;
@@ -171,6 +172,7 @@ fn main() -> eframe::Result {
             window::close_on_signals(cc.egui_ctx.clone());
             #[cfg(unix)]
             let _ = ui_context.set(cc.egui_ctx.clone());
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut app = app::NotesApp::new(cc, &root, started, startup_document);
             #[cfg(unix)]
             {
@@ -182,6 +184,7 @@ fn main() -> eframe::Result {
     // The socket file stays: the next launch finds nobody listening on it and
     // replaces it. Removing it here could remove a newer window's socket.
     // The window is gone; an agent that ignores SIGTERM still gets its SIGKILL.
+    #[cfg(feature = "agente")]
     rustidian::terminal::wait_for_closing();
     result
 }

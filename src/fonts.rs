@@ -2,6 +2,8 @@
 //! interface, for note text and for code. An empty name keeps Rustidian's own font.
 use eframe::egui::{self, FontFamily};
 use serde::{Deserialize, Serialize};
+#[cfg(any(windows, test))]
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,7 +48,140 @@ fn interface(face: &str) -> FontFamily {
     }
 }
 
+/// The families Windows ships, with the files of each face in `%WINDIR%\Fonts`:
+/// (family, monospace, regular, semibold, bold, italic). Windows has no `fc-list`, and the
+/// family names inside the font files are not read here, so the well-known ones are listed.
+#[cfg(any(windows, test))]
+const WINDOWS_FAMILIES: &[(&str, bool, &str, &str, &str, &str)] = &[
+    (
+        "Segoe UI",
+        false,
+        "segoeui.ttf",
+        "seguisb.ttf",
+        "segoeuib.ttf",
+        "segoeuii.ttf",
+    ),
+    ("Segoe UI Emoji", false, "seguiemj.ttf", "", "", ""),
+    (
+        "Consolas",
+        true,
+        "consola.ttf",
+        "",
+        "consolab.ttf",
+        "consolai.ttf",
+    ),
+    ("Arial", false, "arial.ttf", "", "arialbd.ttf", "ariali.ttf"),
+    (
+        "Calibri",
+        false,
+        "calibri.ttf",
+        "",
+        "calibrib.ttf",
+        "calibrii.ttf",
+    ),
+    (
+        "Cambria",
+        false,
+        "cambria.ttc",
+        "",
+        "cambriab.ttf",
+        "cambriai.ttf",
+    ),
+    (
+        "Georgia",
+        false,
+        "georgia.ttf",
+        "",
+        "georgiab.ttf",
+        "georgiai.ttf",
+    ),
+    (
+        "Verdana",
+        false,
+        "verdana.ttf",
+        "",
+        "verdanab.ttf",
+        "verdanai.ttf",
+    ),
+    ("Tahoma", false, "tahoma.ttf", "", "tahomabd.ttf", ""),
+    (
+        "Times New Roman",
+        false,
+        "times.ttf",
+        "",
+        "timesbd.ttf",
+        "timesi.ttf",
+    ),
+    (
+        "Courier New",
+        true,
+        "cour.ttf",
+        "",
+        "courbd.ttf",
+        "couri.ttf",
+    ),
+    ("Lucida Console", true, "lucon.ttf", "", "", ""),
+];
+
+/// The file of `family` in `face` inside `folder`, if Windows ships it and it is there.
+#[cfg(any(windows, test))]
+fn windows_file(folder: &Path, family: &str, face: &str) -> Option<PathBuf> {
+    let entry = WINDOWS_FAMILIES
+        .iter()
+        .find(|entry| entry.0.eq_ignore_ascii_case(family.trim()))?;
+    let name = match face {
+        "semibold" => entry.3,
+        "bold" => entry.4,
+        "italic" => entry.5,
+        _ => entry.2,
+    };
+    let file = folder.join(name);
+    (!name.is_empty() && file.is_file()).then_some(file)
+}
+
+/// `%WINDIR%\Fonts`.
+#[cfg(windows)]
+fn windows_fonts() -> Option<PathBuf> {
+    std::env::var_os("WINDIR")
+        .or_else(|| std::env::var_os("SystemRoot"))
+        .map(|windows| PathBuf::from(windows).join("Fonts"))
+}
+
 /// Installed families, by name, for the pickers; monospace ones only if `mono`.
+#[cfg(windows)]
+pub fn installed(mono: bool) -> &'static [String] {
+    static ALL: OnceLock<Vec<String>> = OnceLock::new();
+    static MONO: OnceLock<Vec<String>> = OnceLock::new();
+    let list = |mono: bool| {
+        let Some(folder) = windows_fonts() else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = WINDOWS_FAMILIES
+            .iter()
+            .filter(|entry| {
+                (!mono || entry.1) && windows_file(&folder, entry.0, "regular").is_some()
+            })
+            .map(|entry| entry.0.to_owned())
+            .collect();
+        names.sort_by_key(|name| name.to_lowercase());
+        names
+    };
+    if mono {
+        MONO.get_or_init(|| list(true))
+    } else {
+        ALL.get_or_init(|| list(false))
+    }
+}
+
+/// The installed file for `family` in `face`, or `None` when no such family is installed.
+#[cfg(windows)]
+fn file(family: &str, face: &str) -> Option<egui::FontData> {
+    let path = windows_file(&windows_fonts()?, family, face)?;
+    Some(egui::FontData::from_owned(std::fs::read(path).ok()?))
+}
+
+/// Installed families, by name, for the pickers; monospace ones only if `mono`.
+#[cfg(not(windows))]
 pub fn installed(mono: bool) -> &'static [String] {
     static ALL: OnceLock<Vec<String>> = OnceLock::new();
     static MONO: OnceLock<Vec<String>> = OnceLock::new();
@@ -74,6 +209,7 @@ pub fn installed(mono: bool) -> &'static [String] {
 }
 
 /// The installed file for `family` in `face`, or `None` when no such family is installed.
+#[cfg(not(windows))]
 fn file(family: &str, face: &str) -> Option<egui::FontData> {
     let style = match face {
         "semibold" => ":weight=semibold",
@@ -168,6 +304,32 @@ mod tests {
                 text: "Source Serif 4".into(),
                 monospace: "JetBrains Mono".into(),
             }
+        );
+    }
+
+    #[test]
+    fn windows_families_resolve_to_files_in_the_fonts_folder() {
+        let folder = tempfile::tempdir().unwrap();
+        for name in ["segoeui.ttf", "segoeuib.ttf", "consola.ttf"] {
+            std::fs::write(folder.path().join(name), b"font").unwrap();
+        }
+        let find = |family, face| windows_file(folder.path(), family, face);
+        assert_eq!(
+            find("segoe ui", "regular"),
+            Some(folder.path().join("segoeui.ttf"))
+        );
+        assert_eq!(
+            find("Segoe UI", "bold"),
+            Some(folder.path().join("segoeuib.ttf"))
+        );
+        // A face the folder lacks, a family it lacks and an unknown family are all `None`.
+        assert_eq!(find("Segoe UI", "italic"), None);
+        assert_eq!(find("Segoe UI", "semibold"), None);
+        assert_eq!(find("Arial", "regular"), None);
+        assert_eq!(find("No Such Font 4096", "regular"), None);
+        assert_eq!(
+            find("Consolas", "regular"),
+            Some(folder.path().join("consola.ttf"))
         );
     }
 

@@ -37,6 +37,12 @@ impl Recorder {
             let mut pending = HashMap::<PathBuf, Deferred>::new();
             let mut prune_after = Instant::now();
             let mut current_config = config;
+            if !current_config.enabled
+                && let Err(error) = history.erase()
+            {
+                let _ = errors.send(error);
+                wake();
+            }
             loop {
                 let timeout = pending
                     .values()
@@ -45,6 +51,10 @@ impl Recorder {
                     .unwrap_or(Duration::from_secs(60))
                     .min(Duration::from_secs(60));
                 match receiver.recv_timeout(timeout) {
+                    Ok(Request::Capture(_, _, config)) if !config.enabled => {
+                        // History is off: keep nothing.
+                        current_config = config;
+                    }
                     Ok(Request::Capture(path, text, config)) => {
                         current_config = config.clone();
                         pending.insert(
@@ -63,6 +73,15 @@ impl Recorder {
                     }
                     Ok(Request::Configure(config)) => {
                         current_config = config.clone();
+                        if !config.enabled {
+                            // Turned off: drop what waited and delete the history file.
+                            pending.clear();
+                            if let Err(error) = history.erase() {
+                                let _ = errors.send(error);
+                            }
+                            wake();
+                            continue;
+                        }
                         for entry in pending.values_mut() {
                             entry.config = config.clone();
                             entry.due = Instant::now();

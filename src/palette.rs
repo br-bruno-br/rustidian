@@ -97,11 +97,7 @@ pub fn global_file(state_base: &std::path::Path) -> std::path::PathBuf {
 }
 
 fn state_base() -> Option<std::path::PathBuf> {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state"))
-        })
+    rustidian::paths::state_base()
 }
 
 pub fn read_global(state_base: &std::path::Path) -> Option<Palette> {

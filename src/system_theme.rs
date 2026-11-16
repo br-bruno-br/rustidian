@@ -7,6 +7,8 @@ use eframe::egui;
 pub struct SystemTheme {
     #[cfg(target_os = "linux")]
     linux: linux::Settings,
+    #[cfg(windows)]
+    windows: windows::Settings,
 }
 
 impl SystemTheme {
@@ -18,8 +20,95 @@ impl SystemTheme {
     ) {
         #[cfg(target_os = "linux")]
         self.linux.update(ctx, raw, appearance);
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        self.windows.update(raw, appearance);
+        #[cfg(not(any(target_os = "linux", windows)))]
         let _ = (ctx, raw, appearance);
+        #[cfg(windows)]
+        let _ = ctx;
+    }
+}
+
+/// Windows normally reports the theme through winit; when it does not, the setting is read once
+/// from the registry (no watcher: a change shows at the next start).
+#[cfg(any(windows, test))]
+mod windows {
+    #[cfg(windows)]
+    use super::Appearance;
+    use super::egui;
+
+    const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    const VALUE: &str = "AppsUseLightTheme";
+
+    /// The theme in `reg query` output: `AppsUseLightTheme    REG_DWORD    0x0` is dark.
+    pub(super) fn parse(output: &str) -> Option<egui::Theme> {
+        let line = output.lines().find(|line| line.contains(VALUE))?;
+        let data = line.split_whitespace().last()?;
+        let light = match data
+            .strip_prefix("0x")
+            .map_or_else(|| data.parse::<u32>(), |hex| u32::from_str_radix(hex, 16))
+        {
+            Ok(0) => false,
+            Ok(_) => true,
+            Err(_) => return None,
+        };
+        Some(if light {
+            egui::Theme::Light
+        } else {
+            egui::Theme::Dark
+        })
+    }
+
+    #[cfg(windows)]
+    fn read() -> Option<egui::Theme> {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: no console flashes while the command runs.
+        let output = std::process::Command::new("reg")
+            .args(["query", KEY, "/v", VALUE])
+            .creation_flags(0x0800_0000)
+            .output()
+            .ok()?;
+        parse(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    #[cfg(windows)]
+    #[derive(Default)]
+    pub(super) struct Settings {
+        read: bool,
+        theme: Option<egui::Theme>,
+    }
+
+    #[cfg(windows)]
+    impl Settings {
+        pub(super) fn update(&mut self, raw: &mut egui::RawInput, appearance: Appearance) {
+            if appearance != Appearance::System {
+                *self = Self::default();
+                return;
+            }
+            if raw.system_theme.is_some() {
+                return;
+            }
+            if !self.read {
+                self.read = true;
+                self.theme = read();
+            }
+            raw.system_theme = self.theme;
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn reg_query_output_gives_the_apps_theme() {
+            let dark = format!("\r\n{KEY}\r\n    {VALUE}    REG_DWORD    0x0\r\n\r\n");
+            let light = format!("\r\n{KEY}\r\n    {VALUE}    REG_DWORD    0x1\r\n\r\n");
+            assert_eq!(parse(&dark), Some(egui::Theme::Dark));
+            assert_eq!(parse(&light), Some(egui::Theme::Light));
+            assert_eq!(parse("ERROR: The system was unable to find the key."), None);
+            assert_eq!(parse(&format!("{VALUE}    REG_DWORD    garbage")), None);
+        }
     }
 }
 

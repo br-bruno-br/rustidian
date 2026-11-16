@@ -20,7 +20,7 @@ pub struct Vaults {
 /// Masih's two starting places stay on top however many folders agents open (5 Nov: 29 roots
 /// buried them).
 fn default_pins() -> Vec<PathBuf> {
-    let desktop = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Desktop"));
+    let desktop = crate::paths::home_dir().map(|home| home.join("Desktop"));
     desktop
         .into_iter()
         .chain(default_vault())
@@ -39,10 +39,7 @@ fn pin_first(roots: &mut Vec<PathBuf>, pinned: &[PathBuf]) {
 }
 
 pub fn location() -> Option<PathBuf> {
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
-        .map(|base| crate::paths::app_directory(&base).join("vaults.json"))
+    crate::paths::data_base().map(|base| crate::paths::app_directory(&base).join("vaults.json"))
 }
 
 /// Where the vault Masih last read is kept: beside the vault list, outside his notes.
@@ -298,6 +295,8 @@ mod tests {
         let b = base.path().join("b/Notes");
         fs::create_dir_all(&a).unwrap();
         fs::create_dir_all(&b).unwrap();
+        // The list stores canonical paths (`\?\C:\...` on Windows), so compare with those.
+        let (a, b) = (a.canonicalize().unwrap(), b.canonicalize().unwrap());
         fs::write(a.join("Keep.md"), "original").unwrap();
         let location = base.path().join("state/vaults.json");
         let mut list = Vaults::load(location.clone()).unwrap();
@@ -350,6 +349,8 @@ mod tests {
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("Notes");
         fs::create_dir(&root).unwrap();
+        // The list stores the canonical path (`\?\C:\...` on Windows).
+        let root = root.canonicalize().unwrap();
         let location = base.path().join("vaults.json");
         let mut list = Vaults::load(location.clone()).unwrap();
         list.remember(&root).unwrap();
@@ -410,7 +411,10 @@ mod tests {
     fn creating_a_vault_is_contained_empty_and_never_reuses_a_destination() {
         let base = tempfile::tempdir().unwrap();
         let root = create(base.path(), "یادداشت Notes").unwrap();
-        assert_eq!(root.parent(), Some(base.path()));
+        assert_eq!(
+            root.parent(),
+            Some(base.path().canonicalize().unwrap().as_path())
+        );
         assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
         fs::write(root.join("Keep.md"), "original").unwrap();
         assert!(create(base.path(), "یادداشت Notes").is_err());

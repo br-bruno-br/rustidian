@@ -1,6 +1,8 @@
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Mutex, mpsc},
     time::{Duration, Instant},
 };

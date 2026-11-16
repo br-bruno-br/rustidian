@@ -31,7 +31,7 @@ impl FileMatcher {
                 label: if path.as_os_str().is_empty() {
                     "/".into()
                 } else {
-                    path.to_string_lossy().into_owned()
+                    crate::paths::slashed(&path)
                 },
                 path,
             })
@@ -48,7 +48,7 @@ impl FileMatcher {
             .entries
             .extend(vault.attachments.iter().map(|path| Entry {
                 path: path.clone(),
-                label: path.to_string_lossy().into_owned(),
+                label: crate::paths::slashed(path),
             }));
         matcher
     }
@@ -57,7 +57,7 @@ impl FileMatcher {
         let entries = paths
             .into_iter()
             .map(|path| Entry {
-                label: path.with_extension("").to_string_lossy().into_owned(),
+                label: crate::paths::slashed(&path.with_extension("")),
                 path,
             })
             .collect();

@@ -18,13 +18,19 @@ const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 pub struct Config {
     pub interval_minutes: f64,
     pub keep_days: f64,
+    /// "Keep file recovery history". When off nothing is recorded and the history file already
+    /// on disk is deleted (security review of 15 Nov 2026: history keeps text the reader
+    /// deleted from a note).
+    pub enabled: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             interval_minutes: 5.0,
-            keep_days: 7.0,
+            // One day, not a week: old text a note no longer holds should not linger.
+            keep_days: 1.0,
+            enabled: true,
         }
     }
 }
@@ -231,6 +237,9 @@ impl History {
     ) -> Result<bool> {
         let path = supported(path)?;
         config.validate()?;
+        if !config.enabled {
+            return Ok(false);
+        }
         self.access(|db| {
             let write = db.begin_write()?;
             let captured = {
@@ -317,6 +326,9 @@ impl History {
 
     pub fn prune(&self, now_ms: i64, config: &Config) -> Result<()> {
         config.validate()?;
+        if !config.enabled {
+            return self.erase();
+        }
         if !self.exists()? {
             return Ok(());
         }
@@ -327,6 +339,33 @@ impl History {
             db.compact()?;
             Ok(())
         })
+    }
+
+    /// Delete the history file itself (used when the history is turned off). The app's own state
+    /// file, never a note, so it is removed outright rather than sent to the vault's trash.
+    pub fn erase(&self) -> Result<()> {
+        if !self.exists()? {
+            return Ok(());
+        }
+        let lock_file = self.location.with_extension("lock");
+        let result = (|| -> std::io::Result<()> {
+            // The same lock `access` takes, so a write in another process finishes first.
+            let lock = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(&lock_file)?;
+            lock.lock()?;
+            let removed = match fs::remove_file(&self.location) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+                _ => Ok(()),
+            };
+            drop(lock);
+            removed
+        })();
+        let _ = fs::remove_file(&lock_file);
+        result.map_err(|error| format!("Cannot delete local history: {error}"))
     }
 
     pub fn clear(&self) -> Result<()> {

@@ -32,8 +32,14 @@ fn image_display_rewrites_inline_and_reference_images_but_leaves_code_unchanged(
     assert!(display.contains("```md\n![Literal](Assets/image.png)\n```"));
     let blocked = prepare_images("![Private](file:///etc/secret.png)", |_| None);
     assert!(blocked.contains("rust-missing-image:file:///etc/secret.png"));
+    // Web images are blocked unless the setting allows them: no address stays as a destination.
     let remote = prepare_images("![Remote](https://example.com/image.png)", |_| None);
-    assert!(remote.contains("<https://example.com/image.png>"));
+    assert!(remote.contains("rust-blocked-image:https://example.com/image.png"));
+    assert!(!remote.contains("](<https://"));
+    let allowed = prepare_images("![Remote](https://example.com/image.png)", |target| {
+        rustidian::assets::image_uri_with(None, Path::new("Note.md"), target, true)
+    });
+    assert!(allowed.contains("<https://example.com/image.png>"));
 }
 
 #[test]
@@ -54,7 +60,11 @@ fn images_resolve_relative_root_and_unique_names_without_escaping_the_vault() {
             vault
                 .resolve_attachment(Path::new("Notes/Note.md"), target)
                 .unwrap(),
-            temp.path().join("Assets/Hello world.PNG")
+            // Resolved paths are canonical (`\\?\C:\...` on Windows).
+            temp.path()
+                .join("Assets/Hello world.PNG")
+                .canonicalize()
+                .unwrap()
         );
     }
     for target in [
@@ -82,7 +92,10 @@ fn images_resolve_relative_root_and_unique_names_without_escaping_the_vault() {
         vault
             .resolve_attachment(Path::new("Notes/Note.md"), "Hello world.PNG")
             .unwrap(),
-        temp.path().join("Notes/Hello world.PNG")
+        temp.path()
+            .join("Notes/Hello world.PNG")
+            .canonicalize()
+            .unwrap()
     );
 }
 

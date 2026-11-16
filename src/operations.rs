@@ -767,12 +767,24 @@ impl Vault {
                 ));
             }
         }
-        #[cfg(target_os = "linux")]
         {
-            use std::os::unix::fs::MetadataExt;
             let metadata = std::fs::symlink_metadata(&original)
                 .map_err(|error| format!("Cannot read source: {error}"))?;
-            if metadata.dev() != plan.metadata.dev() || metadata.ino() != plan.metadata.ino() {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if metadata.dev() != plan.metadata.dev() || metadata.ino() != plan.metadata.ino() {
+                    return Err(
+                        "The source was replaced outside the app. Nothing was renamed.".into(),
+                    );
+                }
+            }
+            // Without inode numbers in std, a source swapped for a look-alike (a folder renamed
+            // away and recreated with the same contents) shows as a new creation time.
+            #[cfg(not(target_os = "linux"))]
+            if metadata.file_type().is_symlink()
+                || metadata.created().ok() != plan.metadata.created().ok()
+            {
                 return Err("The source was replaced outside the app. Nothing was renamed.".into());
             }
             if image
@@ -791,8 +803,6 @@ impl Vault {
             rename_noreplace(&original, &destination)
                 .map_err(|error| format!("Cannot rename file or folder: {error}"))?;
         }
-        #[cfg(not(target_os = "linux"))]
-        return Err("Guarded renaming is currently available on Linux.".into());
         for note in &mut self.notes {
             note.path = moved_path(&note.path, &plan.from, &plan.to, folder);
         }
@@ -900,6 +910,31 @@ fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
         rustix::fs::RenameFlags::NOREPLACE,
     )
     .map_err(std::io::Error::from)
+}
+
+/// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` fails if the destination exists,
+/// atomically, for files and folders alike (`std::fs::rename` would replace a file).
+#[cfg(windows)]
+fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+    let wide = |path: &Path| -> Vec<u16> { path.as_os_str().encode_wide().chain([0]).collect() };
+    let (from, to) = (wide(from), wide(to));
+    // SAFETY: both are NUL-terminated UTF-16 strings that outlive the call.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Elsewhere: look, then rename. A file created in the gap would be replaced.
+#[cfg(not(any(target_os = "linux", windows)))]
+fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(to).is_ok() {
+        return Err(std::io::ErrorKind::AlreadyExists.into());
+    }
+    std::fs::rename(from, to)
 }
 
 fn same_move_source(expected: &std::fs::Metadata, current: &std::fs::Metadata) -> bool {

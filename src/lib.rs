@@ -25,6 +25,13 @@ pub mod search;
 pub mod structure;
 pub mod tab;
 pub mod tables;
+#[cfg(all(feature = "agente", not(target_os = "linux")))]
+compile_error!(
+    "A feature `agente` só funciona no Linux por enquanto: o terminal usa PTY e sinais POSIX (a tabela de R2 do plano do fork)."
+);
+
+/// Aba do agente: desligada por padrão (revisão de segurança de 15/11/2026).
+#[cfg(feature = "agente")]
 pub mod terminal;
 pub mod vault;
 pub mod vaults;

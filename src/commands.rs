@@ -28,6 +28,7 @@ pub const OPEN_FILE: &str = "Open file…";
 pub const OPEN_FOLDER: &str = "Open folder…";
 pub const OPEN_FILE_SHORTCUT: &str = "Ctrl+Shift+O";
 pub const OPEN_FOLDER_SHORTCUT: &str = "Ctrl+Alt+O";
+#[cfg(feature = "agente")]
 pub const OPEN_AGENT: &str = "Agent: Open agent tab";
 pub const OPEN_GRAPH: &str = "Graph view: Open graph view";
 pub const OPEN_LOCAL_GRAPH: &str = "Graph view: Open local graph";
@@ -57,6 +58,7 @@ pub const ALL: &[Command] = &[
         shortcut: OPEN_FOLDER_SHORTCUT,
         scope: Scope::Global,
     },
+    #[cfg(feature = "agente")]
     Command {
         name: OPEN_AGENT,
         shortcut: "Ctrl+Shift+A",
