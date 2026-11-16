@@ -156,11 +156,11 @@ impl Table {
         draft: Option<&CellDraft>,
     ) -> Result<CellDraft, &'static str> {
         if !self.is_current(source) {
-            return Err("The table changed. Reopen the cell before editing it.");
+            return Err("A tabela mudou. Reabra a célula antes de editá-la.");
         }
         if column >= self.alignments.len() || row >= self.rows.len() || text.contains(['\n', '\r'])
         {
-            return Err("A table cell must be one Markdown line in an existing column.");
+            return Err("Uma célula de tabela deve ser uma linha Markdown em uma coluna existente.");
         }
         let encoded = encode_pipes(&text);
         let target = &self.rows[row];
@@ -229,7 +229,7 @@ impl Table {
             return self.edit_cell(source, row, column, text, None).map(|_| ());
         }
         if !self.is_current(source) {
-            return Err("The table changed. Reopen the cell before editing it.");
+            return Err("A tabela mudou. Reabra a célula antes de editá-la.");
         }
         let columns = self.alignments.len();
         let mut rows: Vec<Vec<String>> = self
@@ -344,7 +344,7 @@ impl Table {
             }
             _ => {
                 return Err(
-                    "That table operation would remove its header or last column, or uses a missing cell.",
+                    "Essa operação na tabela removeria o cabeçalho ou a última coluna, ou usa uma célula que não existe.",
                 );
             }
         }

@@ -314,7 +314,7 @@ pub fn handles(
         let response = ui
             .interact(rect, id, egui::Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-            .on_hover_text("Drag to resize column · arrow keys adjust width · Ctrl+Z undoes");
+            .on_hover_text("Arraste para redimensionar a coluna · as setas ajustam a largura · Ctrl+Z desfaz");
         crate::ui_probe::record(ui.ctx(), format!("table-resize:{table}:{column}"), rect);
         if response.hovered() || response.dragged() || response.has_focus() {
             ui.painter().line_segment(
