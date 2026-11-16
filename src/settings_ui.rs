@@ -808,7 +808,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
         .height(320.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .selected_text(if value.is_empty() {
-            "Default"
+            rustidian::i18n::t("Default")
         } else {
             value.as_str()
         })
@@ -825,7 +825,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
             };
             let field = ui.add(
                 egui::TextEdit::singleline(&mut search)
-                    .hint_text("Search fonts")
+                    .hint_text("Buscar fontes")
                     .desired_width(f32::INFINITY),
             );
             if opened {
@@ -842,7 +842,7 @@ fn font_choice(ui: &mut egui::Ui, id: &str, value: &mut String, mono: bool) -> b
             );
             for name in names {
                 let label = if name.is_empty() { "Default" } else { name };
-                let response = ui.selectable_label(*value == name, label);
+                let response = ui.selectable_label(*value == name, rustidian::i18n::t(label));
                 crate::ui_probe::record(ui.ctx(), format!("{id}:{label}"), response.rect);
                 if response.clicked() {
                     *value = name.to_owned();
@@ -895,7 +895,7 @@ fn navigation_row(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Respon
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 25.0), egui::Sense::click());
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, page.label())
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, page.shown())
     });
     if selected || response.hovered() || response.has_focus() {
         ui.painter().rect_filled(
@@ -930,7 +930,7 @@ fn navigation_row(ui: &mut egui::Ui, page: Page, selected: bool) -> egui::Respon
     ui.painter().text(
         egui::pos2(rect.left() + 32.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        page.label(),
+        page.shown(),
         FontId::proportional(13.0),
         ui.visuals().text_color(),
     );
@@ -987,11 +987,11 @@ fn choice(
         let before = *value;
         let response = egui::ComboBox::from_id_salt(id)
             .icon(theme::combo_chevron)
-            .selected_text(labels[usize::from(*value)])
+            .selected_text(rustidian::i18n::t(labels[usize::from(*value)]))
             .show_ui(ui, |ui| {
                 theme::menu_style(ui);
                 for (i, label) in labels.into_iter().enumerate() {
-                    let r = ui.selectable_value(value, i == 1, label);
+                    let r = ui.selectable_value(value, i == 1, rustidian::i18n::t(label));
                     crate::ui_probe::record(ui.ctx(), format!("{id}:{label}"), r.rect);
                 }
             });
