@@ -1,9 +1,7 @@
+use rustidian::tab::{ImageScale, Tab, View};
 use rustidian::vault::Vault;
-use rustidian::{
-    paths,
-    search::FileMatcher,
-    tab::{ImageScale, Tab, View},
-};
+#[cfg(target_os = "linux")]
+use rustidian::{paths, search::FileMatcher};
 use std::{fs, path::Path};
 
 #[test]
@@ -100,6 +98,8 @@ fn missing_image_links_do_not_create_empty_markdown_replacements() {
     }
 }
 
+// Linux only: the file names hold `|`, `]` and `:`, which Windows does not allow in a name.
+#[cfg(target_os = "linux")]
 #[test]
 fn image_targets_are_unambiguous_and_escaped_names_round_trip() {
     let dir = tempfile::tempdir().unwrap();
@@ -155,6 +155,8 @@ fn image_tabs_keep_read_only_modes_and_restore_note_editing_mode() {
     assert_eq!(tab.image_scale, ImageScale::Fit);
 }
 
+// Linux only: the file names hold `|` and `]`, which Windows does not allow in a name.
+#[cfg(target_os = "linux")]
 #[test]
 fn quick_open_keeps_all_files_while_link_completion_excludes_unsafe_note_names() {
     let dir = tempfile::tempdir().unwrap();

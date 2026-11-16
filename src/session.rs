@@ -288,7 +288,8 @@ mod tests {
         let mut vault = Vault::open(root.path()).unwrap();
         let state: Session = serde_json::from_str(&format!(
             r#"{{"tabs":[["Home.md","Live"],["{}","Live"]],"active":1,"left":true,"right":false,"dark":true}}"#,
-            guest.display()
+            // A Windows path holds backslashes, which JSON needs doubled.
+            guest.display().to_string().replace('\\', "\\\\")
         ))
         .unwrap();
         let (tabs, active) = state.restore_tabs(&mut vault);

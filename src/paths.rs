@@ -98,17 +98,28 @@ pub fn app_directory(base: &Path) -> PathBuf {
     current
 }
 
+/// A relative path as it is written in links and searched: components joined with `/` on every
+/// system. On Windows the separator is `\`, which a wiki link cannot hold; on Linux a `\` is an
+/// ordinary character of a name and stays.
+pub fn slashed(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
+
 pub fn wiki_destination(path: &Path) -> String {
     if crate::vault::is_markdown(path) {
         let stem = path.with_extension("");
         if crate::assets::is_image(&stem) {
-            path.display().to_string()
+            slashed(path)
         } else {
-            stem.display().to_string()
+            slashed(&stem)
         }
     } else {
-        path.display()
-            .to_string()
+        slashed(path)
             .replace('%', "%25")
             .replace('#', "%23")
             .replace('|', "%7C")
@@ -122,19 +133,20 @@ pub fn wiki_destination(path: &Path) -> String {
 
 pub fn display_path(path: &Path) -> String {
     if crate::vault::is_markdown(path) {
-        path.with_extension("").display().to_string()
+        slashed(&path.with_extension(""))
     } else {
-        path.display().to_string()
+        slashed(path)
     }
 }
 
 pub fn wiki_path_supported(path: &Path) -> bool {
-    let Some(raw) = path.to_str() else {
+    if path.to_str().is_none() {
         return false;
-    };
+    }
     if !crate::vault::is_markdown(path) {
         return true;
     }
+    let raw = slashed(path);
     let name = &raw[..raw.len() - 3];
     !name.is_empty()
         && name.trim() == name

@@ -1,3 +1,6 @@
+// Linux only: the only test reads the freedesktop Trash folder under XDG_DATA_HOME.
+#![cfg(target_os = "linux")]
+
 use rustidian::vault::Vault;
 use std::{fs, path::Path};
 

@@ -2428,7 +2428,8 @@ mod tests {
 
     #[test]
     fn native_tables_preserve_alignments_styles_links_empty_cells_and_neighboring_code() {
-        let (source, links) = prepare(include_str!("../tests/fixtures/table.md"));
+        let (source, links) =
+            prepare(&include_str!("../tests/fixtures/table.md").replace("\r\n", "\n"));
         let parsed = Parsed::new(&source);
         assert!(!parsed.fallback);
         assert_eq!(parsed.blocks.len(), 4);
