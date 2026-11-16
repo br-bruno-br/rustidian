@@ -37,7 +37,7 @@ pub struct Restored {
 impl Layout {
     fn validate(&self) -> Result<(), String> {
         if !self.left_width.is_finite() || !self.right_width.is_finite() {
-            return Err("The workspace has invalid sidebar sizes.".into());
+            return Err("O espaço de trabalho tem tamanhos de painel lateral inválidos.".into());
         }
         if (!self.tabs.is_empty() && self.active >= self.tabs.len())
             || self
@@ -45,14 +45,14 @@ impl Layout {
                 .iter()
                 .any(|tab| !matches!(tab.editing_view, View::Live | View::Source))
         {
-            return Err("The workspace has an invalid active tab or editing mode.".into());
+            return Err("O espaço de trabalho tem uma aba ativa ou um modo de edição inválido.".into());
         }
         if self.tabs.iter().any(|tab| {
             tab.path
                 .components()
                 .any(|part| !matches!(part, Component::Normal(_)))
         }) {
-            return Err("Workspace files must stay inside this vault.".into());
+            return Err("Os arquivos do espaço de trabalho devem ficar dentro deste cofre.".into());
         }
         Ok(())
     }
@@ -81,7 +81,7 @@ impl Layout {
         }
         if tabs.is_empty() && !self.tabs.is_empty() {
             return Err(
-                "None of this workspace's files can be opened. Your current tabs are unchanged."
+                "Nenhum arquivo deste espaço de trabalho pode ser aberto. Suas abas atuais continuam como estão."
                     .into(),
             );
         }
@@ -119,15 +119,15 @@ pub fn location(root: &Path) -> Option<PathBuf> {
 
 impl Workspaces {
     pub fn open(root: &Path) -> Result<Self, String> {
-        Self::load(location(root).ok_or("Cannot locate workspace storage.")?)
+        Self::load(location(root).ok_or("Não foi possível localizar o armazenamento dos espaços de trabalho.")?)
     }
 
     pub fn load(location: PathBuf) -> Result<Self, String> {
         let stored: Stored = match std::fs::read(&location) {
             Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|error| format!("Cannot read workspaces: {error}"))?,
+                .map_err(|error| format!("Não foi possível ler os espaços de trabalho: {error}"))?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Stored::default(),
-            Err(error) => return Err(format!("Cannot read workspaces: {error}")),
+            Err(error) => return Err(format!("Não foi possível ler os espaços de trabalho: {error}")),
         };
         for entry in &stored.entries {
             name_valid(&entry.name)?;
@@ -176,7 +176,7 @@ impl Workspaces {
     pub fn activate(&mut self, name: &str) -> Result<(), String> {
         self.update(|stored| {
             if !stored.entries.iter().any(|entry| entry.name == name) {
-                return Err("This workspace no longer exists.".into());
+                return Err("Este espaço de trabalho não existe mais.".into());
             }
             stored.active = Some(name.into());
             Ok(())
@@ -190,7 +190,7 @@ impl Workspaces {
         let parent = self
             .location
             .parent()
-            .ok_or("Cannot locate workspace storage.")?;
+            .ok_or("Não foi possível localizar o armazenamento dos espaços de trabalho.")?;
         let save = || -> Result<Stored, String> {
             std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             let _lock = std::fs::OpenOptions::new()
@@ -216,14 +216,14 @@ impl Workspaces {
                 .map_err(|error| error.to_string())?;
             Ok(latest)
         };
-        self.stored = save().map_err(|error| format!("Cannot save workspaces: {error}"))?;
+        self.stored = save().map_err(|error| format!("Não foi possível salvar os espaços de trabalho: {error}"))?;
         Ok(())
     }
 }
 
 fn name_valid(name: &str) -> Result<(), String> {
     if name.trim().is_empty() || name.chars().any(char::is_control) {
-        Err("Enter a workspace name without line breaks.".into())
+        Err("Digite um nome de espaço de trabalho sem quebras de linha.".into())
     } else {
         Ok(())
     }

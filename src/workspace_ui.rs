@@ -68,7 +68,7 @@ impl Manager {
             let width: f32 = if self.load_only { 686.0 } else { 546.0 };
             ui.set_width(width.min((ctx.content_rect().width() - 48.0).max(240.0)));
             if !self.load_only {
-                let button = theme::dialog_header(ui, "Manage workspace layouts", "Close");
+                let button = theme::dialog_header(ui, "Gerenciar layouts de espaço de trabalho", "Fechar");
                 ui_probe::record(ctx, "workspace-close", button.rect);
                 close = button.clicked();
                 ui.add_space(crate::theme::space::M);
@@ -77,9 +77,9 @@ impl Manager {
                 let input = ui.add(
                     TextEdit::singleline(&mut self.input)
                         .hint_text(if self.load_only {
-                            "Type to search..."
+                            "Digite para buscar..."
                         } else {
-                            "Save current workspace layout as..."
+                            "Salvar o layout atual como..."
                         })
                         .desired_width(
                             (ui.available_width() - if self.load_only { 0.0 } else { 66.0 })
@@ -97,7 +97,7 @@ impl Manager {
                 if !self.load_only {
                     let button = ui.add_enabled(
                         self.list.is_ok() && !self.input.trim().is_empty(),
-                        egui::Button::new("Save")
+                        egui::Button::new("Salvar")
                             .min_size(egui::vec2(54.0, crate::theme::space::CONTROL)),
                     );
                     ui_probe::record(ctx, "workspace-save", button.rect);
@@ -150,9 +150,9 @@ impl Manager {
                     }
                     if entries.is_empty() && self.load_only {
                         ui.label(if list.entries().is_empty() {
-                            "No saved workspace layouts."
+                            "Nenhum layout de espaço de trabalho salvo."
                         } else {
-                            "No matching layouts."
+                            "Nenhum layout encontrado."
                         });
                     }
                     let max_height = (ctx.content_rect().height() - 240.0).clamp(90.0, 360.0);
@@ -221,16 +221,16 @@ impl Manager {
                                                         / 60_000;
                                                     ui.label(
                                                         RichText::new(if age == 0 {
-                                                            "Modified just now".into()
+                                                            "Modificado agora há pouco".into()
                                                         } else {
-                                                            format!("Modified {age} min ago")
+                                                            format!("Modificado há {age} min")
                                                         })
                                                         .small()
                                                         .weak(),
                                                     );
                                                     if list.active() == Some(entry.name.as_str()) {
                                                         ui.label(
-                                                            RichText::new("Active")
+                                                            RichText::new("Ativo")
                                                                 .small()
                                                                 .color(theme::accent(ui)),
                                                         );
@@ -238,7 +238,7 @@ impl Manager {
                                                 });
                                             },
                                         );
-                                        let button = ui.button("Load");
+                                        let button = ui.button("Carregar");
                                         ui_probe::record(
                                             ctx,
                                             format!("workspace-load:{}", entry.name),
@@ -268,7 +268,7 @@ impl Manager {
                     if self.load_only {
                         ui.separator();
                         ui.label(
-                            RichText::new("↑↓ to navigate    ↵ to open    esc to dismiss")
+                            RichText::new("↑↓ para navegar    ↵ para abrir    esc para fechar")
                                 .small()
                                 .weak(),
                         );
