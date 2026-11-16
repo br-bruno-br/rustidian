@@ -5,7 +5,40 @@ use rustidian::{
 };
 use std::{fs, path::Path};
 
-// Linux only: it expects a POSIX file URI; the Windows form (`file:///C:/...`) is not built yet.
+// The Windows form: `canonicalize` gives `\\?\C:\...`, and the URI must be `file:///C:/...`
+// (it used to come out as `file:////%3F/C:/...`).
+#[cfg(windows)]
+#[test]
+fn existing_file_links_use_the_windows_file_uri_form() {
+    let base = tempfile::tempdir().unwrap();
+    let root = base.path().join("Vault");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("Home.md"), "# Home\n").unwrap();
+    let outside = base.path().join("record #1.json");
+    fs::write(&outside, "original evidence").unwrap();
+    let vault = Vault::open(&root).unwrap();
+    let uri = vault
+        .external_file_uri(Path::new("Home.md"), "../record%20%231.json")
+        .expect("the file is outside the vault");
+    let tail = uri.strip_prefix("file:///").expect("three slashes");
+    let drive = tail.as_bytes();
+    assert!(drive[0].is_ascii_alphabetic() && drive[1] == b':', "{uri}");
+    assert!(!uri.contains("%3F") && !uri.contains('\\'), "{uri}");
+    assert!(uri.ends_with("/record%20%231.json"), "{uri}");
+    // Decoded, it names the very file the link points at.
+    let decoded = rustidian::paths::decode(tail).unwrap().replace('/', "\\");
+    assert_eq!(
+        decoded.to_lowercase(),
+        outside
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_lowercase()
+    );
+}
+
+// Linux only: it expects a POSIX file URI.
 #[cfg(target_os = "linux")]
 #[test]
 fn existing_file_links_use_encoded_desktop_uris_without_creating_or_escaping_notes() {

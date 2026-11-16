@@ -744,10 +744,7 @@ impl Vault {
     /// Resolving them must not create notes, change the vault, or follow a symlink escape.
     pub fn external_file_uri(&self, from: &Path, target: &str) -> Option<String> {
         let file = self.external_file(from, target)?;
-        Some(format!(
-            "file://{}",
-            crate::paths::markdown_destination(Path::new(""), &file)
-        ))
+        Some(crate::paths::file_uri(&file))
     }
 
     /// A file a link names that the vault does not own: outside the root, or inside it but

@@ -199,6 +199,51 @@ pub fn decode(value: &str) -> Option<String> {
         .map(|value| value.into_owned())
 }
 
+/// Characters a path may not carry unescaped inside a link or a `file://` URI.
+const RESERVED: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'(')
+    .add(b')')
+    .add(b'#')
+    .add(b'%')
+    .add(b'?')
+    .add(b'[')
+    .add(b']')
+    .add(b'\\');
+
+/// The `file://` URI of an absolute path on this system. On Windows `canonicalize` yields the
+/// verbatim form `\\?\C:\dir\file`, and the URI must be `file:///C:/dir/file`, never the
+/// `file:////%3F/C:/...` that treating the prefix as a folder produced.
+pub fn file_uri(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        return windows_file_uri(&text);
+    }
+    format!("file://{}", utf8_percent_encode(&text, RESERVED))
+}
+
+/// `file_uri` for a Windows path written as text (`C:\x`, `\\?\C:\x`, `\\?\UNC\srv\share\x`,
+/// `\\srv\share\x`). Pure, so it is tested on every system.
+pub fn windows_file_uri(text: &str) -> String {
+    let slashed = text.replace('\\', "/");
+    let rest = slashed
+        .strip_prefix("//?/")
+        .or_else(|| slashed.strip_prefix("//./"))
+        .unwrap_or(&slashed);
+    let encoded = |value: &str| utf8_percent_encode(value, RESERVED).to_string();
+    if let Some(unc) = rest.strip_prefix("UNC/") {
+        return format!("file://{}", encoded(unc));
+    }
+    if let Some(unc) = rest.strip_prefix("//") {
+        return format!("file://{}", encoded(unc));
+    }
+    let drive = rest.as_bytes();
+    if drive.len() >= 2 && drive[0].is_ascii_alphabetic() && drive[1] == b':' {
+        return format!("file:///{}", encoded(rest));
+    }
+    format!("file://{}", encoded(rest))
+}
+
 pub fn markdown_destination(from: &Path, to: &Path) -> String {
     let parent: Vec<_> = from
         .parent()
@@ -218,15 +263,30 @@ pub fn markdown_destination(from: &Path, to: &Path) -> String {
     for component in &destination[common..] {
         relative.push(component.as_os_str());
     }
-    const RESERVED: &AsciiSet = &CONTROLS
-        .add(b' ')
-        .add(b'(')
-        .add(b')')
-        .add(b'#')
-        .add(b'%')
-        .add(b'?')
-        .add(b'[')
-        .add(b']')
-        .add(b'\\');
     utf8_percent_encode(&relative.to_string_lossy().replace('\\', "/"), RESERVED).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_file_uri;
+
+    #[test]
+    fn windows_paths_become_file_uris_without_the_verbatim_prefix() {
+        for (path, uri) in [
+            (
+                r"\\?\C:\Users\me\record #1.json",
+                "file:///C:/Users/me/record%20%231.json",
+            ),
+            (r"C:\Users\me\a.json", "file:///C:/Users/me/a.json"),
+            (
+                r"\\?\D:\Notas (x)\é.pdf",
+                "file:///D:/Notas%20%28x%29/%C3%A9.pdf",
+            ),
+            (r"\\?\UNC\srv\share\a b.pdf", "file://srv/share/a%20b.pdf"),
+            (r"\\srv\share\a.pdf", "file://srv/share/a.pdf"),
+        ] {
+            assert_eq!(windows_file_uri(path), uri, "{path}");
+            assert!(!uri.contains("%3F"));
+        }
+    }
 }
