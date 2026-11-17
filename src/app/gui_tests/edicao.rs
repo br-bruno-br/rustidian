@@ -1560,3 +1560,233 @@ fn callout_na_leitura_dobra_e_guarda_tarefa_tabela_e_codigo() {
     session.key(CTRL, egui::Key::Z);
     session.assert_saved("Rico.md", checked.as_bytes(), "desfazer");
 }
+
+// ---------------------------------------------------------------- inline-styles
+
+const INLINE_STYLES: &str = include_str!("../../../tests/fixtures/inline-styles.md");
+
+#[test]
+fn estilos_inline_em_tabelas_e_callouts_sao_desenhados_sem_mudar_o_fonte() {
+    let mut session = Session::open_with(&[("Estilos.md", INLINE_STYLES.as_bytes())]);
+    session.open_note("Estilos");
+    // Leitura: o texto sai sem os atributos, e a tabela dentro do callout também.
+    session.command("Reading view");
+    session.settle();
+    for shown in ["8h", "11h", "49h"] {
+        assert!(
+            session.has_value(shown),
+            "a leitura mostra {shown} sem a marcação\n{}",
+            session.tree_summary()
+        );
+    }
+    assert!(
+        !session.has_value(
+            "<mark style=\"background-color:rgba(46,204,113,0.4);color:inherit\">49h</mark>"
+        ),
+        "o atributo bruto não aparece na célula"
+    );
+    // Live: as células editáveis guardam a marcação original.
+    session.command("Live preview");
+    session.settle();
+    assert!(
+        session.has_value("==11h=="),
+        "célula Live com o realce original"
+    );
+    assert_eq!(
+        std::fs::read(session.path("Estilos.md")).unwrap(),
+        INLINE_STYLES.as_bytes()
+    );
+    // Source: edição comum, desfazer e salvar devolvem o documento exato.
+    session.command("Source editing");
+    session.settle();
+    session.key(CTRL, egui::Key::End);
+    session.type_text("EDIT_UNDO_CONTROL");
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Estilos.md", INLINE_STYLES.as_bytes(), "bytes originais");
+}
+
+// ---------------------------------------------------------------- note-aids
+
+const MEETING: &str = "Hello {{title}}\n{{date:YYYY-MM-DD}} {{time:HH:mm}}\n{{content}}\n";
+
+fn aids_vault() -> Session {
+    Session::open_with(&[
+        (
+            ".obsidian/templates.json",
+            br#"{"folder":"Templates","dateFormat":"DD/MM/YYYY","timeFormat":"HH:mm"}"#,
+        ),
+        ("Templates/Meeting.md", MEETING.as_bytes()),
+        (
+            "Templates/Daily.md",
+            b"# {{title}}\n\n- [ ] Review {{date}}\n",
+        ),
+        ("Alvo.md", b"# Before\n\n"),
+    ])
+}
+
+fn today(format: &str) -> String {
+    chrono::Local::now().format(format).to_string()
+}
+
+#[test]
+fn nota_diaria_padrao_nasce_vazia_e_reabre_sem_duplicar() {
+    let mut session = Session::open();
+    session.command("Daily notes: Open today's daily note");
+    let name = format!("{}.md", today("%Y-%m-%d"));
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with(&name))
+    });
+    assert_eq!(std::fs::read(session.path(&name)).unwrap(), b"");
+    session.command("Daily notes: Open today's daily note");
+    session.settle();
+    assert_eq!(std::fs::read(session.path(&name)).unwrap(), b"");
+    let daily: Vec<_> = std::fs::read_dir(session.path(""))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&today("%Y-%m-%d"))
+        })
+        .collect();
+    assert_eq!(daily.len(), 1, "só uma nota do dia");
+    assert_eq!(session.active_tab_count(), 1);
+}
+
+#[test]
+fn modelo_escolhido_expande_titulo_data_e_hora_com_um_desfazer() {
+    let mut session = aids_vault();
+    session.edit("Alvo", "Source editing");
+    // Cancelar o seletor não altera nada.
+    session.command("Templates: Insert template");
+    session.settle();
+    assert!(session.has_label("Templates/Meeting.md") || session.has_label("Meeting"));
+    session.key(NONE, egui::Key::Escape);
+    assert_eq!(session.active_text(), "# Before\n\n");
+    session.type_text("Cancelled chooser typing");
+    session.assert_saved(
+        "Alvo.md",
+        b"# Before\n\nCancelled chooser typing",
+        "digitação depois de cancelar",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Alvo.md", b"# Before\n\n", "desfazer a digitação");
+    // Escolher o modelo filtrando pelo nome.
+    session.command("Templates: Insert template");
+    session.type_text("Mtg");
+    session.key(NONE, egui::Key::Enter);
+    let inserted = String::from_utf8(session.save_and_read("Alvo.md")).unwrap();
+    assert!(
+        inserted.starts_with("# Before\n\nHello Alvo\n"),
+        "título expandido: {inserted:?}"
+    );
+    assert!(
+        inserted.contains("{{content}}"),
+        "variável desconhecida fica literal"
+    );
+    assert!(!inserted.contains("{{date") && !inserted.contains("{{time"));
+    assert!(
+        inserted.contains(&today("%Y-%m-%d")),
+        "data do modelo: {inserted:?}"
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Alvo.md", b"# Before\n\n", "um desfazer remove o modelo");
+    session.key(CTRL | SHIFT, egui::Key::Z);
+    session.assert_saved("Alvo.md", inserted.as_bytes(), "refazer devolve o modelo");
+    assert_eq!(
+        std::fs::read(session.path("Templates/Meeting.md")).unwrap(),
+        MEETING.as_bytes(),
+        "o modelo em si não muda"
+    );
+}
+
+#[test]
+fn comandos_de_data_e_hora_usam_os_formatos_do_cofre() {
+    let mut session = aids_vault();
+    session.edit("Alvo", "Source editing");
+    session.type_text("\nDATE=");
+    session.command("Templates: Insert current date");
+    session.key(CTRL, egui::Key::End);
+    let text = String::from_utf8(session.save_and_read("Alvo.md")).unwrap();
+    assert!(
+        text.ends_with(&format!("DATE={}", today("%d/%m/%Y"))),
+        "data no formato DD/MM/YYYY: {text:?}"
+    );
+    session.type_text(" TIME=");
+    session.command("Templates: Insert current time");
+    let text = String::from_utf8(session.save_and_read("Alvo.md")).unwrap();
+    let tail = text.rsplit(" TIME=").next().unwrap();
+    assert!(
+        tail.len() == 5
+            && tail.as_bytes()[2] == b':'
+            && tail.replace(':', "").chars().all(|c| c.is_ascii_digit()),
+        "hora HH:mm: {tail:?}"
+    );
+}
+
+#[test]
+fn nota_diaria_configurada_cria_pastas_expande_o_modelo_uma_vez_e_preserva_a_edicao() {
+    let mut session = Session::open_with(&[
+        (
+            ".obsidian/templates.json",
+            br#"{"folder":"Templates","dateFormat":"DD/MM/YYYY","timeFormat":"HH:mm"}"#,
+        ),
+        (
+            ".obsidian/daily-notes.json",
+            br#"{"folder":"Journal","format":"YYYY/MMMM/YYYY-MMM-DD","template":"Templates/Daily"}"#,
+        ),
+        ("Templates/Daily.md", b"# {{title}}\n\n- [ ] Review {{date}}\n"),
+    ]);
+    session.command("Daily notes: Open today's daily note");
+    session.wait_for(|app| {
+        app.tabs.get(app.active).is_some_and(|tab| {
+            tab.document
+                .path
+                .components()
+                .any(|part| part.as_os_str() == "Journal")
+        })
+    });
+    let relative = session.app().tabs[session.app().active]
+        .document
+        .path
+        .clone();
+    let path = session.folder.path().join(&relative);
+    let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        format!("# {stem}\n\n- [ ] Review {}\n", today("%d/%m/%Y"))
+    );
+    assert!(
+        path.parent().unwrap().ends_with(today("%B")),
+        "pasta do mês criada: {path:?}"
+    );
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("\nKept daily text");
+    session.key(CTRL, egui::Key::S);
+    let kept = std::fs::read_to_string(&path).unwrap();
+    session.command("Daily notes: Open today's daily note");
+    session.settle();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), kept);
+    assert!(kept.ends_with("Kept daily text"));
+}
+
+#[test]
+fn nota_diaria_com_modelo_ausente_avisa_sem_criar_pastas_nem_trocar_de_nota() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.app_mut().note_aids.daily.folder = "Missing daily".into();
+    session.app_mut().note_aids.daily.template = "Templates/Missing".into();
+    session.command("Daily notes: Open today's daily note");
+    session.settle();
+    assert!(session.app().error.is_some(), "o erro é mostrado");
+    assert!(!session.path("Missing daily").exists());
+    assert!(session.active_path_ends_with("Home.md"));
+    assert_eq!(
+        std::fs::read(session.path("Home.md")).unwrap(),
+        HOME.as_bytes()
+    );
+}
