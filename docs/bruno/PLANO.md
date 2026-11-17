@@ -102,10 +102,41 @@ Este repositório é **público**. Aqui entra só código e documentação. Nunc
 | R4 | `nota-sync` + `nota-servidor` (em memória e em disco) | teste de propriedade com 3 aparelhos e quedas; servidor recusa sem token |
 | R5 | Sync no app desktop: tela de configurar (endereço, token, frase), ícone de estado, ciclo em segundo plano | dois apps no mesmo PC com cofres diferentes convergem pelo servidor local |
 | R6 | Implantar no re-servidor (systemd, só Tailscale) e backup rustic → Google Drive | serviço volta sozinho após reinício; backup e restauração testados |
-| R8 | Tudo em Rust: os scripts Python de empacotamento, benchmark e release viram um `xtask` (`cargo xtask ...`). O smoke de GUI (`tests/gui_smoke.py`, ~12 mil linhas, dirigido por X11) vira testes Rust com `egui_kittest`, que funcionam no Windows e no CI sem X11. O Python sai em fatias, só quando a cobertura equivalente existir | `git ls-files '*.py'` vazio; os mesmos fluxos cobertos por `cargo test` |
+| R8 | (R8a feita, R8b abaixo) Tudo em Rust: os scripts Python de empacotamento, benchmark e release viram um `xtask` (`cargo xtask ...`). O smoke de GUI (`tests/gui_smoke.py`, ~12 mil linhas, dirigido por X11) vira testes Rust com `egui_kittest`, que funcionam no Windows e no CI sem X11. O Python sai em fatias, só quando a cobertura equivalente existir | `git ls-files '*.py'` vazio; os mesmos fluxos cobertos por `cargo test` |
 | R7 | Android: protótipo comparando egui (android-activity) e Dioxus para digitar acentos pelo Gboard, selecionar e rolar; depois o app com o mesmo miolo | APK instalado no celular do dono, sincronizando |
 
 R2 e R3 tocam arquivos diferentes e podem correr em paralelo.
+
+## R8a: xtask e primeiros testes de GUI em Rust (feito)
+
+**Linhas de Python: 14.781 → 13.343** (`git ls-files '*.py'`: 23 arquivos → 8).
+
+### O que virou `cargo xtask` (crate `xtask/`, alias em `.cargo/config.toml`)
+| Antes | Agora |
+|---|---|
+| `scripts/benchmark-vault.py`, `benchmark-editor.py`, `check-editor-timings.py` | `cargo xtask benchmark-vault`, `benchmark-editor`, `check-editor-timings` |
+| `scripts/package-linux.py`, `package-deb.py`, `package-appimage.py` | `cargo xtask package-linux`, `package-deb`, `package-appimage` |
+| `scripts/install-linux.py` (o `install.py` do tar.gz) | `rustidian --install` (`src/install_linux.rs`, só biblioteca padrão); o pacote não precisa mais de Python |
+| `tests/linux_bundle.py`, `tests/debian_package.py` | `cargo xtask test-bundle`, `test-deb` (só Linux) |
+| `tests/launcher_path.py` | teste unitário em `src/install_linux.rs` (roda o lançador no Unix) |
+| `scripts/lint-packaging.py` | `cargo xtask lint-packaging` (roda no Windows; usa o bash do Git) |
+| `scripts/language-notices.py` | `cargo xtask language-notices` |
+| `scripts/preflight-release.py`, `publish-checked-release.py`, `reuse-actions-candidate.py` | `cargo xtask preflight-release`, `publish-release`, `reuse-candidate` |
+
+Mudanças de comportamento de propósito: o lançador do `.deb` virou shell e o pacote deixou de depender de `python3`; o tar.gz sai reprodutível (data de `SOURCE_DATE_EPOCH`, dono `root`, modos explícitos); `START_HERE.txt` e o README mandam rodar `./rustidian --install`; a regra `python-syntax` do lint sumiu (o compilador confere). O que não deu para rodar no Windows (`package-deb`, `package-appimage`, `test-bundle`, `test-deb`, `preflight-release`, `publish-release`, `reuse-candidate`, `language-notices`) está compilado, com testes unitários das partes puras, mas só roda de verdade no Linux/Actions: a primeira rodada do CI é o teste real.
+
+### Testes de GUI com `egui_kittest` (`src/app/gui_tests.rs`, `cargo test --bin rustidian`)
+O app inteiro roda dentro do harness em memória (sem janela, sem X11, sem mexer na tela do dono). Cobertos: abrir o cofre e listar no explorador; abrir nota pelo Abrir rápido (Ctrl+O); editar, Ctrl+S com bytes exatos e desfazer; leitura que não aceita digitação; busca lateral (Ctrl+Shift+F) com e sem resultado; painel de links de entrada nas duas direções.
+Achado do harness: o editor de texto não tem nome acessível (desligado com `with_accessibility_check(false)` até alguém decidir se vale consertar).
+
+## R8b: o que falta para `git ls-files '*.py'` ficar vazio
+Sobram 13.343 linhas, todas dirigidas por X11 (`xdotool`, `Xvfb`, Pillow) ou presas a elas:
+- `tests/gui_smoke.py` (11.852 linhas, ~120 seções): migrar seção a seção para o `egui_kittest`, começando pelas que não dependem de pixel nem de janela real (palette, undo, tabs, tabelas, tarefas, backlinks com contexto, workspaces, recovery, settings, bookmarks, navegação). Seções que dependem do sistema (system-open, system-theme, instance, reveal, vault-switch com seletor nativo, agent-terminal) ficam por último, ou viram teste de integração do crate, ou saem se a função já tiver cobertura.
+- `scripts/native_input.py`, `scripts/record-keyboard.py` (ajudantes do X11), `tests/vault_loading_checks.py` e `tests/agent_terminal_checks.py` (módulos do gui_smoke): saem junto com ele.
+- `scripts/compare-editors.py`: comparação externa com o editor Ferrite por xdotool; decidir se ainda interessa (se sim, vira medição Rust sem X11; se não, apagar).
+- `tests/emoji_font_asset.py` (FontTools/HarfBuzz): as conferências de hash das partes podem virar teste Rust; a de shaping depende de HarfBuzz.
+- `experiments/html-host/verify.py`: experimento CEF abandonado; decidir se apaga.
+- Depois disso, tirar `python3`/`xvfb`/`xdotool` dos workflows `identity.yml`, `ux.yml`, `syntax.yml` e trocar `gui_smoke` por `cargo test`.
 
 ## R7a: protótipos Android (egui × Dioxus)
 
