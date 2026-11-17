@@ -581,7 +581,9 @@ impl NotesApp {
         if let Err(error) = spawned {
             self.loading = None;
             self.loading_root = None;
-            self.error = Some(format!("Não foi possível iniciar a indexação do cofre: {error}"));
+            self.error = Some(format!(
+                "Não foi possível iniciar a indexação do cofre: {error}"
+            ));
         }
     }
 
@@ -1369,7 +1371,9 @@ impl NotesApp {
                 self.editor.jump = Some(character);
             }
         } else {
-            self.error = Some(format!("Não foi possível encontrar o título ou bloco: {fragment}"));
+            self.error = Some(format!(
+                "Não foi possível encontrar o título ou bloco: {fragment}"
+            ));
         }
     }
 
@@ -2092,26 +2096,28 @@ impl NotesApp {
         use rustidian::{native_picker::Kind, vaults};
         match kind {
             Kind::Folder => vaults::folder(path).map(|root| (root, None)),
-            Kind::File => (|| {
-                let absolute = path
-                    .canonicalize()
-                    .map_err(|error| format!("Não foi possível abrir {}: {error}", path.display()))?;
-                let current = self.vault.as_ref().map(|vault| vault.root.as_path());
-                let target =
-                    if let Some(current) = current.filter(|root| absolute.starts_with(root)) {
-                        // Within the active vault, keep its links and workspace context.
-                        vaults::resolve_input(&absolute, Some(current), &[])?
-                    } else {
-                        let registered = vaults::Vaults::open().ok();
-                        let default = rustidian::vaults::default_vault();
-                        let roots = registered.as_ref().map_or(&[][..], |list| list.roots());
-                        vaults::resolve_input(&absolute, default.as_deref(), roots)?
-                    };
-                if target.1.is_none() {
-                    return Err("Escolha um arquivo Markdown, de texto ou de código-fonte que já exista.".into());
-                }
-                Ok(target)
-            })(),
+            Kind::File => {
+                (|| {
+                    let absolute = path.canonicalize().map_err(|error| {
+                        format!("Não foi possível abrir {}: {error}", path.display())
+                    })?;
+                    let current = self.vault.as_ref().map(|vault| vault.root.as_path());
+                    let target =
+                        if let Some(current) = current.filter(|root| absolute.starts_with(root)) {
+                            // Within the active vault, keep its links and workspace context.
+                            vaults::resolve_input(&absolute, Some(current), &[])?
+                        } else {
+                            let registered = vaults::Vaults::open().ok();
+                            let default = rustidian::vaults::default_vault();
+                            let roots = registered.as_ref().map_or(&[][..], |list| list.roots());
+                            vaults::resolve_input(&absolute, default.as_deref(), roots)?
+                        };
+                    if target.1.is_none() {
+                        return Err("Escolha um arquivo Markdown, de texto ou de código-fonte que já exista.".into());
+                    }
+                    Ok(target)
+                })()
+            }
         }
     }
 
@@ -2172,7 +2178,9 @@ impl NotesApp {
         if let Err(error) = self.write_session() {
             self.bookmarks = before;
             self.status = "Favoritos não salvos".into();
-            self.error = Some(format!("As alterações nos favoritos não foram salvas. {error}"));
+            self.error = Some(format!(
+                "As alterações nos favoritos não foram salvas. {error}"
+            ));
             return false;
         }
         self.status = "Favoritos salvos".into();
@@ -2275,7 +2283,11 @@ impl NotesApp {
                         for (name, label, enabled) in [
                             ("title", "Editar título…", true),
                             ("up", "Mover para cima", index > 0),
-                            ("down", "Mover para baixo", index + 1 < self.bookmarks.items.len()),
+                            (
+                                "down",
+                                "Mover para baixo",
+                                index + 1 < self.bookmarks.items.len(),
+                            ),
                             ("remove", "Remover favorito", true),
                         ] {
                             let response = ui.add_enabled(enabled, egui::Button::new(label));
@@ -4609,42 +4621,71 @@ impl NotesApp {
         }
         if let Some(pending) = self.pending.clone() {
             let response = egui::Modal::new(egui::Id::unique("unsaved-changes"))
-            .frame(theme::dialog_frame(ctx)).show(ctx, |ui| {
-                theme::dialog_style(ui);
-                ui.set_width(440.0);
-                ui.heading("Manter suas alterações?");
-                ui.label("Você tem edições não salvas. Salve-as antes de continuar ou descarte-as.");
-                ui.add_space(theme::space::L);
-                ui.horizontal(|ui| {
-                    let save = ui.button("Salvar e continuar");
-                    crate::ui_probe::record(ctx, "pending-save", save.rect);
-                    if save.clicked() {
-                        let indices: Vec<usize> = match &pending {
-                            Pending::CloseTab(index) => vec![*index],
-                            Pending::CloseOtherTabs(keep) => rustidian::tab::other_tab_indices(&self.tabs, *keep)
-                                .into_iter().filter(|&index| self.tabs[index].document.dirty()).collect(),
-                            Pending::CloseTabsToRight(keep) => rustidian::tab::right_tab_indices(&self.tabs, *keep)
-                                .into_iter().filter(|&index| self.tabs[index].document.dirty()).collect(),
-                            _ => self.tabs.iter().enumerate().filter(|(_, tab)| tab.document.dirty()).map(|(i, _)| i).collect(),
-                        };
-                        if indices.into_iter().all(|index| self.save(index)) {
-                            let mut next = pending.clone();
-                            if let Pending::RestoreSnapshot(request) = &mut next
-                                && let Some(tab) = self.tabs.iter().find(|tab|tab.document.path == request.expected.path) {
-                                request.expected = tab.document.clone();
+                .frame(theme::dialog_frame(ctx))
+                .show(ctx, |ui| {
+                    theme::dialog_style(ui);
+                    ui.set_width(440.0);
+                    ui.heading("Manter suas alterações?");
+                    ui.label(
+                        "Você tem edições não salvas. Salve-as antes de continuar ou descarte-as.",
+                    );
+                    ui.add_space(theme::space::L);
+                    ui.horizontal(|ui| {
+                        let save = ui.button("Salvar e continuar");
+                        crate::ui_probe::record(ctx, "pending-save", save.rect);
+                        if save.clicked() {
+                            let indices: Vec<usize> = match &pending {
+                                Pending::CloseTab(index) => vec![*index],
+                                Pending::CloseOtherTabs(keep) => {
+                                    rustidian::tab::other_tab_indices(&self.tabs, *keep)
+                                        .into_iter()
+                                        .filter(|&index| self.tabs[index].document.dirty())
+                                        .collect()
+                                }
+                                Pending::CloseTabsToRight(keep) => {
+                                    rustidian::tab::right_tab_indices(&self.tabs, *keep)
+                                        .into_iter()
+                                        .filter(|&index| self.tabs[index].document.dirty())
+                                        .collect()
+                                }
+                                _ => self
+                                    .tabs
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, tab)| tab.document.dirty())
+                                    .map(|(i, _)| i)
+                                    .collect(),
+                            };
+                            if indices.into_iter().all(|index| self.save(index)) {
+                                let mut next = pending.clone();
+                                if let Pending::RestoreSnapshot(request) = &mut next
+                                    && let Some(tab) = self
+                                        .tabs
+                                        .iter()
+                                        .find(|tab| tab.document.path == request.expected.path)
+                                {
+                                    request.expected = tab.document.clone();
+                                }
+                                self.pending = None;
+                                self.run_pending(next, ctx);
                             }
-                            self.pending = None; self.run_pending(next, ctx);
                         }
+                        let discard = ui.button("Descartar");
+                        crate::ui_probe::record(ctx, "pending-discard", discard.rect);
+                        if discard.clicked() {
+                            self.pending = None;
+                            self.run_pending(pending.clone(), ctx);
+                        }
+                        let cancel = ui.button("Cancelar");
+                        crate::ui_probe::record(ctx, "pending-cancel", cancel.rect);
+                        if cancel.clicked() {
+                            self.pending = None;
+                        }
+                    });
+                    if let Some(error) = &self.error {
+                        ui.colored_label(Color32::from_rgb(235, 157, 132), error);
                     }
-                    let discard = ui.button("Descartar");
-                    crate::ui_probe::record(ctx, "pending-discard", discard.rect);
-                    if discard.clicked() { self.pending = None; self.run_pending(pending.clone(), ctx); }
-                    let cancel = ui.button("Cancelar");
-                    crate::ui_probe::record(ctx, "pending-cancel", cancel.rect);
-                    if cancel.clicked() { self.pending = None; }
                 });
-                if let Some(error) = &self.error { ui.colored_label(Color32::from_rgb(235, 157, 132), error); }
-            });
             if response.should_close() {
                 self.pending = None;
             }
@@ -5826,7 +5867,8 @@ impl NotesApp {
                 self.editor.native_highlight(tab, color);
                 ctx.request_repaint();
             } else {
-                self.error = Some("Escolha uma nota Markdown editável para destacar o texto.".into());
+                self.error =
+                    Some("Escolha uma nota Markdown editável para destacar o texto.".into());
             }
             return;
         }
@@ -5843,7 +5885,8 @@ impl NotesApp {
                 self.editor.highlight(tab, color);
                 ctx.request_repaint();
             } else {
-                self.error = Some("Escolha uma nota Markdown editável para destacar o texto.".into());
+                self.error =
+                    Some("Escolha uma nota Markdown editável para destacar o texto.".into());
             }
             return;
         }
@@ -6362,8 +6405,8 @@ impl eframe::App for NotesApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_started = Instant::now();
         // A frame that starts on another tab than the last one is a tab switch.
-        let switched_tab = rustidian::perf::enabled()
-            && self.perf_tab != self.tabs.get(self.active).map(Tab::id);
+        let switched_tab =
+            rustidian::perf::enabled() && self.perf_tab != self.tabs.get(self.active).map(Tab::id);
         let ctx = ui.ctx().clone();
         // Only an agent reads the context file, so a vault without one gets no
         // `.rustidian` folder (on 3 Nov it appeared in ~/Desktop and changed notes
@@ -6496,7 +6539,9 @@ impl eframe::App for NotesApp {
                             );
                             if document.dirty() {
                                 ui.label(
-                                    RichText::new("Não salvo").size(11.0).color(theme::accent(ui)),
+                                    RichText::new("Não salvo")
+                                        .size(11.0)
+                                        .color(theme::accent(ui)),
                                 );
                             }
                         }
@@ -6563,7 +6608,9 @@ impl eframe::App for NotesApp {
             && (self.graph.take_changed() || local_graph_open != self.graph.local_open)
             && let Err(error) = self.write_session()
         {
-            self.error = Some(format!("As configurações do grafo não foram salvas: {error}"));
+            self.error = Some(format!(
+                "As configurações do grafo não foram salvas: {error}"
+            ));
         }
         self.show_page_preview(&ctx);
         self.dialogs(&ctx);
@@ -6638,3 +6685,7 @@ impl NotesApp {
         self.ctx.request_repaint();
     }
 }
+
+/// Fluxos de GUI sem janela (R8a), no módulo-filho para enxergar os campos privados do app.
+#[cfg(test)]
+mod gui_tests;
