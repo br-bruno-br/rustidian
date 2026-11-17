@@ -468,7 +468,7 @@ pub fn ranked(query: &str, scope: Scope) -> Vec<&'static Command> {
             None => scored.push((shown.0, score)),
         }
     }
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     let mut matches: Vec<_> = scored.into_iter().map(|(command, _)| command).collect();
     if let Some(index) = matches.iter().position(|command| {
         command.name.eq_ignore_ascii_case(query) || label(command.name).eq_ignore_ascii_case(query)

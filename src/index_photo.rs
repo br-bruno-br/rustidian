@@ -92,11 +92,11 @@ pub(crate) struct Entry {
 const K: u64 = 0x517c_c1b7_2722_0a95;
 
 fn mix(mut hash: u64, bytes: &[u8]) -> u64 {
-    let mut words = bytes.chunks_exact(8);
-    for word in &mut words {
-        hash = (hash.rotate_left(5) ^ u64::from_le_bytes(word.try_into().unwrap())).wrapping_mul(K);
+    let (words, remainder) = bytes.as_chunks::<8>();
+    for word in words {
+        hash = (hash.rotate_left(5) ^ u64::from_le_bytes(*word)).wrapping_mul(K);
     }
-    for byte in words.remainder() {
+    for byte in remainder {
         hash = (hash.rotate_left(5) ^ u64::from(*byte)).wrapping_mul(K);
     }
     (hash.rotate_left(5) ^ bytes.len() as u64).wrapping_mul(K)

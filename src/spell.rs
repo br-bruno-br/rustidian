@@ -679,6 +679,8 @@ pub enum Status {
     Downloading,
 }
 
+// Cada carga manda uma só mensagem; encaixotar o motor não compensa o desvio extra.
+#[allow(clippy::large_enum_variant)]
 enum Job {
     Loaded(Result<Engine, String>),
     Downloaded(Result<(), String>),

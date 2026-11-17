@@ -483,7 +483,10 @@ fn check_structure(text: &str) {
         "é".to_owned(),
         "[[".to_owned(),
     ];
-    for range in unlinked::spans(text, &names, &[0..text.len().min(3)]) {
+    // A função recebe uma fatia de intervalos: um só intervalo é de propósito.
+    #[allow(clippy::single_range_in_vec_init)]
+    let skipped = [0..text.len().min(3)];
+    for range in unlinked::spans(text, &names, &skipped) {
         inside(text, &range, "menção sem link");
     }
 }
@@ -542,7 +545,7 @@ fn check_tables_and_callouts(text: &str) {
 }
 
 fn many(family: &str, extra: usize, check: fn(&str)) {
-    let mut rng = Rng::new(seed() ^ family.len() as u64 * 0x9E37_79B9);
+    let mut rng = Rng::new(seed() ^ (family.len() as u64 * 0x9E37_79B9));
     for round in 0..ROUNDS + extra {
         let text = input(&mut rng);
         run(family, round, &text, check);
