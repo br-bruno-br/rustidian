@@ -11,7 +11,7 @@ categories = ["text-editors"]
 license = "MIT"
 
 [workspace]
-members = [".", "crates/*"]
+members = [".", "crates/*", "xtask"]
 default-members = ["."]
 # Protótipos Android (R7a): cada um tem o próprio `[workspace]` e não entra no build do app.
 exclude = ["prototipos/android-egui", "prototipos/android-dioxus"]
@@ -99,6 +99,14 @@ nota-servidor = { path = "crates/nota-servidor" }
 opt-level = 3
 lto = "thin"
 strip = true
+
+# O xtask comprime e calcula hashes de binários grandes; sem isto o `cargo xtask` em debug leva minutos.
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
 
 [patch.crates-io]
 epaint = { path = "vendor/epaint" }

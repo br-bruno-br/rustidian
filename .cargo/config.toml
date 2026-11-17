@@ -1,0 +1,3 @@
+# `cargo xtask <comando>`: as tarefas de empacotamento, benchmark e release (R8), todas em Rust.
+[alias]
+xtask = "run --quiet --package xtask --"
