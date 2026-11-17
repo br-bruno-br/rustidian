@@ -261,7 +261,10 @@ impl Panel {
             match Session::start(&program, &args, root, size, repaint) {
                 Ok(session) => self.session = Some(session),
                 Err(error) => {
-                    self.error = Some(format!("Não foi possível iniciar {}: {error}", backend.label()));
+                    self.error = Some(format!(
+                        "Não foi possível iniciar {}: {error}",
+                        backend.label()
+                    ));
                 }
             }
         }
@@ -371,7 +374,8 @@ impl Panel {
                 let message = match (&self.error, current) {
                     (Some(error), _) => error.clone(),
                     (None, None) => {
-                        "Nenhum agente de linha de comando no PATH: instale elpis, codex ou claude.".to_owned()
+                        "Nenhum agente de linha de comando no PATH: instale elpis, codex ou claude."
+                            .to_owned()
                     }
                     (None, Some(_)) => String::new(),
                 };
@@ -684,7 +688,9 @@ fn load(root: &Path) -> Option<Backend> {
 fn save(root: &Path, backend: Backend) -> Result<(), String> {
     let path = rustidian::paths::state_file(root, "agent", "json")
         .ok_or("Não foi possível achar a pasta de estado.")?;
-    let parent = path.parent().ok_or("Não foi possível achar a pasta de estado.")?;
+    let parent = path
+        .parent()
+        .ok_or("Não foi possível achar a pasta de estado.")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let bytes = serde_json::to_vec(&Saved {
         backend: Some(backend),

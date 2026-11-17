@@ -473,11 +473,15 @@ impl Manager {
                                     && let Some(text) = &self.text
                                 {
                                     ctx.copy_text(text.clone());
-                                    self.notice = Some("Copiado para a área de transferência".into());
+                                    self.notice =
+                                        Some("Copiado para a área de transferência".into());
                                 }
                                 let changes = ui.add_enabled(
                                     !busy && self.text.is_some(),
-                                    egui::Checkbox::new(&mut self.show_changes, "Mostrar alterações"),
+                                    egui::Checkbox::new(
+                                        &mut self.show_changes,
+                                        "Mostrar alterações",
+                                    ),
                                 );
                                 ui_probe::record(ctx, "recovery-changes", changes.rect);
                             });
@@ -572,7 +576,8 @@ impl Manager {
             let modal = dialog.show(ctx, |ui| {
                 theme::dialog_style(ui);
                 ui.set_width(390.0);
-                cancel |= theme::dialog_header(ui, "Apagar o histórico?", "Fechar diálogo").clicked();
+                cancel |=
+                    theme::dialog_header(ui, "Apagar o histórico?", "Fechar diálogo").clicked();
                 ui.label("Isto apagará de vez todas as versões locais deste cofre.");
                 let (confirm, dismiss) = theme::dialog_actions(ui, "Limpar", true);
                 ui_probe::record(ctx, "recovery-clear-cancel", dismiss.rect);

@@ -68,7 +68,8 @@ impl Manager {
             let width: f32 = if self.load_only { 686.0 } else { 546.0 };
             ui.set_width(width.min((ctx.content_rect().width() - 48.0).max(240.0)));
             if !self.load_only {
-                let button = theme::dialog_header(ui, "Gerenciar layouts de espaço de trabalho", "Fechar");
+                let button =
+                    theme::dialog_header(ui, "Gerenciar layouts de espaço de trabalho", "Fechar");
                 ui_probe::record(ctx, "workspace-close", button.rect);
                 close = button.clicked();
                 ui.add_space(crate::theme::space::M);

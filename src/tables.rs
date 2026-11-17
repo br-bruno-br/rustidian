@@ -160,7 +160,9 @@ impl Table {
         }
         if column >= self.alignments.len() || row >= self.rows.len() || text.contains(['\n', '\r'])
         {
-            return Err("Uma célula de tabela deve ser uma linha Markdown em uma coluna existente.");
+            return Err(
+                "Uma célula de tabela deve ser uma linha Markdown em uma coluna existente.",
+            );
         }
         let encoded = encode_pipes(&text);
         let target = &self.rows[row];

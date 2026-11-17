@@ -111,7 +111,8 @@ pub fn resolve(
         .split_once('#')
         .filter(|(_, fragment)| !fragment.is_empty())
     {
-        section(full, fragment).ok_or_else(|| format!("Título ou bloco não encontrado: {fragment}"))?
+        section(full, fragment)
+            .ok_or_else(|| format!("Título ou bloco não encontrado: {fragment}"))?
     } else {
         0..full.len()
     };
@@ -265,7 +266,8 @@ impl<'a> Context<'a> {
                         || self.open.iter().any(|(path, _)| *path == source.path);
                     if !is_open && before.text != full {
                         return Err(
-                            "A nota incorporada mudou no disco. Recarregue-a antes de editar.".into(),
+                            "A nota incorporada mudou no disco. Recarregue-a antes de editar."
+                                .into(),
                         );
                     }
                     before.text = full.into();

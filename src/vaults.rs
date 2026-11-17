@@ -166,7 +166,8 @@ pub fn create(parent: &Path, name: &str) -> Result<PathBuf, String> {
         return Err("Digite um nome de cofre sem barras nem espaços nas pontas.".into());
     }
     let root = folder(parent)?.join(name);
-    std::fs::create_dir(&root).map_err(|error| format!("Não foi possível criar o cofre: {error}"))?;
+    std::fs::create_dir(&root)
+        .map_err(|error| format!("Não foi possível criar o cofre: {error}"))?;
     Ok(root)
 }
 

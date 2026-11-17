@@ -1502,11 +1502,17 @@ impl Editor {
                             )
                             .write_image(
                                 &rgba,
-                                image.size[0].try_into().map_err(|_| "A imagem é larga demais.")?,
-                                image.size[1].try_into().map_err(|_| "A imagem é alta demais.")?,
+                                image.size[0]
+                                    .try_into()
+                                    .map_err(|_| "A imagem é larga demais.")?,
+                                image.size[1]
+                                    .try_into()
+                                    .map_err(|_| "A imagem é alta demais.")?,
                                 image::ExtendedColorType::Rgba8,
                             )
-                            .map_err(|error| format!("Não foi possível codificar a imagem colada: {error}"))?;
+                            .map_err(|error| {
+                                format!("Não foi possível codificar a imagem colada: {error}")
+                            })?;
                             let name = format!(
                                 "Pasted image {}.png",
                                 chrono::Local::now().format("%Y%m%d%H%M%S")

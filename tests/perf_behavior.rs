@@ -31,8 +31,17 @@ fn each_measured_action_writes_one_json_line() {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap_or_else(|e| panic!("{line}: {e}")))
         .collect();
-    let actions: Vec<&str> = lines.iter().map(|line| line["acao"].as_str().unwrap()).collect();
-    for expected in ["abrir_cofre", "salvar", "indexar_nota", "buscar", "quadro_lento"] {
+    let actions: Vec<&str> = lines
+        .iter()
+        .map(|line| line["acao"].as_str().unwrap())
+        .collect();
+    for expected in [
+        "abrir_cofre",
+        "salvar",
+        "indexar_nota",
+        "buscar",
+        "quadro_lento",
+    ] {
         assert!(actions.contains(&expected), "{expected} em {actions:?}");
     }
     let opened = &lines[actions.iter().position(|a| *a == "abrir_cofre").unwrap()];

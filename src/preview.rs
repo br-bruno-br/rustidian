@@ -1010,7 +1010,10 @@ fn reading_menu(
     .show(|ui| {
         crate::theme::menu_style(ui);
         ui.set_min_width(240.0);
-        let copy = ui.add_enabled(selected, egui::Button::new("Copiar").shortcut_text("Ctrl+C"));
+        let copy = ui.add_enabled(
+            selected,
+            egui::Button::new("Copiar").shortcut_text("Ctrl+C"),
+        );
         crate::ui_probe::record(ui.ctx(), "reading-menu:Copy", copy.rect);
         ui.ctx()
             .data_mut(|data| data.insert_temp(menu.with("copy"), copy.rect));
@@ -1549,7 +1552,10 @@ fn show_blocks(
                 egui::WidgetInfo::labeled(
                     egui::Role::Button,
                     true,
-                    format!("{} {title}", if collapsed { "Expandir" } else { "Recolher" }),
+                    format!(
+                        "{} {title}",
+                        if collapsed { "Expandir" } else { "Recolher" }
+                    ),
                 )
             });
             crate::ui_probe::record(ui.ctx(), format!("fold:{index}"), rect);

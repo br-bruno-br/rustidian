@@ -104,7 +104,9 @@ pub fn record(action: &str, elapsed: Duration, size: Option<Size>) {
         line.push_str(&format!(",\"notas\":{notes},\"bytes\":{bytes}"));
     }
     line.push_str("}\n");
-    let mut file = sink.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut file = sink
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _ = file.write_all(line.as_bytes());
 }
 

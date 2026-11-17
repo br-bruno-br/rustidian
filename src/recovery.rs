@@ -121,9 +121,13 @@ impl History {
     fn exists(&self) -> Result<bool> {
         match fs::symlink_metadata(&self.location) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
-            Ok(_) => Err("O armazenamento da recuperação de arquivos deve ser um arquivo comum.".into()),
+            Ok(_) => {
+                Err("O armazenamento da recuperação de arquivos deve ser um arquivo comum.".into())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(format!("Não foi possível ler o armazenamento da recuperação de arquivos: {error}")),
+            Err(error) => Err(format!(
+                "Não foi possível ler o armazenamento da recuperação de arquivos: {error}"
+            )),
         }
     }
 

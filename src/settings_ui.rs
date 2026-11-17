@@ -113,15 +113,25 @@ impl Page {
             Self::Editor => {
                 "editor spelling spell check corretor ortografia dicionario editing files save autosave default view source live preview inline title readable line length status mode privacy images internet web remote load edição edicao modo padrão título linha largura privacidade imagens salvar salvamento automático"
             }
-            Self::Files => "files and links automatically update move folder arquivos links atualizar automaticamente mover pasta lixeira",
+            Self::Files => {
+                "files and links automatically update move folder arquivos links atualizar automaticamente mover pasta lixeira"
+            }
             Self::Hotkeys => "hotkeys keyboard shortcuts commands atalhos teclado comandos",
             Self::Sync => {
                 "sync synchronization server address token passphrase device connect disconnect keys devices sincronização sincronizar servidor endereço senha dispositivo conectar"
             }
-            Self::Daily => "daily notes date format folder template new file location notas diárias data formato pasta modelo local",
-            Self::Templates => "templates date time format folder location modelos data hora formato pasta local",
-            Self::Unique => "unique notes prefix format folder template new file location notas únicas prefixo formato pasta modelo local",
-            Self::Recovery => "file recovery snapshots history interval length days keep recuperação recuperacao arquivos versões histórico intervalo dias",
+            Self::Daily => {
+                "daily notes date format folder template new file location notas diárias data formato pasta modelo local"
+            }
+            Self::Templates => {
+                "templates date time format folder location modelos data hora formato pasta local"
+            }
+            Self::Unique => {
+                "unique notes prefix format folder template new file location notas únicas prefixo formato pasta modelo local"
+            }
+            Self::Recovery => {
+                "file recovery snapshots history interval length days keep recuperação recuperacao arquivos versões histórico intervalo dias"
+            }
         };
         query.split_whitespace().all(|word| terms.contains(word))
     }

@@ -54,7 +54,11 @@ fn oversized_note_stays_out_of_the_index_with_one_warning() {
 #[test]
 fn a_note_exactly_at_the_ceiling_is_indexed() {
     let dir = tempdir().unwrap();
-    write(dir.path(), "limite.md", &"a".repeat(MAX_NOTE_BYTES as usize));
+    write(
+        dir.path(),
+        "limite.md",
+        &"a".repeat(MAX_NOTE_BYTES as usize),
+    );
     let vault = Vault::open(dir.path()).unwrap();
     assert_eq!(paths(&vault), ["limite.md"]);
     assert!(vault.warnings.is_empty(), "{:?}", vault.warnings);

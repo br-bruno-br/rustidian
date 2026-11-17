@@ -291,11 +291,9 @@ impl Manager {
                         }
                     } else {
                         let missing = ui.add(
-                            egui::Button::new(
-                                "Esta nota ainda não foi criada. Clique para criar.",
-                            )
-                            .wrap()
-                            .frame_when_inactive(false),
+                            egui::Button::new("Esta nota ainda não foi criada. Clique para criar.")
+                                .wrap()
+                                .frame_when_inactive(false),
                         );
                         ui_probe::record(ctx, "page-preview-create", missing.rect);
                         if missing.clicked() {

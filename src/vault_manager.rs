@@ -190,7 +190,9 @@ impl Manager {
                                 if let Ok(list) = &self.list {
                                     if list.roots().is_empty() {
                                         ui.label(
-                                            RichText::new("Nenhum cofre aberto ainda.").small().weak(),
+                                            RichText::new("Nenhum cofre aberto ainda.")
+                                                .small()
+                                                .weak(),
                                         );
                                     }
                                     for root in list.roots() {

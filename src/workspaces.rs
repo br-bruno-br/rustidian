@@ -45,7 +45,9 @@ impl Layout {
                 .iter()
                 .any(|tab| !matches!(tab.editing_view, View::Live | View::Source))
         {
-            return Err("O espaço de trabalho tem uma aba ativa ou um modo de edição inválido.".into());
+            return Err(
+                "O espaço de trabalho tem uma aba ativa ou um modo de edição inválido.".into(),
+            );
         }
         if self.tabs.iter().any(|tab| {
             tab.path
@@ -119,7 +121,10 @@ pub fn location(root: &Path) -> Option<PathBuf> {
 
 impl Workspaces {
     pub fn open(root: &Path) -> Result<Self, String> {
-        Self::load(location(root).ok_or("Não foi possível localizar o armazenamento dos espaços de trabalho.")?)
+        Self::load(
+            location(root)
+                .ok_or("Não foi possível localizar o armazenamento dos espaços de trabalho.")?,
+        )
     }
 
     pub fn load(location: PathBuf) -> Result<Self, String> {
@@ -127,7 +132,11 @@ impl Workspaces {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map_err(|error| format!("Não foi possível ler os espaços de trabalho: {error}"))?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Stored::default(),
-            Err(error) => return Err(format!("Não foi possível ler os espaços de trabalho: {error}")),
+            Err(error) => {
+                return Err(format!(
+                    "Não foi possível ler os espaços de trabalho: {error}"
+                ));
+            }
         };
         for entry in &stored.entries {
             name_valid(&entry.name)?;
@@ -216,7 +225,8 @@ impl Workspaces {
                 .map_err(|error| error.to_string())?;
             Ok(latest)
         };
-        self.stored = save().map_err(|error| format!("Não foi possível salvar os espaços de trabalho: {error}"))?;
+        self.stored = save()
+            .map_err(|error| format!("Não foi possível salvar os espaços de trabalho: {error}"))?;
         Ok(())
     }
 }

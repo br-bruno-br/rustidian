@@ -23,7 +23,9 @@ pub fn reveal(path: &Path) -> Result<(), String> {
         .raw_arg(format!("/select,\"{}\"", path.display()))
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}"))
+        .map_err(|error| {
+            format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}")
+        })
 }
 
 /// Select an item in its parent using the desktop file-manager interface.
@@ -49,7 +51,9 @@ pub fn reveal(path: &Path) -> Result<(), String> {
             "string:",
         ])
         .output()
-        .map_err(|error| format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}"))?;
+        .map_err(|error| {
+            format!("Não foi possível abrir o gerenciador de arquivos do sistema: {error}")
+        })?;
     if output.status.success() {
         Ok(())
     } else {
@@ -80,7 +84,9 @@ impl Picker {
 
     pub fn start(&mut self, kind: Kind, initial: Option<&Path>, title: &str) -> Result<(), String> {
         if self.active() {
-            return Err("Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into());
+            return Err(
+                "Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into(),
+            );
         }
         let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(initial) = initial.filter(|path| !path.as_os_str().is_empty()) {
@@ -182,14 +188,18 @@ impl Picker {
 
     fn spawn(&mut self, kind: Kind, command: &mut Command) -> Result<(), String> {
         if self.active() {
-            return Err("Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into());
+            return Err(
+                "Já há um navegador de arquivos aberto. Conclua ou cancele-o primeiro.".into(),
+            );
         }
         self.child = Some(
             command
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
-                .map_err(|error| format!("Não foi possível abrir o navegador de arquivos: {error}"))?,
+                .map_err(|error| {
+                    format!("Não foi possível abrir o navegador de arquivos: {error}")
+                })?,
         );
         self.kind = kind;
         Ok(())
@@ -202,7 +212,9 @@ impl Picker {
             Ok(None) => return None,
             Err(error) => {
                 self.cancel();
-                return Some(Err(format!("Não foi possível ler o navegador de arquivos: {error}")));
+                return Some(Err(format!(
+                    "Não foi possível ler o navegador de arquivos: {error}"
+                )));
             }
         };
         let mut child = self.child.take()?;

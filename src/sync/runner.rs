@@ -113,7 +113,8 @@ impl SyncRunner {
             Ok(handle) => Some(handle),
             Err(error) => {
                 shared.lock().phase = Phase::Failed;
-                shared.lock().error = Some(format!("Não foi possível iniciar a sincronização: {error}"));
+                shared.lock().error =
+                    Some(format!("Não foi possível iniciar a sincronização: {error}"));
                 None
             }
         };
@@ -393,8 +394,9 @@ pub fn start_for_vault(
         aparelho: config.device.clone(),
     })?;
     if let Some(parent) = files.database.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Não foi possível criar a pasta de estado da sincronização: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!("Não foi possível criar a pasta de estado da sincronização: {e}")
+        })?;
     }
     Ok(SyncRunner::start(
         Opcoes {

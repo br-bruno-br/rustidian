@@ -926,8 +926,10 @@ impl Tables {
                                          label: &str,
                                          enabled: bool,
                                          value: Action| {
-                                            let response =
-                                                ui.add_enabled(enabled, egui::Button::new(rustidian::i18n::t(label)));
+                                            let response = ui.add_enabled(
+                                                enabled,
+                                                egui::Button::new(rustidian::i18n::t(label)),
+                                            );
                                             crate::ui_probe::record(
                                                 ui.ctx(),
                                                 format!("table-action:{label}"),
@@ -1218,8 +1220,10 @@ impl Tables {
                                      label: &str,
                                      enabled: bool,
                                      value: Option<Action>| {
-                                        let response =
-                                            ui.add_enabled(enabled, egui::Button::new(rustidian::i18n::t(label)));
+                                        let response = ui.add_enabled(
+                                            enabled,
+                                            egui::Button::new(rustidian::i18n::t(label)),
+                                        );
                                         crate::ui_probe::record(
                                             ui.ctx(),
                                             format!("table-action:{label}"),

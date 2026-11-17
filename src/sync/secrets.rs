@@ -48,7 +48,8 @@ impl Secret {
 pub struct KeyringStore;
 
 fn entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, account).map_err(|e| format!("cofre de credenciais do sistema: {e}"))
+    keyring::Entry::new(SERVICE, account)
+        .map_err(|e| format!("cofre de credenciais do sistema: {e}"))
 }
 
 impl SecretStore for KeyringStore {

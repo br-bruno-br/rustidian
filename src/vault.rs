@@ -105,7 +105,9 @@ pub fn is_editor_temporary(relative: &Path) -> bool {
         || name.starts_with(".#")
         || (name.len() > 2 && name.starts_with('#') && name.ends_with('#'))
         || name.contains(".sb-")
-        || (relative.extension().is_none() && !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()))
+        || (relative.extension().is_none()
+            && !name.is_empty()
+            && name.bytes().all(|b| b.is_ascii_digit()))
         || extension.is_some_and(|extension| {
             matches!(
                 extension.as_str(),
@@ -549,7 +551,9 @@ impl Vault {
 
     pub(crate) fn safe_path(&self, relative: &Path, create_parents: bool) -> Result<PathBuf> {
         if !is_text_document(relative) {
-            return Err("Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into());
+            return Err(
+                "Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into(),
+            );
         }
         self.safe_file_path(relative, create_parents)
     }
@@ -560,7 +564,9 @@ impl Vault {
                 .components()
                 .any(|c| !matches!(c, Component::Normal(_)))
         {
-            return Err("As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into());
+            return Err(
+                "As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into(),
+            );
         }
         let mut parent = self.root.clone();
         if let Some(parents) = relative.parent() {
@@ -608,9 +614,12 @@ impl Vault {
 
     pub fn read(&self, path: &Path) -> Result<Document> {
         let absolute = self.document_path(path, false)?;
-        let text = fs::read_to_string(absolute).map_err(|e| format!("Não foi possível ler a nota: {e}"))?;
+        let text = fs::read_to_string(absolute)
+            .map_err(|e| format!("Não foi possível ler a nota: {e}"))?;
         if text.contains('\0') {
-            return Err("Este arquivo contém dados binários e não pode ser editado como texto.".into());
+            return Err(
+                "Este arquivo contém dados binários e não pode ser editado como texto.".into(),
+            );
         }
         Ok(Document {
             path: path.into(),
@@ -787,7 +796,9 @@ impl Vault {
             return self.safe_path(path, create_parents);
         }
         if !self.guests.contains(path) {
-            return Err("As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into());
+            return Err(
+                "As notas devem ficar dentro do cofre. Use um caminho Markdown relativo.".into(),
+            );
         }
         match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -808,7 +819,9 @@ impl Vault {
             return Err("Este arquivo pertence ao cofre aberto.".into());
         }
         if !is_text_document(&absolute) {
-            return Err("Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into());
+            return Err(
+                "Escolha um arquivo Markdown, de texto ou de código-fonte compatível.".into(),
+            );
         }
         self.guests.insert(absolute.clone());
         let document = self.read(&absolute);
@@ -963,11 +976,13 @@ impl Vault {
 
     pub fn duplicate_file(&mut self, from: &Path) -> Result<PathBuf> {
         if is_ignored_path(from) || !(is_text_document(from) || crate::assets::is_image(from)) {
-            return Err("Escolha uma nota visível ou uma imagem compatível dentro deste cofre.".into());
+            return Err(
+                "Escolha uma nota visível ou uma imagem compatível dentro deste cofre.".into(),
+            );
         }
         let source = self.safe_file_path(from, false)?;
-        let bytes =
-            fs::read(&source).map_err(|error| format!("Não foi possível ler o arquivo a copiar: {error}"))?;
+        let bytes = fs::read(&source)
+            .map_err(|error| format!("Não foi possível ler o arquivo a copiar: {error}"))?;
         let text = is_text_document(from)
             .then(|| {
                 std::str::from_utf8(&bytes)
@@ -1004,7 +1019,9 @@ impl Vault {
                     return Ok(path);
                 }
                 Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(format!("Não foi possível criar a cópia: {}", error.error)),
+                Err(error) => {
+                    return Err(format!("Não foi possível criar a cópia: {}", error.error));
+                }
             }
         }
         Err("Não foi possível achar um nome de cópia livre.".into())
@@ -1187,9 +1204,7 @@ impl Vault {
                 return Err("Esta imagem não existe no cofre.".into());
             }
             if self.root.join(&path).is_file() {
-                return Err(
-                    "Este link aponta para um anexo, não para uma nota Markdown.".into(),
-                );
+                return Err("Este link aponta para um anexo, não para uma nota Markdown.".into());
             }
             let mut name = path.into_os_string();
             name.push(".md");
@@ -1202,7 +1217,9 @@ impl Vault {
             .count()
             > 1
         {
-            return Err("Várias notas têm este nome. Use o caminho completo a partir do cofre.".into());
+            return Err(
+                "Várias notas têm este nome. Use o caminho completo a partir do cofre.".into(),
+            );
         }
         let mut document = Document::new(path);
         document.text = format!("# {}\n\n", document.title());
@@ -1344,7 +1361,9 @@ impl PendingSave {
         // The sync cycle and the editor take turns on the vault's files (see `sync::gate`).
         let _gate = crate::sync::gate::global().hold();
         let current = fs::read_to_string(&self.absolute).map_err(|e| {
-            format!("A nota foi removida ou não pode ser lida. Suas alterações continuam abertas: {e}")
+            format!(
+                "A nota foi removida ou não pode ser lida. Suas alterações continuam abertas: {e}"
+            )
         })?;
         if current != self.original {
             return Err("Esta nota mudou fora do Rustidian. Salve suas edições em uma nova nota ou mantenha-as aqui enquanto confere a versão do disco. Nada foi sobrescrito.".into());
@@ -1356,7 +1375,8 @@ impl PendingSave {
         // Recheck after writing the temporary file to catch changes during a long write.
         if fs::read_to_string(&self.absolute).ok().as_ref() != Some(&self.original) {
             return Err(
-                "Esta nota mudou fora do Rustidian durante o salvamento. Nada foi sobrescrito.".into(),
+                "Esta nota mudou fora do Rustidian durante o salvamento. Nada foi sobrescrito."
+                    .into(),
             );
         }
         temporary
@@ -1372,8 +1392,8 @@ fn prepare_file(
     permissions: Option<fs::Permissions>,
 ) -> Result<NamedTempFile> {
     let parent = absolute.parent().ok_or("Caminho de nota inválido")?;
-    let mut temporary =
-        NamedTempFile::new_in(parent).map_err(|e| format!("Não foi possível preparar o salvamento: {e}"))?;
+    let mut temporary = NamedTempFile::new_in(parent)
+        .map_err(|e| format!("Não foi possível preparar o salvamento: {e}"))?;
     temporary
         .write_all(bytes)
         .map_err(|e| format!("Não foi possível gravar a nota: {e}"))?;

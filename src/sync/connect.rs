@@ -57,9 +57,15 @@ impl fmt::Display for ConnectError {
                 f,
                 "O servidor recusou o token. Confira se é o token deste dispositivo."
             ),
-            ConnectError::Server(m) => write!(f, "Não foi possível acessar o servidor de sincronização: {m}"),
+            ConnectError::Server(m) => write!(
+                f,
+                "Não foi possível acessar o servidor de sincronização: {m}"
+            ),
             ConnectError::BadKeyFile(m) => {
-                write!(f, "O arquivo da chave do cofre no servidor não pode ser usado: {m}")
+                write!(
+                    f,
+                    "O arquivo da chave do cofre no servidor não pode ser usado: {m}"
+                )
             }
         }
     }
@@ -193,9 +199,10 @@ pub fn load_secrets(store: &dyn SecretStore, vault: &Path) -> Result<(ChaveCofre
     let token = store
         .get(&account(vault, Secret::Token))?
         .ok_or_else(missing)?;
-    let key =
-        ChaveCofre::de_bytes(&key).map_err(|_| "A chave de sincronização guardada está danificada.".to_owned())?;
-    let token = String::from_utf8(token).map_err(|_| "O token guardado está danificado.".to_owned())?;
+    let key = ChaveCofre::de_bytes(&key)
+        .map_err(|_| "A chave de sincronização guardada está danificada.".to_owned())?;
+    let token =
+        String::from_utf8(token).map_err(|_| "O token guardado está danificado.".to_owned())?;
     Ok((key, token))
 }
 

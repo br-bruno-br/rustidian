@@ -19,15 +19,20 @@ pub fn read_obsidian<T: serde::de::DeserializeOwned + Default>(
     let path = folder.join(name);
     let meta = match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(T::default()),
-        Err(error) => return Err(format!("Não foi possível ler as configurações de notas: {error}")),
+        Err(error) => {
+            return Err(format!(
+                "Não foi possível ler as configurações de notas: {error}"
+            ));
+        }
         Ok(meta) => meta,
     };
     if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 65536 {
         return Err("As configurações de notas devem ser arquivos JSON comuns e pequenos.".into());
     }
-    let bytes =
-        std::fs::read(path).map_err(|error| format!("Não foi possível ler as configurações de notas: {error}"))?;
-    serde_json::from_slice(&bytes).map_err(|error| format!("Não foi possível importar as configurações de notas: {error}"))
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("Não foi possível ler as configurações de notas: {error}"))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Não foi possível importar as configurações de notas: {error}"))
 }
 
 /// The user's home folder: `HOME`, or `USERPROFILE` on Windows.

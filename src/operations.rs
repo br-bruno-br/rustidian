@@ -80,9 +80,7 @@ impl Vault {
             .first()
             .is_some_and(|(relative, directory)| relative.as_os_str().is_empty() && *directory)
         {
-            return Err(
-                "A origem não é mais uma pasta. Atualize o cofre e tente de novo.".into(),
-            );
+            return Err("A origem não é mais uma pasta. Atualize o cofre e tente de novo.".into());
         }
         let snapshot = entries
             .iter()
@@ -117,7 +115,9 @@ impl Vault {
                     let current =
                         std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
                     if !same_move_source(expected, &current) {
-                        return Err("A pasta de origem mudou durante a cópia. Tente de novo.".into());
+                        return Err(
+                            "A pasta de origem mudou durante a cópia. Tente de novo.".into()
+                        );
                     }
                     std::fs::copy(&source, &target)
                         .map_err(|error| format!("Não foi possível copiar a pasta: {error}"))?;
@@ -141,7 +141,9 @@ impl Vault {
             for (relative, directory, metadata) in snapshot.iter().rev() {
                 if *directory {
                     std::fs::set_permissions(staging.path().join(relative), metadata.permissions())
-                        .map_err(|error| format!("Não foi possível copiar as permissões da pasta: {error}"))?;
+                        .map_err(|error| {
+                            format!("Não foi possível copiar as permissões da pasta: {error}")
+                        })?;
                 }
             }
             for counter in 1..u64::MAX {
@@ -153,7 +155,11 @@ impl Vault {
                 match std::fs::symlink_metadata(&absolute) {
                     Ok(_) => continue,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(format!("Não foi possível conferir o destino da cópia: {error}")),
+                    Err(error) => {
+                        return Err(format!(
+                            "Não foi possível conferir o destino da cópia: {error}"
+                        ));
+                    }
                 }
                 match rename_noreplace(staging.path(), &absolute) {
                     Ok(()) => return Ok((destination, index)),
@@ -262,7 +268,10 @@ impl Vault {
     ) -> Result<Option<MovedEntries>> {
         let sources = self.selected_entries(sources)?;
         if sources.iter().any(|source| folder.starts_with(source)) {
-            return Err("Uma seleção não pode ser movida para dentro dela mesma ou de uma de suas pastas.".into());
+            return Err(
+                "Uma seleção não pode ser movida para dentro dela mesma ou de uma de suas pastas."
+                    .into(),
+            );
         }
         if crate::vault::is_ignored_path(folder)
             || folder
@@ -286,7 +295,9 @@ impl Vault {
             if source.parent() == Some(folder) {
                 continue;
             }
-            let filename = source.file_name().ok_or("Escolha um arquivo ou uma pasta.")?;
+            let filename = source
+                .file_name()
+                .ok_or("Escolha um arquivo ou uma pasta.")?;
             let is_folder = self.folders.contains(&source);
             let mut target = folder.join(filename);
             let mut counter = 0u64;
@@ -341,7 +352,10 @@ impl Vault {
                 return Err(if rollback_errors.is_empty() {
                     format!("Nenhum item foi movido: {error}")
                 } else {
-                    format!("Movimento interrompido: {error}. {}", rollback_errors.join("; "))
+                    format!(
+                        "Movimento interrompido: {error}. {}",
+                        rollback_errors.join("; ")
+                    )
                 });
             }
             completed.push((from, to));
@@ -375,7 +389,8 @@ impl Vault {
 
     pub fn create_folder(&mut self, relative: &Path) -> Result<()> {
         let absolute = self.folder_path(relative)?;
-        std::fs::create_dir(&absolute).map_err(|error| format!("Não foi possível criar a pasta: {error}"))?;
+        std::fs::create_dir(&absolute)
+            .map_err(|error| format!("Não foi possível criar a pasta: {error}"))?;
         self.folders.push(relative.to_owned());
         self.folders.sort();
         Ok(())
@@ -423,7 +438,9 @@ impl Vault {
                 .components()
                 .any(|part| !matches!(part, std::path::Component::Normal(_)))
         {
-            return Err("Escolha um arquivo visível e uma pasta relativa dentro deste cofre.".into());
+            return Err(
+                "Escolha um arquivo visível e uma pasta relativa dentro deste cofre.".into(),
+            );
         }
         let source = self.safe_file_path(from, false)?;
         let expected = std::fs::symlink_metadata(&source).map_err(|error| error.to_string())?;
@@ -538,7 +555,9 @@ impl Vault {
             return Err("Mantenha a extensão do nome da imagem ao renomeá-la ou movê-la.".into());
         }
         if attachment && !image && !crate::vault::is_text_document(to) {
-            return Err("Mantenha uma extensão de texto no nome ao renomear um arquivo de texto.".into());
+            return Err(
+                "Mantenha uma extensão de texto no nome ao renomear um arquivo de texto.".into(),
+            );
         }
         if folder && to.starts_with(from) {
             return Err("Uma pasta não pode ser movida para dentro dela mesma.".into());
@@ -785,7 +804,9 @@ impl Vault {
             if metadata.file_type().is_symlink()
                 || metadata.created().ok() != plan.metadata.created().ok()
             {
-                return Err("A origem foi substituída fora do aplicativo. Nada foi renomeado.".into());
+                return Err(
+                    "A origem foi substituída fora do aplicativo. Nada foi renomeado.".into(),
+                );
             }
             if image
                 && (metadata.len() != plan.metadata.len()
@@ -800,8 +821,9 @@ impl Vault {
             } else {
                 self.safe_path(&plan.to, true)?
             };
-            rename_noreplace(&original, &destination)
-                .map_err(|error| format!("Não foi possível renomear o arquivo ou a pasta: {error}"))?;
+            rename_noreplace(&original, &destination).map_err(|error| {
+                format!("Não foi possível renomear o arquivo ou a pasta: {error}")
+            })?;
         }
         for note in &mut self.notes {
             note.path = moved_path(&note.path, &plan.from, &plan.to, folder);
@@ -920,7 +942,8 @@ impl Vault {
         let mut folders = Vec::new();
         if folder {
             for entry in walkdir::WalkDir::new(&absolute).follow_links(false) {
-                let entry = entry.map_err(|error| format!("Não foi possível examinar a pasta: {error}"))?;
+                let entry =
+                    entry.map_err(|error| format!("Não foi possível examinar a pasta: {error}"))?;
                 if entry.file_type().is_dir() {
                     folders.push(entry.into_path());
                 } else {

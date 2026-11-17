@@ -216,7 +216,10 @@ impl NotesApp {
                 self.sync.notice = None;
             }
             Err(error) => {
-                self.sync.notice = Some((false, format!("Não foi possível iniciar a conexão: {error}")));
+                self.sync.notice = Some((
+                    false,
+                    format!("Não foi possível iniciar a conexão: {error}"),
+                ));
             }
         }
     }
