@@ -138,6 +138,14 @@ Sobram 13.343 linhas, todas dirigidas por X11 (`xdotool`, `Xvfb`, Pillow) ou pre
 - `experiments/html-host/verify.py`: experimento CEF abandonado; decidir se apaga.
 - Depois disso, tirar `python3`/`xvfb`/`xdotool` dos workflows `identity.yml`, `ux.yml`, `syntax.yml` e trocar `gui_smoke` por `cargo test`.
 
+### R8b-1 (17/11): 38 seções migradas para o egui_kittest
+Os testes de GUI viraram a pasta `src/app/gui_tests/` (ajudantes em `mod.rs`, `edicao.rs` com 42 testes, `navegacao.rs` com 74). `cargo test --bin rustidian`: 205 testes, 1 ignorado, verde 3 vezes seguidas no Windows (~100 s).
+- **Edição:** undo, list-indent, list-enter, delimiter-pairs, unicode-queued, tasks, tables, table-input, table-links, table-edit, folding, inline-styles (parcial), callouts, note-aids, external-rename, block-completion.
+- **Navegação:** tab-state, tab-actions, tab-restore, tab-close-menu, navigation, quick-create, quick-ranking, bookmarks, workspaces, note-dialogs, folders, folder-create, file-copy, folder-copy, file-move, trash-options, explorer, palettes, settings, recovery, backlink-context, link-fragments.
+- **Ficou de fora de propósito:** medição de pixel/cor/geometria, arrastar com mouse real, seletor nativo, reinício do processo, `chmod`, lixeira do sistema (os testes nunca usam), botão de dobra da leitura (sem nome acessível).
+- **Achados:** o harness não chama `raw_input_hook` (Tab/Enter enfileirados no mesmo quadro se perdiam; `edicao.rs` tem `Session::frame()` e `queued()`). **Bug do app no Windows:** renomear/mover pasta com subpastas dá "Acesso negado" com o vigia de arquivos ligado (teste `renomear_pasta_com_subpastas_com_o_vigia_ligado` com `#[ignore]`).
+- **Ainda não feito:** tirar essas seções do `gui_smoke.py` e das listas dos workflows. Primeiro ver o `cargo test` passar no CI Linux (cópia de pasta e mover pasta têm ramo por sistema).
+
 ## R7a: protótipos Android (egui × Dioxus)
 
 Pergunta que decide o caminho: **qual toolkit digita bem pelo Gboard** (acentos, autocorretor, sugestões, apagar, selecionar com o dedo, rolar, teclado sem cobrir o texto). Dois protótipos mínimos em `prototipos/android-egui` e `prototipos/android-dioxus`, fora do workspace (`exclude` no `Cargo.toml` da raiz e `[workspace]` vazio em cada um; o gate `cargo test --workspace` do app não os vê). Tela igual nos dois: campo multilinha grande, botão Salvar (grava `nota.md` na pasta interna do app) e rótulo de status. Roteiro do dono: `docs/bruno/R7-TESTE.md`. Não houve emulador nem aparelho neste PC: o que se diz abaixo sobre o comportamento no celular vem do teste do dono ou é inferência marcada como tal.
