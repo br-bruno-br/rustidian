@@ -972,3 +972,1183 @@ fn consulta_vazia_lista_arquivos_e_cancelar_preserva_a_nota_atual_e_os_bytes() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// bookmarks
+// ---------------------------------------------------------------------------------------------
+
+fn bookmarked(session: &Session) -> Vec<String> {
+    session
+        .app()
+        .bookmarks
+        .items
+        .iter()
+        .map(|item| item.path.to_string_lossy().replace('\\', "/"))
+        .collect()
+}
+
+/// O JSON da sessão gravada fora do cofre (favoritos, fixações, preferências).
+fn saved_state(session: &Session) -> serde_json::Value {
+    let root = session.app().vault.as_ref().unwrap().root.clone();
+    let state = rustidian::paths::state_file(&root, "", "json").expect("arquivo de estado");
+    serde_json::from_str(&std::fs::read_to_string(state).expect("sessão gravada"))
+        .expect("sessão em JSON")
+}
+
+fn saved_bookmarks(session: &Session) -> Vec<String> {
+    saved_state(session)["bookmarks"]["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item["path"].as_str().unwrap_or_default().replace('\\', "/"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Preenche o diálogo aberto como o usuário: Ctrl+A, o texto, Enter.
+fn fill_dialog(session: &mut Session, text: &str) {
+    session.key(CTRL, egui::Key::A);
+    session.type_text(text);
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+}
+
+#[test]
+fn favoritar_a_nota_atual_grava_na_hora_e_repetir_nao_duplica() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.command("Source editing");
+    session.command("Bookmark current file");
+    session.command("Bookmark current file");
+    assert_eq!(bookmarked(&session), ["Home.md"]);
+    assert_eq!(
+        saved_bookmarks(&session),
+        ["Home.md"],
+        "gravado fora do cofre, sem esperar"
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Home.md")).unwrap(),
+        HOME
+    );
+    // Remover o favorito não apaga a nota.
+    let before = session.app().bookmarks.clone();
+    session.app_mut().bookmarks.remove(Path::new("Home.md"));
+    assert!(session.app_mut().save_bookmarks(before));
+    assert!(saved_bookmarks(&session).is_empty());
+    assert!(session.path("Home.md").is_file());
+}
+
+#[test]
+fn titulo_do_favorito_guarda_texto_persa_e_a_ordem_persiste() {
+    let mut session = Session::open();
+    for name in ["Home", "Second", "Alpha"] {
+        session.open_note(name);
+        session.command("Bookmark current file");
+    }
+    assert_eq!(bookmarked(&session), ["Home.md", "Second.md", "Alpha.md"]);
+    // Título pelo diálogo, como o item "Editar título" do menu do favorito.
+    session.app_mut().ask(Dialog::BookmarkTitle);
+    session.app_mut().dialog_path = Some(PathBuf::from("Second.md"));
+    session.app_mut().dialog_input = String::new();
+    session.settle();
+    fill_dialog(&mut session, "Writing فارسی");
+    assert_eq!(
+        session.app().bookmarks.items[1].title.as_deref(),
+        Some("Writing فارسی")
+    );
+    assert_eq!(
+        saved_state(&session)["bookmarks"]["items"][1]["title"],
+        "Writing فارسی"
+    );
+    // Subir o último (a ação "up" do menu) e conferir a ordem gravada.
+    let before = session.app().bookmarks.clone();
+    session
+        .app_mut()
+        .bookmarks
+        .move_item(Path::new("Alpha.md"), -1);
+    assert!(session.app_mut().save_bookmarks(before));
+    assert_eq!(
+        saved_bookmarks(&session),
+        ["Home.md", "Alpha.md", "Second.md"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+}
+
+#[test]
+fn renomear_arquivo_e_pasta_atualiza_o_caminho_do_favorito_sem_perder_o_titulo() {
+    let mut session = Session::open();
+    write_note(
+        &session,
+        "Bookmark folder/Bookmark check.md",
+        "# Bookmark check\n\nOriginal 🦀.\n",
+    );
+    refresh(&mut session, 4);
+    session.open_note("Bookmark check");
+    session.command("Bookmark current file");
+    let before = session.app().bookmarks.clone();
+    session
+        .app_mut()
+        .bookmarks
+        .set_title(Path::new("Bookmark folder/Bookmark check.md"), "Writing");
+    assert!(session.app_mut().save_bookmarks(before));
+    // F2 renomeia a nota atual.
+    session.key(egui::Modifiers::NONE, egui::Key::F2);
+    fill_dialog(&mut session, "Bookmark folder/Bookmark renamed.md");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(
+        session
+            .path("Bookmark folder/Bookmark renamed.md")
+            .is_file()
+    );
+    assert_eq!(
+        bookmarked(&session),
+        ["Bookmark folder/Bookmark renamed.md"]
+    );
+    assert_eq!(
+        session.app().bookmarks.items[0].title.as_deref(),
+        Some("Writing")
+    );
+    // Renomear a pasta leva o favorito junto.
+    session
+        .app_mut()
+        .ask_file(Dialog::RenameNote, PathBuf::from("Bookmark folder"));
+    session.settle();
+    fill_dialog(&mut session, "Pinned notes");
+    session.wait_for(|app| app.dialog.is_none());
+    assert_eq!(bookmarked(&session), ["Pinned notes/Bookmark renamed.md"]);
+    assert_eq!(
+        session.app().bookmarks.items[0].title.as_deref(),
+        Some("Writing")
+    );
+    session.app_mut().write_session().unwrap();
+    assert_eq!(
+        saved_bookmarks(&session),
+        ["Pinned notes/Bookmark renamed.md"]
+    );
+}
+
+#[test]
+fn falha_ao_gravar_a_sessao_desfaz_o_favorito_e_a_nova_tentativa_grava() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.command("Bookmark current file");
+    let root = session.app().vault.as_ref().unwrap().root.clone();
+    let state = rustidian::paths::state_file(&root, "", "json").expect("estado");
+    let held = state.with_extension("held");
+    std::fs::rename(&state, &held).unwrap();
+    std::fs::create_dir(&state).unwrap();
+    session.open_note("Second");
+    session.command("Bookmark current file");
+    assert_eq!(
+        bookmarked(&session),
+        ["Home.md"],
+        "o favorito novo foi desfeito"
+    );
+    assert!(
+        session.app().error.is_some(),
+        "a falha aparece para a pessoa"
+    );
+    std::fs::remove_dir(&state).unwrap();
+    std::fs::rename(&held, &state).unwrap();
+    session.command("Bookmark current file");
+    assert_eq!(bookmarked(&session), ["Home.md", "Second.md"]);
+    assert_eq!(saved_bookmarks(&session), ["Home.md", "Second.md"]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// workspaces
+// ---------------------------------------------------------------------------------------------
+
+fn workspace_names(session: &Session) -> Vec<String> {
+    let root = session.app().vault.as_ref().unwrap().root.clone();
+    rustidian::workspaces::Workspaces::open(&root)
+        .expect("lista de layouts")
+        .entries()
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect()
+}
+
+fn save_layout(session: &mut Session, name: &str) {
+    session.command("Workspaces: Manage workspace layouts");
+    session.type_text(name);
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+}
+
+fn load_layout(session: &mut Session, name: &str) {
+    session.command("Workspaces: Load workspace layout");
+    session.type_text(name);
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.settle();
+}
+
+#[test]
+fn cancelar_o_nome_nao_cria_layout() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.command("Workspaces: Manage workspace layouts");
+    assert!(session.app().workspace_manager.open);
+    session.type_text("Cancelled layout");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(!session.app().workspace_manager.open);
+    assert!(workspace_names(&session).is_empty());
+}
+
+#[test]
+fn salvar_e_carregar_layouts_restaura_abas_modos_fixacao_e_barras() {
+    let mut session = Session::open();
+    write_note(
+        &session,
+        "Workspace A.md",
+        "# Workspace A\n\nFirst saved layout.\n",
+    );
+    write_note(
+        &session,
+        "Workspace B.md",
+        "# Workspace B\n\nSecond saved layout.\n",
+    );
+    refresh(&mut session, 5);
+    session.open_note("Workspace A");
+    session.command("Source editing");
+    session.app_mut().show_left = true;
+    session.app_mut().show_right = false;
+    session.app_mut().sidebar_widths = [330.0, 234.0];
+    session.command("Reading view");
+    save_layout(&mut session, "Writing");
+    assert_eq!(workspace_names(&session), ["Writing"]);
+    // Segundo layout: duas abas, a B ativa em Source, a A fixada, barra esquerda recolhida.
+    open_in_new_tab(&mut session, "Workspace B");
+    session.command("Source editing");
+    session.app_mut().tabs[0].pinned = true;
+    session.app_mut().show_left = false;
+    session.app_mut().show_right = true;
+    session.app_mut().sidebar_widths = [330.0, 260.0];
+    save_layout(&mut session, "Reading");
+    assert_eq!(workspace_names(&session), ["Writing", "Reading"]);
+    load_layout(&mut session, "Writing");
+    assert_eq!(tab_files(&session), ["Workspace A.md"]);
+    assert_eq!(active_view(&session), View::Read);
+    assert!(session.app().show_left && !session.app().show_right);
+    load_layout(&mut session, "Reading");
+    assert_eq!(tab_files(&session), ["Workspace A.md", "Workspace B.md"]);
+    assert_eq!(pins(&session), [true, false]);
+    assert_eq!(active_file(&session), "Workspace B.md");
+    assert_eq!(active_view(&session), View::Source);
+    assert!(!session.app().show_left && session.app().show_right);
+    // Carregar não mexe nos bytes das notas.
+    assert_eq!(
+        std::fs::read_to_string(session.path("Workspace A.md")).unwrap(),
+        "# Workspace A\n\nFirst saved layout.\n"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// note-dialogs
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn nota_nova_nasce_vazia_o_titulo_selecionado_renomeia_e_enter_leva_ao_corpo() {
+    let mut session = Session::open();
+    session.key(CTRL, egui::Key::N);
+    assert!(
+        session.app().dialog.is_none(),
+        "criar nota não abre um modal de nome"
+    );
+    let first = session.path("Untitled.md");
+    assert!(first.is_file());
+    assert_eq!(
+        std::fs::read(&first).unwrap(),
+        b"",
+        "a nota nasce sem cabeçalho duplicado"
+    );
+    session.type_text("Quick thought");
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    let renamed = session.path("Quick thought.md");
+    session.wait_for(|_| renamed.is_file() && !first.exists());
+    session.type_text("Write immediately after naming.");
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(
+        std::fs::read_to_string(&renamed).unwrap(),
+        "Write immediately after naming."
+    );
+}
+
+#[test]
+fn criar_nota_pelo_comando_usa_nomes_sem_colisao_e_nao_toca_nas_existentes() {
+    let mut session = Session::open();
+    session.key(CTRL, egui::Key::N);
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    session.command("New note");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    session.command("New note");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    for name in ["Untitled.md", "Untitled 1.md", "Untitled 2.md"] {
+        assert_eq!(std::fs::read(session.path(name)).unwrap(), b"", "{name}");
+    }
+    assert!(session.app().dialog.is_none());
+}
+
+#[test]
+fn formularios_padrao_abrem_cancelam_e_deixam_a_digitacao_intacta() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session.command("Source editing");
+    for name in [
+        "New folder",
+        "Rename or move file",
+        "Save a copy",
+        "Add property",
+    ] {
+        session.command(name);
+        assert!(session.app().dialog.is_some(), "{name}: o diálogo abre");
+        assert!(session.has_label("Cancelar"), "{name}: botão Cancelar");
+        session.key(egui::Modifiers::NONE, egui::Key::Escape);
+        assert!(session.app().dialog.is_none(), "{name}: Escape fecha");
+        session.key(CTRL, egui::Key::End);
+        session.type_text(" mais");
+        session.key(CTRL, egui::Key::S);
+        assert_eq!(
+            std::fs::read_to_string(session.path("Second.md")).unwrap(),
+            format!("{SECOND} mais")
+        );
+        session.key(CTRL, egui::Key::Z);
+        session.key(CTRL, egui::Key::S);
+        assert_eq!(
+            std::fs::read_to_string(session.path("Second.md")).unwrap(),
+            SECOND
+        );
+    }
+}
+
+#[test]
+fn salvar_uma_copia_e_adicionar_propriedade_gravam_o_que_foi_pedido() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session.command("Save a copy");
+    fill_dialog(&mut session, "Copias/Second backup.md");
+    session.wait_for(|app| app.dialog.is_none());
+    assert_eq!(
+        std::fs::read_to_string(session.path("Copias/Second backup.md")).unwrap(),
+        SECOND
+    );
+    // Propriedade nova entra no cabeçalho da nota ativa (a cópia).
+    session.command("Add property");
+    session.type_text("status");
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(
+        session.active_text().starts_with("---\nstatus:"),
+        "{}",
+        session.active_text()
+    );
+    // Repetir a mesma propriedade é recusado com mensagem.
+    session.command("Add property");
+    session.type_text("status");
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.wait_for(|app| app.error.is_some());
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+}
+
+#[test]
+fn dialogo_da_lixeira_mostra_o_alvo_e_cancelar_preserva_a_nota() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session
+        .app_mut()
+        .ask_file(Dialog::TrashNote, PathBuf::from("Second.md"));
+    session.settle();
+    assert!(session.app().dialog == Some(Dialog::TrashNote));
+    assert!(
+        session.has_label("Second.md"),
+        "o alvo aparece como rótulo, não como campo"
+    );
+    assert!(session.has_label("Não perguntar de novo"));
+    click_label(&mut session, "Cancelar");
+    assert!(session.app().dialog.is_none());
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+    assert!(
+        session.app().confirm_trash,
+        "cancelar não grava a escolha de não perguntar"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// folders
+// ---------------------------------------------------------------------------------------------
+
+fn rename_dialog(session: &mut Session, from: &str, to: &str) {
+    session
+        .app_mut()
+        .ask_file(Dialog::RenameNote, PathBuf::from(from));
+    session.settle();
+    fill_dialog(session, to);
+}
+
+fn md_files(session: &Session) -> Vec<String> {
+    file_set(session)
+        .into_iter()
+        .filter(|name| name.ends_with(".md"))
+        .collect()
+}
+
+#[test]
+fn nova_pasta_aparece_sem_nota_e_repetir_o_nome_falha_sem_mexer_em_nada() {
+    let mut session = Session::open();
+    let notes = md_files(&session);
+    session.command("New folder");
+    fill_dialog(&mut session, "GUI empty");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(session.path("GUI empty").is_dir());
+    assert_eq!(
+        std::fs::read_dir(session.path("GUI empty"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(
+        session
+            .app()
+            .vault
+            .as_ref()
+            .unwrap()
+            .folders
+            .contains(&PathBuf::from("GUI empty"))
+    );
+    session.command("New folder");
+    fill_dialog(&mut session, "GUI empty");
+    session.settle();
+    assert!(
+        session.app().error.is_some(),
+        "a pasta repetida é recusada em voz alta"
+    );
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert_eq!(md_files(&session), notes);
+}
+
+#[test]
+fn renomear_pasta_vazia_nao_ganha_extensao_md_nem_nota() {
+    let mut session = Session::open();
+    std::fs::create_dir(session.path("External.empty")).unwrap();
+    session.command("Refresh vault");
+    session.wait_for(|app| {
+        app.loading.is_none()
+            && app
+                .vault
+                .as_ref()
+                .is_some_and(|vault| vault.folders.contains(&PathBuf::from("External.empty")))
+    });
+    rename_dialog(&mut session, "External.empty", "Renamed empty");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(!session.path("External.empty").exists());
+    assert!(session.path("Renamed empty").is_dir());
+    assert_eq!(
+        std::fs::read_dir(session.path("Renamed empty"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn mover_pasta_aninhada_atualiza_ligacoes_abas_e_historico_e_recusa_destinos_inseguros() {
+    let mut session = Session::open();
+    let parent = "# Moving parent\n\n[Home](../Home.md)\n![[Move source/Nested/photo.png|64]]\n";
+    let child = "# Moving child\n\n[[Move source/Moving parent|parent]]\n";
+    let links = "# Folder links\n\n[[Move source/Nested/Moving child|child]]\n[Parent](Move%20source/Moving%20parent.md)\n";
+    write_note(&session, "Move source/Moving parent.md", parent);
+    write_note(&session, "Move source/Nested/Moving child.md", child);
+    std::fs::create_dir_all(session.path("Move source/Empty")).unwrap();
+    std::fs::create_dir_all(session.path("Move target")).unwrap();
+    write_note(&session, "Folder links.md", links);
+    let image: Vec<u8> = (0..=255u8).collect();
+    std::fs::write(session.path("Move source/Nested/photo.png"), &image).unwrap();
+    refresh(&mut session, 6);
+    session.open_note("Moving child");
+    session.command("Source editing");
+    open_in_new_tab(&mut session, "Folder links");
+    session.command("Source editing");
+    // No Windows, renomear uma pasta com subpastas vigiadas falha com "Acesso negado" (achado
+    // do harness, ver o teste ignorado abaixo). Aqui o vigia é solto para testar o resto.
+    session.app_mut().watcher = None;
+    session.app_mut().watch_events = None;
+    rename_dialog(&mut session, "Move source", "Move target/Renamed");
+    session.wait_for(|app| app.dialog.is_none());
+    let moved = session.path("Move target/Renamed");
+    assert!(!session.path("Move source").exists());
+    assert!(moved.join("Empty").is_dir(), "pastas vazias vão junto");
+    assert_eq!(
+        std::fs::read(moved.join("Nested/photo.png")).unwrap(),
+        image
+    );
+    let expected_child = child.replace("Move source/", "Move target/Renamed/");
+    let expected_parent = parent
+        .replace("../Home.md", "../../Home.md")
+        .replace("Move source/", "Move target/Renamed/");
+    let expected_links = links
+        .replace("Move source/", "Move target/Renamed/")
+        .replace("Move%20source/", "Move%20target/Renamed/");
+    assert_eq!(
+        std::fs::read_to_string(moved.join("Nested/Moving child.md")).unwrap(),
+        expected_child
+    );
+    assert_eq!(
+        std::fs::read_to_string(moved.join("Moving parent.md")).unwrap(),
+        expected_parent
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Folder links.md")).unwrap(),
+        expected_links
+    );
+    // As abas seguem a pasta: editar e salvar grava no caminho novo, nas duas.
+    session.key(CTRL, egui::Key::End);
+    session.type_text(" AFTER_FOLDER_RENAME");
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Folder links.md")).unwrap(),
+        format!("{expected_links} AFTER_FOLDER_RENAME")
+    );
+    session.key(CTRL | egui::Modifiers::SHIFT, egui::Key::Tab);
+    assert_eq!(active_file(&session), "Moving child.md");
+    session.key(CTRL, egui::Key::End);
+    session.type_text(" AFTER_MOVE");
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(
+        std::fs::read_to_string(moved.join("Nested/Moving child.md")).unwrap(),
+        format!("{expected_child} AFTER_MOVE")
+    );
+    // Destinos inseguros: dentro de si mesma e com "#" no nome. A pasta fica onde está.
+    for target in ["Move target/Renamed/Inside", "Move target/Bad#name"] {
+        rename_dialog(&mut session, "Move target/Renamed", target);
+        session.settle();
+        assert!(session.app().error.is_some(), "{target}: recusado");
+        assert!(moved.is_dir(), "{target}");
+        session.key(egui::Modifiers::NONE, egui::Key::Escape);
+        session.app_mut().error = None;
+    }
+    assert_eq!(
+        std::fs::read_to_string(moved.join("Nested/Moving child.md")).unwrap(),
+        format!("{expected_child} AFTER_MOVE")
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// folder-create
+// ---------------------------------------------------------------------------------------------
+
+fn new_folder_in(session: &mut Session, folder: &str, name: &str) {
+    session.app_mut().ask(Dialog::NewFolder);
+    session.app_mut().dialog_path = Some(PathBuf::from(folder));
+    session.app_mut().dialog_input = "Untitled".into();
+    session.settle();
+    fill_dialog(session, name);
+}
+
+fn folder_session() -> Session {
+    let mut session = Session::open();
+    std::fs::create_dir_all(session.path("Create here/Nested")).unwrap();
+    std::fs::create_dir_all(session.path("Elsewhere")).unwrap();
+    write_note(&session, "Elsewhere/Active.md", "ACTIVE_ELSEWHERE\n");
+    write_note(&session, "Untitled.md", "KEEP_ROOT\n");
+    write_note(&session, "Create here/Untitled.md", "KEEP_PARENT\n");
+    write_note(&session, "Create here/Nested/Untitled.md", "KEEP_NESTED\n");
+    refresh(&mut session, 7);
+    session.open_note("Elsewhere/Active");
+    session
+}
+
+#[test]
+fn nova_nota_numa_pasta_fechada_cria_filha_unica_renomeia_no_lugar_e_salva() {
+    let mut session = folder_session();
+    session.app_mut().create_note_in(Path::new("Create here"));
+    session.settle();
+    assert_eq!(active_file(&session), "Untitled 1.md");
+    assert!(session.path("Create here/Untitled 1.md").is_file());
+    assert_eq!(
+        std::fs::read(session.path("Create here/Untitled 1.md")).unwrap(),
+        b""
+    );
+    session.type_text("Created child");
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    let renamed = session.path("Create here/Created child.md");
+    session.wait_for(|_| renamed.is_file());
+    assert!(!session.path("Create here/Untitled 1.md").exists());
+    assert!(
+        !session.path("Created child.md").exists(),
+        "renomeia dentro da pasta, não na raiz"
+    );
+    session.type_text("CHILD_BODY");
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(std::fs::read_to_string(&renamed).unwrap(), "CHILD_BODY");
+    assert_eq!(
+        std::fs::read_to_string(session.path("Elsewhere/Active.md")).unwrap(),
+        "ACTIVE_ELSEWHERE\n"
+    );
+}
+
+#[test]
+fn nome_so_de_pasta_fica_preso_a_pasta_clicada_e_aceita_aninhadas_e_unicode() {
+    let mut session = folder_session();
+    new_folder_in(&mut session, "Create here", "Child folder");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(session.path("Create here/Child folder").is_dir());
+    assert!(!session.path("Child folder").exists());
+    assert!(!session.path("Elsewhere/Child folder").exists());
+    new_folder_in(&mut session, "Create here/Nested", "Nested child");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(session.path("Create here/Nested/Nested child").is_dir());
+    assert!(!session.path("Nested child").exists());
+    new_folder_in(&mut session, "Create here", "Child café");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(session.path("Create here/Child café").is_dir());
+    // A raiz do cofre vale para criar itens independentes da nota ativa.
+    new_folder_in(&mut session, "", "Root child");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(session.path("Root child").is_dir());
+    assert!(!session.path("Create here/Root child").exists());
+    session.app_mut().create_note_in(Path::new(""));
+    session.settle();
+    assert!(session.path("Untitled 1.md").is_file());
+}
+
+#[test]
+fn pasta_repetida_com_escape_ou_vazia_falha_sem_criar_caminhos() {
+    let mut session = folder_session();
+    new_folder_in(&mut session, "Create here", "Nested");
+    session.settle();
+    assert!(session.app().error.is_some(), "a pasta já existe");
+    session.app_mut().error = None;
+    fill_dialog(&mut session, "../Must not escape");
+    session.settle();
+    assert!(session.app().error.is_some());
+    assert!(!session.path("Create here/Must not escape").exists());
+    assert!(!session.path("Must not escape").exists());
+    session.app_mut().error = None;
+    fill_dialog(&mut session, "");
+    session.settle();
+    assert!(session.app().error.is_some());
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    let before = file_set(&session);
+    new_folder_in_cancelled(&mut session);
+    assert_eq!(file_set(&session), before);
+    // As notas protegidas continuam com os bytes originais.
+    for (path, text) in [
+        ("Untitled.md", "KEEP_ROOT\n"),
+        ("Create here/Untitled.md", "KEEP_PARENT\n"),
+        ("Create here/Nested/Untitled.md", "KEEP_NESTED\n"),
+    ] {
+        assert_eq!(std::fs::read_to_string(session.path(path)).unwrap(), text);
+    }
+}
+
+fn new_folder_in_cancelled(session: &mut Session) {
+    session.app_mut().ask(Dialog::NewFolder);
+    session.app_mut().dialog_path = Some(PathBuf::from("Create here"));
+    session.app_mut().dialog_input = "Untitled".into();
+    session.settle();
+    session.type_text("Cancelled child");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+}
+
+// ---------------------------------------------------------------------------------------------
+// file-copy
+// ---------------------------------------------------------------------------------------------
+
+/// PNG de 1x1 pixel.
+const PNG: [u8; 67] = [
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+];
+
+#[test]
+fn fazer_uma_copia_abre_a_proxima_copia_numerada_numa_aba_nova_com_os_mesmos_bytes() {
+    let mut session = Session::open();
+    let source = b"# Copy source\r\n\r\nExact bytes stay here.\r\n";
+    std::fs::write(session.path("Copy source.md"), source).unwrap();
+    std::fs::write(session.path("Copy source 1.md"), b"KEEP_COPY_COLLISION\n").unwrap();
+    refresh(&mut session, 5);
+    session.open_note("Home");
+    session
+        .app_mut()
+        .duplicate_file(Path::new("Copy source.md"));
+    session.settle();
+    assert_eq!(active_file(&session), "Copy source 2.md");
+    assert!(session.app().dialog.is_none(), "copiar não pede nome");
+    assert_eq!(
+        std::fs::read(session.path("Copy source 2.md")).unwrap(),
+        source
+    );
+    assert_eq!(
+        std::fs::read(session.path("Copy source.md")).unwrap(),
+        source
+    );
+    assert_eq!(
+        std::fs::read(session.path("Copy source 1.md")).unwrap(),
+        b"KEEP_COPY_COLLISION\n"
+    );
+    assert!(tab_files(&session).contains(&"Home.md".to_owned()));
+    // O comando da paleta copia a cópia usando o nome completo; a aba fixada continua.
+    session.command("Toggle pin");
+    session.command("Make a copy of the current file");
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with("Copy source 2 1.md"))
+    });
+    assert_eq!(
+        std::fs::read(session.path("Copy source 2 1.md")).unwrap(),
+        source
+    );
+    assert!(tab_files(&session).contains(&"Copy source 2.md".to_owned()));
+}
+
+#[test]
+fn copiar_imagem_binaria_preserva_os_bytes_e_sem_arquivo_o_comando_some() {
+    let mut session = Session::open();
+    std::fs::write(session.path("Copy image.png"), PNG).unwrap();
+    refresh(&mut session, 3);
+    session
+        .app_mut()
+        .duplicate_file(Path::new("Copy image.png"));
+    session.settle();
+    assert_eq!(active_file(&session), "Copy image 1.png");
+    assert_eq!(
+        std::fs::read(session.path("Copy image 1.png")).unwrap(),
+        PNG
+    );
+    assert_eq!(std::fs::read(session.path("Copy image.png")).unwrap(), PNG);
+    session.command("Make a copy of the current file");
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with("Copy image 1 1.png"))
+    });
+    assert_eq!(
+        std::fs::read(session.path("Copy image 1 1.png")).unwrap(),
+        PNG
+    );
+    // Numa aba em branco o comando não é oferecido.
+    session.app_mut().tabs.clear();
+    session.command("New tab");
+    session.key(CTRL, egui::Key::P);
+    session.type_text("Make a copy");
+    assert!(!session.has_label("Make a copy of the current file"));
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+}
+
+// ---------------------------------------------------------------------------------------------
+// folder-copy
+// ---------------------------------------------------------------------------------------------
+
+/// Caminho relativo → bytes (arquivo) ou `None` (pasta), para comparar árvores inteiras.
+fn snapshot(folder: &Path) -> std::collections::BTreeMap<String, Option<Vec<u8>>> {
+    let mut out = std::collections::BTreeMap::new();
+    for entry in walkdir::WalkDir::new(folder) {
+        let entry = entry.unwrap();
+        let relative = entry
+            .path()
+            .strip_prefix(folder)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.insert(
+            relative,
+            entry
+                .file_type()
+                .is_file()
+                .then(|| std::fs::read(entry.path()).unwrap()),
+        );
+    }
+    out
+}
+
+fn no_staging(session: &Session) {
+    let leaked: Vec<_> = std::fs::read_dir(session.path(""))
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".rustidian-copy-")
+        })
+        .collect();
+    assert!(leaked.is_empty(), "sobrou pasta temporária de cópia");
+}
+
+#[test]
+fn copiar_pasta_leva_notas_binarios_ocultos_e_vazias_e_so_salva_o_rascunho_da_origem() {
+    let mut session = Session::open();
+    let source = session.path("Recipe.v1 Ω");
+    std::fs::create_dir_all(source.join("Nested")).unwrap();
+    std::fs::create_dir_all(source.join("Empty")).unwrap();
+    std::fs::create_dir_all(source.join(".hidden")).unwrap();
+    std::fs::write(source.join(".hidden/secret.bin"), b"\x00PRIVATE\xff\x00").unwrap();
+    std::fs::write(source.join("A.md"), "# A\n\n![[Image.png]]\n").unwrap();
+    std::fs::write(
+        source.join("Raw.md"),
+        b"\xef\xbb\xbf# Raw\r\n\r\nRAW_CRLF_EXACT\r\n",
+    )
+    .unwrap();
+    std::fs::write(source.join("Nested/Child.md"), "# Child\n\n[[../A|A]]\n").unwrap();
+    let blob: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
+    std::fs::write(source.join("Nested/data.bin"), &blob).unwrap();
+    std::fs::write(source.join("Image.png"), PNG).unwrap();
+    std::fs::create_dir(session.path("Empty copy")).unwrap();
+    std::fs::write(session.path("Empty copy 1"), "KEEP_OCCUPIED_FILE\n").unwrap();
+    refresh(&mut session, 6);
+    // Rascunho da pasta de origem + outro rascunho sem relação.
+    session.open_note("Recipe.v1 Ω/Nested/Child");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("SOURCE_DRAFT");
+    open_in_new_tab(&mut session, "Home");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("UNRELATED_DRAFT");
+    assert_eq!(
+        std::fs::read_to_string(session.path("Home.md")).unwrap(),
+        HOME
+    );
+    session.app_mut().duplicate_file(Path::new("Recipe.v1 Ω"));
+    session.settle();
+    if !cfg!(unix) {
+        // A cópia protegida de pastas só existe no Linux: fora dele o app diz isso e não deixa
+        // cópia parcial nem pasta temporária.
+        let error = session.app().error.clone().unwrap_or_default();
+        assert!(error.contains("só está disponível no Linux"), "{error}");
+        assert!(!session.path("Recipe.v1 Ω 1").exists());
+        no_staging(&session);
+        assert_eq!(snapshot(&source).len(), 10);
+        return;
+    }
+    assert!(
+        std::fs::read_to_string(source.join("Nested/Child.md"))
+            .unwrap()
+            .ends_with("SOURCE_DRAFT"),
+        "o rascunho da origem foi salvo antes de copiar"
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Home.md")).unwrap(),
+        HOME,
+        "o rascunho alheio continua só na memória"
+    );
+    let first = session.path("Recipe.v1 Ω 1");
+    assert_eq!(snapshot(&first), snapshot(&source));
+    assert_eq!(
+        active_file(&session),
+        "Home.md",
+        "copiar pasta não troca a aba"
+    );
+    no_staging(&session);
+    // Repetir numera de novo mantendo o nome completo com ponto e Unicode.
+    session.app_mut().duplicate_file(Path::new("Recipe.v1 Ω"));
+    assert_eq!(snapshot(&session.path("Recipe.v1 Ω 2")), snapshot(&source));
+    // Pasta vazia: cópia vazia, e o arquivo que ocupa "Empty copy 1" é pulado, intacto.
+    session.app_mut().duplicate_file(Path::new("Empty copy"));
+    assert!(session.path("Empty copy 2").is_dir());
+    assert_eq!(
+        std::fs::read_dir(session.path("Empty copy 2"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Empty copy 1")).unwrap(),
+        "KEEP_OCCUPIED_FILE\n"
+    );
+    no_staging(&session);
+}
+
+// ---------------------------------------------------------------------------------------------
+// file-move
+// ---------------------------------------------------------------------------------------------
+
+fn move_to(session: &mut Session, folder: &str, modifiers: egui::Modifiers) {
+    session.command("Move current file to another folder");
+    session.type_text(folder);
+    session.key(modifiers, egui::Key::Enter);
+}
+
+#[test]
+fn mover_arquivo_cancelar_no_seletor_nao_muda_nada_e_mover_preserva_bytes_crlf() {
+    let mut session = Session::open();
+    let bytes = b"# Move source\r\n\r\nKeep this document.\r\n";
+    std::fs::write(session.path("Move source.md"), bytes).unwrap();
+    std::fs::create_dir(session.path("Move destination")).unwrap();
+    refresh(&mut session, 4);
+    session.open_note("Move source");
+    session.command("Move current file to another folder");
+    assert!(session.app().file_move.active());
+    session.type_text("Move destination");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(!session.app().file_move.active());
+    assert_eq!(
+        std::fs::read(session.path("Move source.md")).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        std::fs::read_dir(session.path("Move destination"))
+            .unwrap()
+            .count(),
+        0
+    );
+    move_to(&mut session, "Move destination", egui::Modifiers::NONE);
+    session.wait_for(|app| !app.file_move.active());
+    assert!(!session.path("Move source.md").exists());
+    assert_eq!(
+        std::fs::read(session.path("Move destination/Move source.md")).unwrap(),
+        bytes
+    );
+    assert!(
+        session.app().tabs[session.app().active]
+            .document
+            .path
+            .ends_with("Move destination/Move source.md"),
+        "a aba acompanha o arquivo movido"
+    );
+}
+
+#[test]
+fn mover_cria_pasta_aninhada_e_a_escolha_do_dialogo_de_ligacoes_vale_para_cada_caso() {
+    let mut session = Session::open();
+    let bytes = b"# Move source\r\n\r\nKeep this document. BEFOREMOVE\r\n";
+    write_note(
+        &session,
+        "Move destination/Placeholder.md",
+        "# Placeholder\n",
+    );
+    std::fs::write(session.path("Move destination/Move source.md"), bytes).unwrap();
+    // Ligações com o caminho completo: só elas precisam de reescrita quando o arquivo muda de pasta.
+    let reference = b"[[Move destination/Move source|Alias]]\r\n[Label](Move%20destination/Move%20source.md)\r\n";
+    std::fs::write(session.path("Move reference.md"), reference).unwrap();
+    refresh(&mut session, 6);
+    session.open_note("Move destination/Move source");
+    // Enter simples cria a pasta oferecida; "Só desta vez" reescreve os dois formatos.
+    move_to(&mut session, "Created/Nested", egui::Modifiers::NONE);
+    session.wait_for(|app| app.file_move.active());
+    assert!(session.path("Created/Nested/Move source.md").is_file());
+    assert_eq!(
+        std::fs::read(session.path("Move reference.md")).unwrap(),
+        reference
+    );
+    assert!(session.has_label("Atualizar links"));
+    click_label(&mut session, "Só desta vez");
+    let updated =
+        b"[[Created/Nested/Move source|Alias]]\r\n[Label](Created/Nested/Move%20source.md)\r\n";
+    assert_eq!(
+        std::fs::read(session.path("Move reference.md")).unwrap(),
+        updated
+    );
+    assert_eq!(
+        std::fs::read(session.path("Created/Nested/Move source.md")).unwrap(),
+        bytes
+    );
+    // De volta à raiz com "Não atualizar": a referência fica como está.
+    move_to(&mut session, "/", egui::Modifiers::NONE);
+    session.wait_for(|app| app.file_move.active());
+    assert!(session.path("Move source.md").is_file());
+    click_label(&mut session, "Não atualizar");
+    assert_eq!(
+        std::fs::read(session.path("Move reference.md")).unwrap(),
+        updated
+    );
+    assert_eq!(
+        std::fs::read(session.path("Move source.md")).unwrap(),
+        bytes
+    );
+    assert_eq!(active_file(&session), "Move source.md");
+}
+
+#[test]
+fn sempre_atualizar_persiste_e_o_proximo_movimento_nao_pergunta() {
+    let mut session = Session::open();
+    write_note(
+        &session,
+        "Move destination/Move source.md",
+        "# Move source\n",
+    );
+    std::fs::write(
+        session.path("Move reference.md"),
+        "[[Move destination/Move source|Alias]]\n",
+    )
+    .unwrap();
+    refresh(&mut session, 5);
+    session.open_note("Move destination/Move source");
+    move_to(&mut session, "/", egui::Modifiers::NONE);
+    session.wait_for(|app| app.file_move.active());
+    click_label(&mut session, "Sempre atualizar");
+    assert!(session.app().always_update_links);
+    assert_eq!(saved_state(&session)["always_update_links"], true);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Move reference.md")).unwrap(),
+        "[[Move source|Alias]]\n"
+    );
+    // O destino já tem um "Move source": o arquivo ganha número e a ligação precisa mudar.
+    // Com "sempre atualizar" ligado isso acontece sem diálogo.
+    std::fs::write(
+        session.path("Move destination/Move source.md"),
+        "KEEP_OCCUPIED\n",
+    )
+    .unwrap();
+    refresh(&mut session, 6);
+    move_to(&mut session, "Move destination", egui::Modifiers::NONE);
+    session.settle();
+    session.wait_for(|app| !app.file_move.active());
+    assert!(session.path("Move destination/Move source 1.md").is_file());
+    assert_eq!(
+        std::fs::read_to_string(session.path("Move destination/Move source.md")).unwrap(),
+        "KEEP_OCCUPIED\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Move reference.md")).unwrap(),
+        "[[Move destination/Move source 1|Alias]]\n"
+    );
+}
+
+#[test]
+fn destino_inseguro_fica_como_erro_no_seletor_e_nao_move_nem_escapa_do_cofre() {
+    let mut session = Session::open();
+    std::fs::write(session.path("Move source.md"), "# Move source\n").unwrap();
+    refresh(&mut session, 4);
+    session.open_note("Move source");
+    let before = file_set(&session);
+    move_to(&mut session, "../Move outside", egui::Modifiers::SHIFT);
+    session.settle();
+    assert!(
+        session.app().file_move.active(),
+        "o seletor continua aberto com o erro"
+    );
+    assert_eq!(file_set(&session), before);
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(session.path("Move source.md").is_file());
+}
+
+// ---------------------------------------------------------------------------------------------
+// trash-options
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn lixeira_local_do_cofre_guarda_os_bytes_e_a_lixeira_do_sistema_nunca_e_usada() {
+    // O app só manda para a Lixeira do SISTEMA quando a sincronização está desligada, e este
+    // teste jamais confirma essa ação. Aqui só a lixeira do próprio cofre (`.trash/`).
+    let mut session = Session::open();
+    std::fs::write(
+        session.path("Trash first.md"),
+        "# Contextual deletion\n\nKeep this text.\n",
+    )
+    .unwrap();
+    refresh(&mut session, 4);
+    session
+        .app_mut()
+        .vault
+        .as_mut()
+        .unwrap()
+        .trash_entry_in_vault(Path::new("Trash first.md"))
+        .expect("lixeira do cofre");
+    assert!(!session.path("Trash first.md").exists());
+    let kept: Vec<_> = walkdir::WalkDir::new(session.path(".trash"))
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.file_type().is_file())
+        .collect();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(
+        std::fs::read(kept[0].path()).unwrap(),
+        b"# Contextual deletion\n\nKeep this text.\n"
+    );
+}
+
+#[test]
+fn letra_d_digitada_no_editor_e_texto_comum_e_nunca_apaga_arquivo() {
+    let mut session = Session::open();
+    std::fs::write(
+        session.path("Trash first.md"),
+        "# Contextual deletion\n\nKeep this text.\n",
+    )
+    .unwrap();
+    refresh(&mut session, 4);
+    session.open_note("Trash first");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("d");
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Trash first.md")).unwrap(),
+        "# Contextual deletion\n\nKeep this text.\nd"
+    );
+    // Abrir e cancelar o diálogo de lixeira com a confirmação ligada não grava preferência.
+    session
+        .app_mut()
+        .ask_file(Dialog::TrashNote, PathBuf::from("Trash first.md"));
+    session.settle();
+    assert!(session.app().dialog.is_some());
+    session.app_mut().dialog_skip_trash = true;
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(session.app().dialog.is_none());
+    assert!(
+        session.app().confirm_trash,
+        "cancelar não grava 'não perguntar de novo'"
+    );
+    assert!(session.path("Trash first.md").is_file());
+}
+
+// ---------------------------------------------------------------------------------------------
+// explorer
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn explorador_com_milhares_de_notas_lista_so_as_visiveis_e_abre_a_ultima() {
+    let mut session = Session::open();
+    for number in 0..3000 {
+        write_note(
+            &session,
+            &format!("Explorer bulk/Note{number:05}.md"),
+            &format!("# Note{number:05}\n\nShort content.\n"),
+        );
+    }
+    refresh(&mut session, 3003);
+    assert_eq!(session.app().vault.as_ref().unwrap().notes.len(), 3003);
+    // A lista é virtual: nunca desenha as três mil linhas de uma vez.
+    let drawn = session.harness.query_all_by_label_contains("Note0").count();
+    assert!(drawn < 400, "{drawn} linhas desenhadas");
+    // Abrir a última pelo Abrir rápido a revela no explorador.
+    session.open_note("Note02999");
+    assert_eq!(active_file(&session), "Note02999.md");
+    assert_eq!(session.active_text(), "# Note02999\n\nShort content.\n");
+}
+
+#[test]
+#[ignore = "achado do harness: no Windows renomear/mover pasta com subpastas falha com 'Acesso negado' enquanto o vigia de arquivos está ligado; o app não deve ser alterado nesta fatia"]
+fn renomear_pasta_com_subpastas_com_o_vigia_ligado() {
+    let mut session = Session::open();
+    write_note(
+        &session,
+        "Move source/Nested/Moving child.md",
+        "# Moving child\n",
+    );
+    std::fs::create_dir_all(session.path("Move target")).unwrap();
+    refresh(&mut session, 4);
+    rename_dialog(&mut session, "Move source", "Move target/Renamed");
+    session.wait_for(|app| app.dialog.is_none());
+    assert!(
+        session
+            .path("Move target/Renamed/Nested/Moving child.md")
+            .is_file()
+    );
+    assert!(!session.path("Move source").exists());
+}
