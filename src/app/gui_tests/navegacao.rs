@@ -2152,3 +2152,686 @@ fn renomear_pasta_com_subpastas_com_o_vigia_ligado() {
     );
     assert!(!session.path("Move source").exists());
 }
+
+// ---------------------------------------------------------------------------------------------
+// palettes
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn as_quatro_paletas_aplicam_cores_gravam_a_escolha_e_valem_para_o_app_inteiro() {
+    use crate::theme::palette::{self, Palette};
+    let mut session = Session::open();
+    session.open_note("Second");
+    let expected = [
+        (Palette::Teal, "teal", (23, 27, 29), (247, 246, 242)),
+        (
+            Palette::LoveSpace,
+            "love-space",
+            (29, 23, 27),
+            (251, 245, 245),
+        ),
+        (
+            Palette::ElpisGold,
+            "elpis-gold",
+            (28, 27, 23),
+            (251, 248, 239),
+        ),
+        (
+            Palette::Signature,
+            "signature",
+            (31, 31, 40),
+            (252, 245, 242),
+        ),
+    ];
+    for (selected, name, dark_rgb, light_rgb) in expected {
+        for (dark, rgb) in [(true, dark_rgb), (false, light_rgb)] {
+            let color = selected.background(dark);
+            assert_eq!((color.r(), color.g(), color.b()), rgb, "{name} dark={dark}");
+        }
+        // O mesmo que a página Aparência faz ao trocar de cartão.
+        let ctx = session.app().ctx.clone();
+        palette::select(&ctx, selected);
+        session.app_mut().palette = selected;
+        palette::remember(selected);
+        session.app_mut().write_session().expect("sessão gravada");
+        session.settle();
+        assert!(palette::current(&ctx) == selected);
+        assert_eq!(saved_state(&session)["palette"], name);
+        assert!(
+            palette::app_wide() == selected,
+            "vale para qualquer cofre aberto depois"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+    // Volta ao padrão para não vazar a escolha para os outros testes do processo.
+    let ctx = session.app().ctx.clone();
+    palette::select(&ctx, Palette::Teal);
+    palette::remember(Palette::Teal);
+    assert!(palette::app_wide() == Palette::Teal);
+}
+
+#[test]
+fn a_pagina_de_configuracoes_abre_e_fecha_sem_tocar_na_nota() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session.key(CTRL, egui::Key::Comma);
+    assert!(session.app().dialog == Some(Dialog::Settings));
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert!(session.app().dialog.is_none());
+    session.command("Open settings");
+    assert!(session.app().dialog == Some(Dialog::Settings));
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    assert_eq!(session.active_text(), SECOND);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// settings
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn preferencias_do_editor_definem_o_modo_das_abas_novas_e_sao_gravadas() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session.command("Reading view");
+    {
+        let app = session.app_mut();
+        app.editor_preferences.reading_view = true;
+        app.editor_preferences.source_mode = true;
+        app.editor_preferences.inline_title = false;
+        app.editor_preferences.readable_line_length = false;
+        app.settings_saved();
+        app.write_session().expect("sessão gravada");
+    }
+    let preferences = &saved_state(&session)["editor_preferences"];
+    assert_eq!(preferences["reading_view"], true);
+    assert_eq!(preferences["source_mode"], true);
+    assert_eq!(preferences["inline_title"], false);
+    assert_eq!(preferences["readable_line_length"], false);
+    // Aba nova abre em Leitura; Ctrl+E volta ao modo de edição escolhido (Source).
+    open_in_new_tab(&mut session, "Home");
+    assert_eq!(active_view(&session), View::Read);
+    session.key(CTRL, egui::Key::E);
+    assert_eq!(active_view(&session), View::Source);
+    session.app_mut().editor_preferences.show_mode = false;
+    session.app_mut().write_session().unwrap();
+    assert_eq!(
+        saved_state(&session)["editor_preferences"]["show_mode"],
+        false
+    );
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+}
+
+#[test]
+fn fonte_do_documento_para_nos_limites_10_e_30_e_a_gravacao_que_falha_desfaz() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    session.app_mut().set_document_font_size(29);
+    session.command("Increase font size");
+    assert_eq!(session.app().document_font_size, 30);
+    session.command("Increase font size");
+    assert_eq!(session.app().document_font_size, 30, "30 é o teto");
+    assert_eq!(saved_state(&session)["document_font_size"], 30);
+    session.app_mut().set_document_font_size(11);
+    session.command("Decrease font size");
+    assert_eq!(session.app().document_font_size, 10);
+    session.command("Decrease font size");
+    assert_eq!(session.app().document_font_size, 10, "10 é o piso");
+    // Sem poder gravar o estado, o tamanho volta ao anterior e o erro aparece.
+    let root = session.app().vault.as_ref().unwrap().root.clone();
+    let state = rustidian::paths::state_file(&root, "", "json").expect("estado");
+    let held = state.with_extension("held");
+    std::fs::rename(&state, &held).unwrap();
+    std::fs::create_dir(&state).unwrap();
+    session.command("Increase font size");
+    assert_eq!(session.app().document_font_size, 10);
+    assert!(
+        session
+            .app()
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("As configurações não foram salvas"))
+    );
+    std::fs::remove_dir(&state).unwrap();
+    std::fs::rename(&held, &state).unwrap();
+    session.command("Increase font size");
+    assert_eq!(session.app().document_font_size, 11);
+    assert_eq!(saved_state(&session)["document_font_size"], 11);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+    session.app_mut().set_document_font_size(18);
+}
+
+#[test]
+fn aparencia_clara_e_escura_alternam_e_ficam_gravadas() {
+    let mut session = Session::open();
+    session.open_note("Second");
+    let before = session.app().dark;
+    session.command("Switch appearance");
+    assert_eq!(session.app().dark, !before);
+    session.app_mut().write_session().unwrap();
+    assert_eq!(saved_state(&session)["dark"], !before);
+    session.command("Switch appearance");
+    assert_eq!(session.app().dark, before);
+    // O app guarda a escolha para todos os cofres; devolve o padrão ao fim.
+    crate::theme::palette::remember_appearance(crate::theme::Appearance::System);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Second.md")).unwrap(),
+        SECOND
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// recovery
+// ---------------------------------------------------------------------------------------------
+
+fn history_versions(session: &Session, path: &str) -> Vec<rustidian::recovery::Version> {
+    session
+        .app()
+        .recovery_history
+        .as_ref()
+        .and_then(|history| history.versions(Path::new(path)).ok())
+        .unwrap_or_default()
+}
+
+fn wait_versions(session: &mut Session, path: &str, count: usize) {
+    for _ in 0..800 {
+        session.harness.step();
+        if history_versions(session, path).len() >= count {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("o histórico de {path} não chegou a {count} versões");
+}
+
+const RECOVERY_ORIGINAL: &[u8] = "# Original\r\n\r\nسلام\r\n- [x] Keep this\r\n".as_bytes();
+
+fn recovery_session() -> Session {
+    let mut session = Session::open();
+    std::fs::write(session.path("Recovery target.md"), RECOVERY_ORIGINAL).unwrap();
+    refresh(&mut session, 4);
+    session.app_mut().recovery_config.interval_minutes = 0.0;
+    session.open_note("Recovery target");
+    session.command("Source editing");
+    wait_versions(&mut session, "Recovery target.md", 1);
+    session
+}
+
+#[test]
+fn historico_local_guarda_a_versao_inicial_e_cada_salvamento_com_os_bytes_exatos() {
+    let mut session = recovery_session();
+    let history = session.app().recovery_history.clone().unwrap();
+    let first = history_versions(&session, "Recovery target.md")
+        .last()
+        .unwrap()
+        .id;
+    assert_eq!(
+        history
+            .content(Path::new("Recovery target.md"), first)
+            .unwrap()
+            .as_bytes(),
+        RECOVERY_ORIGINAL,
+        "CRLF e persa preservados"
+    );
+    // O intervalo da configuração entra na sessão gravada.
+    session.app_mut().write_session().unwrap();
+    assert_eq!(
+        saved_state(&session)["recovery_config"]["intervalMinutes"],
+        0.0
+    );
+    // Uma versão nova depois de salvar um texto diferente.
+    session.key(CTRL, egui::Key::A);
+    session.type_text("# Changed\n\nsalvo\n");
+    session.key(CTRL, egui::Key::S);
+    wait_versions(&mut session, "Recovery target.md", 2);
+    let versions = history_versions(&session, "Recovery target.md");
+    assert_eq!(
+        history
+            .content(Path::new("Recovery target.md"), versions[0].id)
+            .unwrap(),
+        "# Changed\n\nsalvo\n"
+    );
+    // O diálogo do histórico abre pelo comando e mostra Restaurar e Copiar.
+    session.command("File recovery: Open local history");
+    session.wait_for(|app| app.recovery_manager.active());
+    session.wait_for(|app| app.dialog.is_none());
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+}
+
+fn restore_request(session: &Session, version: u64) -> crate::recovery_ui::Restore {
+    crate::recovery_ui::Restore {
+        expected: session.app().tabs[session.app().active].document.clone(),
+        version,
+    }
+}
+
+#[test]
+fn restaurar_uma_versao_devolve_os_bytes_exatos_e_guarda_a_versao_deslocada() {
+    let mut session = recovery_session();
+    let first = history_versions(&session, "Recovery target.md")
+        .last()
+        .unwrap()
+        .id;
+    session.key(CTRL, egui::Key::A);
+    session.type_text("# Changed\n\nsalvo\n");
+    session.key(CTRL, egui::Key::S);
+    wait_versions(&mut session, "Recovery target.md", 2);
+    let request = restore_request(&session, first);
+    session.app_mut().restore_snapshot(request);
+    session.settle();
+    assert_eq!(
+        std::fs::read(session.path("Recovery target.md")).unwrap(),
+        RECOVERY_ORIGINAL
+    );
+    assert_eq!(session.active_text().as_bytes(), RECOVERY_ORIGINAL);
+    // A versão que foi trocada continua no histórico.
+    wait_versions(&mut session, "Recovery target.md", 3);
+    let history = session.app().recovery_history.clone().unwrap();
+    let all = history_versions(&session, "Recovery target.md");
+    assert!(all.iter().any(|version| {
+        history
+            .content(Path::new("Recovery target.md"), version.id)
+            .is_ok_and(|text| text == "# Changed\n\nsalvo\n")
+    }));
+}
+
+#[test]
+fn nota_alterada_fora_do_dialogo_recusa_restaurar_e_preserva_a_substituta() {
+    let mut session = recovery_session();
+    let first = history_versions(&session, "Recovery target.md")
+        .last()
+        .unwrap()
+        .id;
+    let request = restore_request(&session, first);
+    std::fs::write(session.path("Recovery target.md"), b"# EXTERNAL_RECOVERY\n").unwrap();
+    session.app_mut().restore_snapshot(request);
+    session.settle();
+    assert!(
+        session.app().error.is_some(),
+        "a recusa aparece para a pessoa"
+    );
+    assert_eq!(
+        std::fs::read(session.path("Recovery target.md")).unwrap(),
+        b"# EXTERNAL_RECOVERY\n"
+    );
+}
+
+#[test]
+fn restaurar_com_edicoes_nao_salvas_pergunta_cancelar_mantem_e_salvar_guarda_no_historico() {
+    let mut session = recovery_session();
+    // Sem salvar automático, para o texto ficar mesmo só na memória.
+    session.app_mut().autosave_enabled = false;
+    let first = history_versions(&session, "Recovery target.md")
+        .last()
+        .unwrap()
+        .id;
+    session.key(CTRL, egui::Key::A);
+    session.type_text("UNSAVED_RECOVERY\n");
+    assert_eq!(session.active_text(), "UNSAVED_RECOVERY\n");
+    let request = restore_request(&session, first);
+    session.app_mut().pending = Some(Pending::RestoreSnapshot(Box::new(request)));
+    session.settle();
+    click_label(&mut session, "Cancelar");
+    assert!(!has_pending(&session));
+    assert_eq!(
+        session.active_text(),
+        "UNSAVED_RECOVERY\n",
+        "o buffer não salvo continua"
+    );
+    assert_eq!(
+        std::fs::read(session.path("Recovery target.md")).unwrap(),
+        RECOVERY_ORIGINAL
+    );
+    // "Salvar e continuar" grava o texto antes de restaurar: ele fica no histórico.
+    let request = restore_request(&session, first);
+    session.app_mut().pending = Some(Pending::RestoreSnapshot(Box::new(request)));
+    session.settle();
+    click_label(&mut session, "Salvar e continuar");
+    session.wait_for(|app| app.pending.is_none());
+    assert_eq!(
+        std::fs::read(session.path("Recovery target.md")).unwrap(),
+        RECOVERY_ORIGINAL
+    );
+    wait_versions(&mut session, "Recovery target.md", 3);
+    let history = session.app().recovery_history.clone().unwrap();
+    assert!(
+        history_versions(&session, "Recovery target.md")
+            .iter()
+            .any(|version| history
+                .content(Path::new("Recovery target.md"), version.id)
+                .is_ok_and(|text| text == "UNSAVED_RECOVERY\n"))
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// backlink-context
+// ---------------------------------------------------------------------------------------------
+
+struct BacklinkFixture {
+    session: Session,
+    source_text: String,
+    expected: Vec<(String, usize, String)>,
+}
+
+fn backlink_fixture() -> BacklinkFixture {
+    let mut session = Session::open();
+    let alias = "[[Backlink Target#Section|alias]]";
+    let same = "[[Backlink Target]]";
+    let markdown = "[markdown alias](../Backlink%20Target.md#Section)";
+    let embed = "[[Backlink Target#^id]]";
+    let image = "![note image](../Backlink%20Target.md)";
+    write_note(
+        &session,
+        "Backlink Target.md",
+        "# Backlink Target\n\n## Section\n\nTARGET BODY ^id\n\n[[Backlink Target]]\n",
+    );
+    let source_text = format!(
+        "---\ntitle: \"Café 👋\"\n---\n# Context\n\n{}CAFÉ 👋 BEFORE {alias} CAFÉ AFTER\n\nSAME ONE {same} MIDDLE {same} SAME END\n\n{markdown}\n\n!{embed}\n\n{image}\n\n```md\n[[Backlink Target]]\n[code](../Backlink%20Target.md)\n```\n\n`[[Backlink Target]]` and ` [inline](../Backlink%20Target.md) `\n\n\\[[Backlink Target]]\n\n$[[Backlink Target]]$\n\n$[math](../Backlink%20Target.md)$\n",
+        "Padding before actual reference.\n".repeat(82)
+    );
+    write_note(&session, "Backlink Sources/Context.md", &source_text);
+    let other_link = "[[Backlink Target|other alias]]";
+    let other_text = format!(
+        "# Other\n\n{}{other_link} DIFFERENT CONTEXT\n",
+        "長い café prefix ".repeat(10)
+    );
+    write_note(&session, "Backlink Other/Context.md", &other_text);
+    let windows_link = "[reference label][target]";
+    let windows_text = format!(
+        "# Windows\r\n\r\nUnicode café 👋\r\nCRLF BEFORE {windows_link} CRLF AFTER\r\n\r\n[target]: ../Backlink%20Target.md#Section\r\n"
+    );
+    std::fs::create_dir_all(session.path("Backlink Sources")).unwrap();
+    std::fs::write(
+        session.path("Backlink Sources/Windows.md"),
+        windows_text.as_bytes(),
+    )
+    .unwrap();
+    refresh(&mut session, 7);
+    let mut expected = Vec::new();
+    for (raw, occurrence) in [
+        (alias, 0),
+        (same, 0),
+        (same, 1),
+        (markdown, 0),
+        (embed, 0),
+        (image, 0),
+    ] {
+        let position = source_text
+            .match_indices(raw)
+            .map(|(index, _)| index)
+            .nth(occurrence)
+            .unwrap();
+        expected.push((
+            "Backlink Sources/Context.md".to_owned(),
+            position,
+            raw.to_owned(),
+        ));
+    }
+    expected.push((
+        "Backlink Other/Context.md".to_owned(),
+        other_text.find(other_link).unwrap(),
+        other_link.to_owned(),
+    ));
+    expected.push((
+        "Backlink Sources/Windows.md".to_owned(),
+        windows_text.find(windows_link).unwrap(),
+        windows_link.to_owned(),
+    ));
+    BacklinkFixture {
+        session,
+        source_text,
+        expected,
+    }
+}
+
+fn mention_key(mention: &rustidian::vault::LinkedMention) -> (String, usize, String) {
+    (
+        mention.path.to_string_lossy().replace('\\', "/"),
+        mention.range.start,
+        mention.link.clone(),
+    )
+}
+
+#[test]
+fn mencoes_de_entrada_trazem_o_intervalo_exato_em_bytes_e_ignoram_codigo_escapes_e_matematica() {
+    let fixture = backlink_fixture();
+    let vault = fixture.session.app().vault.as_ref().unwrap();
+    let mut mentions: Vec<_> = vault
+        .backlink_mentions(Path::new("Backlink Target.md"), &[])
+        .iter()
+        .map(mention_key)
+        .collect();
+    mentions.retain(|(path, _, _)| !path.ends_with("Backlink Target.md"));
+    let mut expected = fixture.expected.clone();
+    expected.sort();
+    mentions.sort();
+    assert_eq!(mentions.len(), 8, "só as oito menções reais: {mentions:?}");
+    assert_eq!(mentions, expected);
+    // O intervalo cobre exatamente os bytes da ligação (frontmatter, Unicode e CRLF inclusive).
+    for (path, start, raw) in &expected {
+        let text = std::fs::read_to_string(fixture.session.path(path)).unwrap();
+        assert_eq!(&text[*start..*start + raw.len()], raw, "{path}");
+    }
+}
+
+#[test]
+fn abrir_uma_mencao_seleciona_a_ocorrencia_exata_e_a_aba_fixada_do_alvo_e_poupada() {
+    let mut fixture = backlink_fixture();
+    let session = &mut fixture.session;
+    session.open_note("Backlink Target");
+    session.command("Toggle pin");
+    let target_id = session.app().tabs[0].id();
+    let mentions = session
+        .app()
+        .vault
+        .as_ref()
+        .unwrap()
+        .backlink_mentions(Path::new("Backlink Target.md"), &[]);
+    let mention = mentions
+        .iter()
+        .find(|mention| mention.link == "[[Backlink Target#Section|alias]]")
+        .cloned()
+        .expect("menção com apelido");
+    session.app_mut().open_linked_mention(mention.clone());
+    session.settle();
+    // A fixada do alvo fica; a fonte abre em outra aba.
+    assert_eq!(tab_files(session), ["Backlink Target.md", "Context.md"]);
+    assert_eq!(session.app().tabs[0].id(), target_id);
+    let text = session.active_text();
+    assert_eq!(
+        &text[mention.range.clone()],
+        "[[Backlink Target#Section|alias]]"
+    );
+    assert_eq!(text, fixture.source_text);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Backlink Sources/Context.md")).unwrap(),
+        fixture.source_text,
+        "abrir uma menção não altera a nota"
+    );
+}
+
+#[test]
+fn mencao_de_uma_nota_com_rascunho_usa_o_buffer_aberto_sem_gravar() {
+    let mut fixture = backlink_fixture();
+    let session = &mut fixture.session;
+    write_note(
+        session,
+        "Backlink Sources/Draft.md",
+        "# Draft\n\nORIGINAL DRAFT TEXT\n",
+    );
+    refresh(session, 8);
+    session.app_mut().autosave_enabled = false;
+    session.open_note("Backlink Sources/Draft");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("\nNEW BEFORE [[Backlink Target]] NEW AFTER");
+    assert_eq!(
+        std::fs::read_to_string(session.path("Backlink Sources/Draft.md")).unwrap(),
+        "# Draft\n\nORIGINAL DRAFT TEXT\n"
+    );
+    let buffer = session.active_text();
+    let open = [(Path::new("Backlink Sources/Draft.md"), buffer.as_str())];
+    let mentions = session
+        .app()
+        .vault
+        .as_ref()
+        .unwrap()
+        .backlink_mentions(Path::new("Backlink Target.md"), &open);
+    assert_eq!(
+        mentions
+            .iter()
+            .filter(|mention| mention.path.ends_with("Draft.md"))
+            .count(),
+        1,
+        "a menção só existe no buffer"
+    );
+    assert_eq!(mentions.len(), 9, "oito reais mais a do rascunho");
+}
+
+// ---------------------------------------------------------------------------------------------
+// link-fragments
+// ---------------------------------------------------------------------------------------------
+
+fn fragment_session() -> Session {
+    let mut session = Session::open();
+    let padding = "Top padding paragraph.\n\n".repeat(55);
+    let original = format!(
+        "---\naliases: [FragmentAlias]\nfake: hidden ^properties\n---\n# Fragment Target\n\n{padding}## Alpha **section**\n\nAlpha content.\n\n## Beta café\n\nParagraph chosen ^block-one\n\n- A list block ^list-two\n\n`literal ^inline-fake`\n\nMiddle ^middle-fake tail\n\n```md\n# Fake code heading\nCode ^code-fake\n```\n"
+    );
+    write_note(&session, "Fragment Target.md", &original);
+    write_note(&session, "Fragment Source.md", "");
+    refresh(&mut session, 5);
+    session
+}
+
+#[test]
+fn ancora_de_titulo_e_de_bloco_existem_e_inexistente_vira_erro_visivel() {
+    let mut session = fragment_session();
+    session.open_note("Fragment Source");
+    for target in [
+        "Fragment Target#Alpha section",
+        "Fragment Target#Beta café",
+        "Fragment Target#^block-one",
+        "Fragment Target#^list-two",
+    ] {
+        session.app_mut().follow_link(target);
+        session.settle();
+        assert_eq!(active_file(&session), "Fragment Target.md", "{target}");
+        assert!(
+            session.app().error.is_none(),
+            "{target}: {:?}",
+            session.app().error
+        );
+        session.key(egui::Modifiers::ALT, egui::Key::ArrowLeft);
+        assert_eq!(active_file(&session), "Fragment Source.md");
+    }
+    // Marcadores no código, no meio da linha e nas propriedades não são âncoras.
+    for target in [
+        "Fragment Target#^inline-fake",
+        "Fragment Target#^middle-fake",
+        "Fragment Target#^code-fake",
+        "Fragment Target#missing",
+    ] {
+        session.app_mut().error = None;
+        session.app_mut().follow_link(target);
+        session.settle();
+        assert!(
+            session.app().error.is_some(),
+            "{target} não deveria existir"
+        );
+        session.key(egui::Modifiers::ALT, egui::Key::ArrowLeft);
+    }
+}
+
+#[test]
+fn completar_ligacao_com_titulo_oferece_so_os_titulos_reais_e_enter_insere() {
+    let mut session = fragment_session();
+    session.open_note("Fragment Source");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("[[Fragment Target#");
+    session.settle();
+    assert!(session.has_label("Alpha section"), "candidato de título");
+    assert!(session.has_label("Beta café"));
+    assert!(
+        !session.has_label("Fake code heading"),
+        "título dentro de código não entra"
+    );
+    session.key(egui::Modifiers::NONE, egui::Key::ArrowDown);
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.key(CTRL, egui::Key::S);
+    let saved = std::fs::read_to_string(session.path("Fragment Source.md")).unwrap();
+    assert!(
+        saved.starts_with("[[Fragment Target#Alpha section]]"),
+        "{saved:?}"
+    );
+}
+
+#[test]
+fn completar_bloco_ignora_maiusculas_e_tab_insere_sem_candidato_escape_cancela() {
+    let mut session = fragment_session();
+    session.open_note("Fragment Source");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("[[Fragment Target#^BLoCK-oNe");
+    session.settle();
+    assert!(session.has_label("block-one"));
+    session.key(egui::Modifiers::NONE, egui::Key::Tab);
+    session.key(CTRL, egui::Key::S);
+    let saved = std::fs::read_to_string(session.path("Fragment Source.md")).unwrap();
+    assert!(
+        saved.contains("[[Fragment Target#^block-one]]"),
+        "{saved:?}"
+    );
+    // Sem candidato nenhum, Escape deixa o texto digitado como está.
+    session.key(CTRL, egui::Key::A);
+    session.type_text("[[Fragment Target#missing");
+    session.settle();
+    assert!(!session.has_label("Fragment Target#missing"));
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    session.key(CTRL, egui::Key::S);
+    let saved = std::fs::read_to_string(session.path("Fragment Source.md")).unwrap();
+    assert!(saved.contains("[[Fragment Target#missing"), "{saved:?}");
+    assert!(!saved.contains('^'), "{saved:?}");
+}
+
+#[test]
+fn completar_apelido_e_ligacao_so_de_arquivo() {
+    let mut session = fragment_session();
+    session.open_note("Fragment Source");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("[[FragmentAlias#BEt");
+    session.settle();
+    assert!(session.has_label("Beta café"));
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.key(CTRL, egui::Key::S);
+    let saved = std::fs::read_to_string(session.path("Fragment Source.md")).unwrap();
+    assert!(saved.contains("[[Fragment Target#Beta café]]"), "{saved:?}");
+    // Ligação a arquivo sem fragmento.
+    session.key(CTRL, egui::Key::A);
+    session.type_text("[[Fragment Tar");
+    session.settle();
+    assert!(session.has_label("Fragment Target"));
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    session.key(CTRL, egui::Key::S);
+    let saved = std::fs::read_to_string(session.path("Fragment Source.md")).unwrap();
+    assert!(saved.contains("[[Fragment Target]]"), "{saved:?}");
+    assert!(
+        std::fs::read_to_string(session.path("Fragment Target.md"))
+            .unwrap()
+            .contains("^block-one")
+    );
+}
