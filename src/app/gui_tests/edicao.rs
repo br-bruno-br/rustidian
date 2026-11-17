@@ -1314,3 +1314,116 @@ fn tabela_larga_de_vinte_colunas_edita_a_ultima_celula() {
         "última coluna",
     );
 }
+
+#[test]
+fn tabela_na_leitura_mostra_as_celulas_e_abre_link_com_apelido() {
+    let source = "## Table section\n\n| Item | State | Count |\n| :--- | :---: | ---: |\n| **Bold** | *Ready* | 42 |\n| [[Home\\|Home note]] | `let x = 1;` | π |\n| Empty | | 0 |\n\n## After section\n\n~~~rust\nfn main() {\n    let answer: u32 = 42;\n}\n~~~\n";
+    let mut session = Session::open_with(&[("Leitura.md", source.as_bytes())]);
+    session.open_note("Leitura");
+    session.command("Reading view");
+    session.settle();
+    assert!(session.has_value("Home note"));
+    assert!(session.has_value("Empty"), "a leitura mostra as células vazias e cheias");
+    assert_eq!(
+        std::fs::read(session.path("Leitura.md")).unwrap(),
+        source.as_bytes()
+    );
+    // O link com apelido abre a nota existente, sem criar um arquivo com a barra escapada.
+    session.click_value("Home note");
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with("Home.md"))
+    });
+    assert!(!session.path("Home\\.md").exists());
+    assert_eq!(
+        std::fs::read(session.path("Leitura.md")).unwrap(),
+        source.as_bytes()
+    );
+}
+
+// ---------------------------------------------------------------- folding
+
+impl Session {
+    fn click_label_nth(&mut self, label: &str, nth: usize) {
+        {
+            let nodes: Vec<_> = self.harness.query_all_by_label(label).collect();
+            nodes
+                .get(nth)
+                .unwrap_or_else(|| panic!("não há o {nth}º {label:?}\n{}", self.tree_summary()))
+                .click();
+        }
+        self.settle();
+    }
+}
+
+
+impl Session {
+    /// Quantas seções estão dobradas: cada título dobrado oferece "Expandir seção". (Os títulos
+    /// escondidos dentro de uma seção dobrada não desenham botão.)
+    fn folded_sections(&self) -> usize {
+        self.harness.query_all_by_label("Expandir seção").count()
+    }
+
+    fn foldable_sections(&self) -> usize {
+        self.harness.query_all_by_label("Recolher seção").count()
+    }
+}
+
+const FOLDING: &str = "# Folding GUI\n\nBefore\n\n## Parent\n\nPARENT_BODY\n\n### Child\n\nCHILD_BODY\n\n## Sibling\n\nSIBLING_BODY\n\n[[#Child]]";
+
+#[test]
+fn dobrar_titulos_na_edicao_guarda_o_estado_e_nunca_grava() {
+    for mode in MODES {
+        let mut session = Session::open_with(&[("Dobras.md", FOLDING.as_bytes())]);
+        session.open_note("Dobras");
+        session.command(mode);
+        session.settle();
+        // Os botões seguem a ordem dos títulos: 0 raiz, 1 Parent, 2 Child, 3 Sibling.
+        assert_eq!(session.foldable_sections(), 4, "{mode}");
+        assert_eq!(session.folded_sections(), 0, "{mode}");
+        session.click_label_nth("Recolher seção", 2);
+        assert_eq!(session.folded_sections(), 1, "{mode}: Child dobrado");
+        session.click_label_nth("Recolher seção", 1);
+        // O título filho some com o pai: só o Parent e a raiz seguem com botão de dobrar...
+        assert_eq!(session.folded_sections(), 1, "{mode}: só o Parent aparece dobrado");
+        assert_eq!(
+            session.foldable_sections(),
+            2,
+            "{mode}: a raiz e o irmão continuam visíveis"
+        );
+        // ...e desdobrar o pai mantém o filho dobrado.
+        session.click_label_nth("Expandir seção", 0);
+        assert_eq!(session.folded_sections(), 1, "{mode}: o filho segue dobrado");
+        assert_eq!(session.foldable_sections(), 3, "{mode}");
+        // Seguir o link interno abre os ancestrais e o alvo.
+        session.key(CTRL, egui::Key::End);
+        session.key(CTRL, egui::Key::Enter);
+        assert_eq!(session.folded_sections(), 0, "{mode}: o link abriu o alvo");
+        assert_eq!(
+            std::fs::read(session.path("Dobras.md")).unwrap(),
+            FOLDING.as_bytes(),
+            "{mode}: dobrar nunca grava"
+        );
+    }
+}
+
+#[test]
+fn editar_com_uma_secao_dobrada_preserva_o_fonte_escondido() {
+    let mut session = Session::open_with(&[("Dobras.md", FOLDING.as_bytes())]);
+    session.open_note("Dobras");
+    session.command("Source editing");
+    session.settle();
+    session.click_label_nth("Recolher seção", 1);
+    assert_eq!(session.folded_sections(), 1);
+    session.key(CTRL, egui::Key::End);
+    session.type_text("\nVISIBLE_EDIT");
+    session.assert_saved(
+        "Dobras.md",
+        format!("{FOLDING}\nVISIBLE_EDIT").as_bytes(),
+        "o texto escondido fica nos bytes",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Dobras.md", FOLDING.as_bytes(), "desfazer");
+    assert_eq!(session.folded_sections(), 1, "a dobra sobrevive à edição");
+}
