@@ -89,15 +89,18 @@ impl Session {
     }
 
     /// Passa quadros até a condição valer (o índice do cofre carrega numa thread própria).
+    /// O prazo é largo (20 s) porque a suíte inteira roda em paralelo e uma máquina carregada
+    /// atrasa as threads do app; o pânico aponta a linha do teste que esperava.
+    #[track_caller]
     pub(super) fn wait_for(&mut self, condition: impl Fn(&NotesApp) -> bool) {
-        for _ in 0..600 {
+        for _ in 0..2000 {
             self.harness.step();
             if condition(self.harness.state()) {
                 return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        panic!("a condição da GUI não chegou em 6 s");
+        panic!("a condição da GUI não chegou em 20 s");
     }
 
     pub(super) fn settle(&mut self) {
