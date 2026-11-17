@@ -804,23 +804,6 @@ impl Session {
         self.settle();
     }
 
-    fn right_click_value(&mut self, value: &str) {
-        {
-            let node = self
-                .harness
-                .query_all_by_value(value)
-                .next()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "sem controle com o valor {value:?}\n{}",
-                        self.tree_summary()
-                    )
-                });
-            node.click_secondary();
-        }
-        self.settle();
-    }
-
     fn ctrl_click_value(&mut self, value: &str) {
         {
             let node = self
@@ -1789,4 +1772,360 @@ fn nota_diaria_com_modelo_ausente_avisa_sem_criar_pastas_nem_trocar_de_nota() {
         std::fs::read(session.path("Home.md")).unwrap(),
         HOME.as_bytes()
     );
+}
+
+// ---------------------------------------------------------------- external-rename
+
+impl Session {
+    fn wait_for_active_path(&mut self, ends_with: &str) {
+        let wanted = ends_with.to_owned();
+        self.wait_for(|app| {
+            app.tabs
+                .get(app.active)
+                .is_some_and(|tab| tab.document.path.ends_with(&wanted))
+        });
+    }
+
+    fn wait_for_active_text(&mut self, expected: &str) {
+        let expected = expected.to_owned();
+        self.wait_for(|app| {
+            app.tabs
+                .get(app.active)
+                .is_some_and(|tab| tab.document.text == expected)
+        });
+    }
+}
+
+#[test]
+fn renomear_ou_mover_fora_do_app_reaponta_a_aba_e_atualiza_o_texto() {
+    let original = "# External original\n\nEXTERNAL_RENAME_BODY\n";
+    let sibling = "# Sibling\n\nKEEP_SIBLING\n";
+    let mut session = Session::open_with(&[
+        (
+            "Outside moves/Inner/External original.md",
+            original.as_bytes(),
+        ),
+        (
+            "Outside moves/Inner/External sibling.md",
+            sibling.as_bytes(),
+        ),
+    ]);
+    session.open_note("External original");
+    session.command("Source editing");
+    session.settle();
+    let folder = session.path("Outside moves/Inner");
+    std::fs::rename(
+        folder.join("External original.md"),
+        folder.join("External renamed.md"),
+    )
+    .unwrap();
+    session.wait_for_active_path("External renamed.md");
+    assert_eq!(session.active_text(), original);
+    assert_eq!(
+        session.active_tab_count(),
+        1,
+        "a aba foi reapontada, não duplicada"
+    );
+    assert!(!folder.join("External original.md").exists());
+
+    // Mover a pasta inteira também reaponta a aba; o irmão fica intacto. No Windows o
+    // observador de pastas segura a pasta aberta e o sistema recusa o rename externo
+    // ("Acesso negado"), então esse trecho só roda onde o rename é possível.
+    let moved = if cfg!(windows) {
+        folder.join("External renamed.md")
+    } else {
+        std::fs::rename(session.path("Outside moves"), session.path("Moved outside")).unwrap();
+        session.wait_for(|app| {
+            app.tabs.get(app.active).is_some_and(|tab| {
+                tab.document
+                    .path
+                    .components()
+                    .any(|part| part.as_os_str() == "Moved outside")
+            })
+        });
+        let moved = session.path("Moved outside/Inner/External renamed.md");
+        assert_eq!(std::fs::read_to_string(&moved).unwrap(), original);
+        assert_eq!(
+            std::fs::read_to_string(session.path("Moved outside/Inner/External sibling.md"))
+                .unwrap(),
+            sibling
+        );
+        moved
+    };
+    // Depois do rename, edições externas continuam chegando.
+    let updated = format!("{original}EXTERNAL_UPDATE\n");
+    std::fs::write(&moved, &updated).unwrap();
+    session.wait_for_active_text(&updated);
+}
+
+#[test]
+fn renomear_fora_com_rascunho_sujo_mantem_o_rascunho_e_salva_so_no_caminho_novo() {
+    let original = "# External original\n\nEXTERNAL_RENAME_BODY\n";
+    let mut session = Session::open_with(&[("Dirty source.md", original.as_bytes())]);
+    session.open_note("Dirty source");
+    session.command("Source editing");
+    session.app_mut().autosave_enabled = false;
+    session.key(CTRL, egui::Key::End);
+    session.type_text("LOCAL_DIRTY");
+    assert_eq!(
+        std::fs::read_to_string(session.path("Dirty source.md")).unwrap(),
+        original,
+        "sem autosave nada foi gravado"
+    );
+    std::fs::rename(
+        session.path("Dirty source.md"),
+        session.path("Dirty renamed.md"),
+    )
+    .unwrap();
+    session.wait_for_active_path("Dirty renamed.md");
+    let dirty = format!("{original}LOCAL_DIRTY");
+    assert_eq!(
+        session.active_text(),
+        dirty,
+        "o rascunho sobreviveu à troca de nome"
+    );
+    session.key(CTRL, egui::Key::S);
+    assert_eq!(
+        std::fs::read_to_string(session.path("Dirty renamed.md")).unwrap(),
+        dirty
+    );
+    assert!(
+        !session.path("Dirty source.md").exists(),
+        "o nome antigo não renasce"
+    );
+    // O histórico de desfazer acompanhou a nota.
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved(
+        "Dirty renamed.md",
+        original.as_bytes(),
+        "desfazer no caminho novo",
+    );
+}
+
+#[test]
+fn com_autosave_a_nota_suja_segue_dois_renomes_seguidos_e_grava_so_no_destino_final() {
+    let original = "# Autosave chain\n\nBODY\n";
+    let mut session = Session::open_with(&[("Chain a.md", original.as_bytes())]);
+    session.open_note("Chain a");
+    session.command("Source editing");
+    session.key(CTRL, egui::Key::End);
+    session.type_text("AUTOSAVED_MOVE");
+    std::fs::rename(session.path("Chain a.md"), session.path("Chain b.md")).unwrap();
+    std::fs::rename(session.path("Chain b.md"), session.path("Chain c.md")).unwrap();
+    session.wait_for_active_path("Chain c.md");
+    session.wait_for_file("Chain c.md", format!("{original}AUTOSAVED_MOVE").as_bytes());
+    assert!(!session.path("Chain a.md").exists());
+    assert!(!session.path("Chain b.md").exists());
+}
+
+// ---------------------------------------------------------------- block-completion
+
+const BLOCKS: &str = "# Blocks\n\nUnique paragraph café chosen.\n\n- List chosen first\n- List chosen second\n\n> Quote chosen line\n> more quote\n\n> [!note] Callout chosen\n> callout body\n\n| Table chosen | Value |\n| --- | --- |\n| cell | value |\n\n```rust\n// Code chosen ^literal-id\nlet x = 1;\n```\n\nExisting paragraph ^keep-id\n\n- Standalone chosen first\n- Standalone chosen second\n\n^standalone-list\n";
+
+/// Os IDs que o app gera (`^r` e hexadecimal), no fim de linha.
+fn generated_ids(text: &str) -> Vec<String> {
+    let pattern = regex::Regex::new(r"(?m)(?: |^)\^(r[0-9a-f]+)\s*$").unwrap();
+    pattern
+        .captures_iter(text)
+        .map(|found| found[1].to_owned())
+        .collect()
+}
+
+fn without_generated_ids(text: &str) -> String {
+    regex::Regex::new(r"(?: |\n\n)\^r[0-9a-f]+")
+        .unwrap()
+        .replace_all(text, "")
+        .into_owned()
+}
+
+/// O ID do último `[[...#^id]]` no fim do texto.
+fn last_reference(text: &str) -> String {
+    let pattern = regex::Regex::new(r"\[\[[^\n]*#\^([A-Za-z0-9-]+)\]\]$").unwrap();
+    pattern
+        .captures(text)
+        .unwrap_or_else(|| panic!("falta a referência de bloco completada em {text:?}"))[1]
+        .to_owned()
+}
+
+fn read_text(session: &Session, name: &str) -> String {
+    std::fs::read_to_string(session.path(name)).unwrap()
+}
+
+#[test]
+fn completar_bloco_sem_id_cria_um_id_estavel_e_so_muda_esse_id() {
+    // (consulta, texto do botão da sugestão)
+    let cases = [
+        ("Unique paragraph", "Unique paragraph café chosen."),
+        ("List chosen", "List chosen first List chosen second"),
+        ("Quote chosen", "Quote chosen line more quote"),
+        ("Callout chosen", "[!note] Callout chosen callout body"),
+        ("Table chosen", "Table chosenValuecellvalue"),
+        ("Code chosen", "// Code chosen ^literal-id let x = 1;"),
+    ];
+    for mode in MODES {
+        let mut session = Session::open_with(&[("Blocks.md", BLOCKS.as_bytes()), ("Refs.md", b"")]);
+        session.edit("Refs", mode);
+        for (query, label) in cases {
+            let what = format!("{mode} / {query}");
+            session.key(CTRL, egui::Key::End);
+            session.paste(&format!("\n[[Blocks#^{query}"));
+            session.click_label(label);
+            let source = String::from_utf8(session.save_and_read("Refs.md")).unwrap();
+            let reference = last_reference(&source);
+            let target = read_text(&session, "Blocks.md");
+            assert!(
+                generated_ids(&target).contains(&reference),
+                "{what}: o ID já estava no disco antes do link\n{target}"
+            );
+            assert_eq!(
+                without_generated_ids(&target),
+                BLOCKS,
+                "{what}: só um ID pode mudar no destino"
+            );
+        }
+        let target = read_text(&session, "Blocks.md");
+        assert_eq!(
+            generated_ids(&target).len(),
+            cases.len(),
+            "{mode}: um ID por bloco"
+        );
+
+        // Um bloco que já tem ID reaproveita o existente, sem mexer no destino.
+        let known = generated_ids(&target)[0].clone();
+        session.key(CTRL, egui::Key::End);
+        session.paste("\n[[Blocks#^Unique paragraph");
+        session.click_label_contains("Unique paragraph café chosen.");
+        let source = String::from_utf8(session.save_and_read("Refs.md")).unwrap();
+        assert_eq!(last_reference(&source), known, "{mode}: reaproveita o ID");
+        assert_eq!(
+            read_text(&session, "Blocks.md"),
+            target,
+            "{mode}: destino intacto"
+        );
+
+        // O ID escrito à mão numa lista independente aponta para a lista inteira.
+        session.key(CTRL, egui::Key::End);
+        session.paste("\n[[Blocks#^standalone-list");
+        session.click_label_contains("^standalone-list");
+        let source = String::from_utf8(session.save_and_read("Refs.md")).unwrap();
+        assert_eq!(last_reference(&source), "standalone-list", "{mode}");
+        assert_eq!(read_text(&session, "Blocks.md"), target);
+    }
+}
+
+#[test]
+fn completar_bloco_na_mesma_nota_antes_e_depois_do_cursor_preserva_o_unicode() {
+    for mode in MODES {
+        let mut session = Session::open_with(&[
+            (
+                "Self.md",
+                "# Self\n\nSelf chosen café paragraph.\n\n".as_bytes(),
+            ),
+            ("After.md", b"[[#^After chosen\n\nAfter chosen paragraph.\n"),
+        ]);
+        session.edit("Self", mode);
+        session.paste("[[#^Self chosen");
+        session.click_label("Self chosen café paragraph.");
+        let text = String::from_utf8(session.save_and_read("Self.md")).unwrap();
+        let reference = last_reference(&text);
+        assert_eq!(generated_ids(&text), [reference], "{mode}: um ID");
+        assert!(text.contains("Self chosen café paragraph."));
+
+        session.edit("After", mode);
+        session.key(CTRL, egui::Key::Home);
+        session.key(NONE, egui::Key::End);
+        session.click_label("After chosen paragraph.");
+        let text = String::from_utf8(session.save_and_read("After.md")).unwrap();
+        let reference = first_reference(&text);
+        assert_eq!(
+            generated_ids(&text),
+            [reference],
+            "{mode}: um ID, link antes do bloco"
+        );
+        assert!(text.contains("After chosen paragraph."));
+    }
+}
+
+#[test]
+fn sugestao_de_bloco_usa_o_rascunho_nao_salvo_do_destino_e_o_desfazer_o_preserva() {
+    let draft_original = "# Draft\n\nDraft base.\n";
+    let mut session = Session::open_with(&[
+        ("Draft.md", draft_original.as_bytes()),
+        ("Draftsrc.md", b""),
+    ]);
+    session.app_mut().autosave_enabled = false;
+    session.edit("Draft", "Source editing");
+    session.paste("\n\nDRAFT chosen café paragraph.");
+    let expected_draft = format!("{draft_original}\n\nDRAFT chosen café paragraph.");
+    assert_eq!(session.active_text(), expected_draft);
+    assert_eq!(
+        read_text(&session, "Draft.md"),
+        draft_original,
+        "o rascunho não foi salvo"
+    );
+    // Outra aba escreve o link para um bloco que só existe no rascunho.
+    session.key(CTRL, egui::Key::T);
+    session.open_note("Draftsrc");
+    session.command("Source editing");
+    session.settle();
+    session.paste("[[Draft#^DRAFT chosen");
+    session.click_label("DRAFT chosen café paragraph.");
+    let source = String::from_utf8(session.save_and_read("Draftsrc.md")).unwrap();
+    let reference = last_reference(&source);
+    let on_disk = read_text(&session, "Draft.md");
+    assert_eq!(generated_ids(&on_disk), std::slice::from_ref(&reference));
+    assert_eq!(without_generated_ids(&on_disk), expected_draft);
+    // Fechar a aba da origem volta ao rascunho; desfazer tira só o ID, refazer o devolve.
+    session.key(CTRL, egui::Key::W);
+    session.wait_for_active_path("Draft.md");
+    session.key(CTRL, egui::Key::Z);
+    assert_eq!(
+        session.active_text(),
+        expected_draft,
+        "desfazer preserva o rascunho"
+    );
+    session.key(CTRL | SHIFT, egui::Key::Z);
+    let redone = String::from_utf8(session.save_and_read("Draft.md")).unwrap();
+    assert_eq!(generated_ids(&redone), [reference]);
+}
+
+impl Session {
+    fn click_label_contains(&mut self, label: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_label_contains(label)
+                .next()
+                .unwrap_or_else(|| panic!("sem controle com {label:?}\n{}", self.tree_summary()));
+            node.click();
+        }
+        self.settle();
+    }
+}
+
+#[test]
+fn pares_de_delimitadores_tambem_funcionam_dentro_de_uma_celula_de_tabela() {
+    let source = "# Pair table\n\n| Value |\n| --- |\n| old |\n";
+    let mut session = Session::open_with(&[("Pares.md", source.as_bytes())]);
+    session.open_note("Pares");
+    session.command("Live preview");
+    session.settle();
+    session.click_value("old");
+    session.select_all();
+    session.key(NONE, egui::Key::Backspace);
+    session.type_chars("(");
+    let saved = String::from_utf8(session.save_and_read("Pares.md")).unwrap();
+    assert!(saved.contains("| () |"), "{saved:?}");
+    session.type_chars("cell)");
+    let saved = String::from_utf8(session.save_and_read("Pares.md")).unwrap();
+    assert!(saved.contains("| (cell) |"), "{saved:?}");
+}
+
+/// O ID do primeiro `[[#^id]]` do texto (link para um bloco da mesma nota).
+fn first_reference(text: &str) -> String {
+    let pattern = regex::Regex::new(r"\[\[#\^([A-Za-z0-9-]+)\]\]").unwrap();
+    pattern
+        .captures(text)
+        .unwrap_or_else(|| panic!("sem referência em {text:?}"))[1]
+        .to_owned()
 }
