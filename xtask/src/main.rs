@@ -2,6 +2,9 @@
 //! Substitui os scripts Python de `scripts/` e `tests/` (a lista está em `docs/bruno/PLANO.md`).
 
 mod bench;
+mod package_appimage;
+mod package_deb;
+mod package_linux;
 mod util;
 
 /// O mesmo arquivo do app: o instalador do pacote portátil não depende de mais nada.
@@ -37,6 +40,9 @@ fn dispatch(command: &str, args: &[String]) -> Result<()> {
         "benchmark-vault" => bench::vault(args),
         "benchmark-editor" => bench::editor(args),
         "check-editor-timings" => bench::check_timings(args),
+        "package-linux" => package_linux::run(args),
+        "package-deb" => package_deb::run(args),
+        "package-appimage" => package_appimage::run(args),
         other => util::fail(format!("Comando desconhecido: {other}\n\n{HELP}")),
     }
 }
