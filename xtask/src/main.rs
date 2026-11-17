@@ -3,6 +3,7 @@
 
 mod bench;
 mod lint;
+mod notices;
 mod package_appimage;
 mod package_deb;
 mod package_linux;
@@ -45,6 +46,7 @@ fn dispatch(command: &str, args: &[String]) -> Result<()> {
         "package-deb" => package_deb::run(args),
         "package-appimage" => package_appimage::run(args),
         "lint-packaging" => lint::run_all(args),
+        "language-notices" => notices::run(args),
         other => util::fail(format!("Comando desconhecido: {other}\n\n{HELP}")),
     }
 }
