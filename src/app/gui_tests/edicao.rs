@@ -1058,3 +1058,259 @@ fn tabela_visual_edita_celulas_com_unicode_barra_escapada_tab_e_desfazer() {
     let expected = expected.replace("| Beta | 1 |", "| Queued \\| cell | 7 |");
     session.wait_for_file("Visual.md", expected.as_bytes());
 }
+
+impl Session {
+    fn right_click_role_nth(&mut self, role: egui::Role, nth: usize) {
+        {
+            let nodes: Vec<_> = self.harness.query_all_by_role(role).collect();
+            nodes
+                .get(nth)
+                .unwrap_or_else(|| panic!("não há o {nth}º {role:?}\n{}", self.tree_summary()))
+                .click_secondary();
+        }
+        self.settle();
+    }
+
+    /// Menu de contexto da célula (linha, coluna) de uma tabela de `colunas` colunas, onde a
+    /// linha 0 é o cabeçalho, e o item `label`; depois Ctrl+S e os bytes do disco.
+    fn table_action(
+        &mut self,
+        name: &str,
+        row: usize,
+        col: usize,
+        colunas: usize,
+        label: &str,
+    ) -> String {
+        self.right_click_role_nth(egui::Role::TextInput, row * colunas + col);
+        self.click_label(label);
+        String::from_utf8(self.save_and_read(name)).expect("UTF-8")
+    }
+}
+
+#[test]
+fn menu_da_tabela_insere_apaga_move_ordena_e_alinha_com_desfazer_do_documento() {
+    let base = "# Visual table GUI\n\n| Item | Value |\n| :--- | ---: |\n| Edited π \\| value | 5 |\n| Queued \\| cell | 7 |\n\nAfter table π\n";
+    let mut session = Session::open_with(&[("Menu.md", base.as_bytes())]);
+    session.open_note("Menu");
+    session.command("Live preview");
+    session.settle();
+
+    let inserted = base.replace(
+        "| Queued \\| cell | 7 |",
+        "|  |  |\n| Queued \\| cell | 7 |",
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 0, 2, "Inserir linha abaixo"),
+        inserted
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Menu.md", base.as_bytes(), "desfazer a linha inserida");
+    session.key(CTRL, egui::Key::Y);
+    session.assert_saved("Menu.md", inserted.as_bytes(), "refazer a linha inserida");
+    assert_eq!(
+        session.table_action("Menu.md", 2, 0, 2, "Excluir linha"),
+        base
+    );
+    let moved = base.replace(
+        "| Edited π \\| value | 5 |\n| Queued \\| cell | 7 |",
+        "| Queued \\| cell | 7 |\n| Edited π \\| value | 5 |",
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 0, 2, "Mover linha para baixo"),
+        moved
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 2, 0, 2, "Mover linha para cima"),
+        base
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 1, 2, "Ordem decrescente"),
+        moved
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 1, 2, "Ordem crescente"),
+        base
+    );
+
+    // Colunas: a barra escapada pertence à célula, não separa colunas.
+    let expanded = base
+        .replace("| Item | Value |", "| Item |  | Value |")
+        .replace("| :--- | ---: |", "| :--- | --- | ---: |")
+        .replace(" value | 5 |", " value |  | 5 |")
+        .replace(" cell | 7 |", " cell |  | 7 |");
+    assert_eq!(
+        session.table_action("Menu.md", 1, 0, 2, "Inserir coluna à direita"),
+        expanded
+    );
+    let swapped = expanded
+        .replace("| Item |  | Value |", "| Item | Value |  |")
+        .replace("| :--- | --- | ---: |", "| :--- | ---: | --- |")
+        .replace(" value |  | 5 |", " value | 5 |  |")
+        .replace(" cell |  | 7 |", " cell | 7 |  |");
+    assert_eq!(
+        session.table_action("Menu.md", 1, 1, 3, "Mover coluna para a direita"),
+        swapped
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 2, 3, "Mover coluna para a esquerda"),
+        expanded
+    );
+    assert_eq!(
+        session.table_action("Menu.md", 1, 1, 3, "Excluir coluna"),
+        base
+    );
+    let centered = base.replace("| :--- |", "| :---: |");
+    assert_eq!(
+        session.table_action("Menu.md", 1, 0, 2, "Centralizar"),
+        centered
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Menu.md", base.as_bytes(), "desfazer o alinhamento");
+}
+
+#[test]
+fn tabela_editada_sobrevive_a_reabrir_a_leitura_e_ao_dobrar_a_secao() {
+    let source =
+        "# Visual table GUI\n\n| Item | Value |\n| :--- | ---: |\n| Alpha | 2 |\n\nAfter\n";
+    let mut session = Session::open_with(&[("Dobra.md", source.as_bytes())]);
+    session.open_note("Dobra");
+    session.command("Live preview");
+    session.settle();
+    assert!(session.has_value("Alpha"));
+    // Dobrar a seção do título esconde a tabela editável; desdobrar a traz de volta.
+    session.click_label("Recolher seção");
+    assert!(
+        !session.has_value("Alpha"),
+        "a seção dobrada esconde a tabela"
+    );
+    session.click_label("Expandir seção");
+    assert!(session.has_value("Alpha"));
+    // A leitura não oferece células editáveis nem aceita digitação.
+    session.command("Reading view");
+    session.settle();
+    assert_eq!(
+        session.count_role(egui::Role::TextInput),
+        0,
+        "a leitura não tem células editáveis"
+    );
+    session.type_text("READING_TABLE_MUST_NOT_EDIT");
+    session.assert_saved("Dobra.md", source.as_bytes(), "leitura somente leitura");
+    // Reabrir a nota devolve a tabela editável.
+    session.open_note("Home");
+    session.open_note("Dobra");
+    session.command("Live preview");
+    session.settle();
+    assert!(session.has_value("Alpha"));
+    assert_eq!(
+        std::fs::read(session.path("Dobra.md")).unwrap(),
+        source.as_bytes()
+    );
+}
+
+#[test]
+fn tabelas_em_citacao_e_lista_preservam_crlf_e_a_cerca_fica_literal() {
+    let source = "# Nested editing\r\n\r\n> | Q | N |\r\n> | --- | --- |\r\n> | quoted | 1 |\r\n\r\n- | L | N |\r\n  | --- | --- |\r\n  | listed | 2 |\r\n\r\n```md\r\n| Fence | Cell |\r\n| --- | --- |\r\n| Literal | 0 |\r\n```\r\n";
+    let mut session = Session::open_with(&[("Aninhada.md", source.as_bytes())]);
+    session.open_note("Aninhada");
+    session.command("Live preview");
+    session.settle();
+    assert!(!session.has_value("Fence"), "a tabela da cerca é só código");
+    assert_eq!(session.count_role(egui::Role::TextInput), 8);
+
+    session.click_value("quoted");
+    session.select_all();
+    session.type_text("quote π | cell");
+    session.save_and_read("Aninhada.md");
+    session.click_value("listed");
+    session.select_all();
+    session.type_text("list edit");
+    let mut expected = source
+        .replace("quoted", "quote π \\| cell")
+        .replace("listed", "list edit");
+    session.assert_saved(
+        "Aninhada.md",
+        expected.as_bytes(),
+        "edição em citação e lista",
+    );
+
+    let saved = session.table_action("Aninhada.md", 1, 0, 2, "Inserir linha abaixo");
+    expected = expected.replace(
+        "> | quote π \\| cell | 1 |\r\n",
+        "> | quote π \\| cell | 1 |\r\n> |  |  |\r\n",
+    );
+    assert_eq!(saved.as_bytes(), expected.as_bytes());
+
+    session.click_value("2");
+    session.select_all();
+    session.type_text("3");
+    session.key(NONE, egui::Key::Enter);
+    session.type_text("4");
+    expected = expected.replace(
+        "  | list edit | 2 |\r\n",
+        "  | list edit | 3 |\r\n  |  | 4 |\r\n",
+    );
+    session.assert_saved(
+        "Aninhada.md",
+        expected.as_bytes(),
+        "Enter acrescenta uma linha",
+    );
+
+    // Escape devolve a digitação ao texto comum.
+    session.key(NONE, egui::Key::Escape);
+    session.key(CTRL, egui::Key::End);
+    session.type_text("\nNormal prose");
+    session.assert_saved(
+        "Aninhada.md",
+        format!("{expected}\nNormal prose").as_bytes(),
+        "prosa depois das tabelas",
+    );
+}
+
+#[test]
+fn tabela_larga_de_vinte_colunas_edita_a_ultima_celula() {
+    let header: Vec<String> = (0..20).map(|n| format!("Column {n:02}")).collect();
+    let rule = vec!["---"; 20];
+    let values: Vec<String> = (0..20).map(|n| format!("Value {n:02}")).collect();
+    let source = format!(
+        "| {} |\n| {} |\n| {} |\n\nAfter wide table\n",
+        header.join(" | "),
+        rule.join(" | "),
+        values.join(" | ")
+    );
+    let mut session = Session::open_with(&[("Larga.md", source.as_bytes())]);
+    session.open_note("Larga");
+    session.command("Live preview");
+    session.settle();
+    // A última célula fica fora da área visível: a rolagem horizontal a traz.
+    assert!(!session.has_value("Value 19"));
+    let centre = session
+        .harness
+        .query_all_by_value("Value 00")
+        .next()
+        .expect("primeira célula")
+        .rect()
+        .center();
+    session.harness.hover_at(centre);
+    session.settle();
+    for _ in 0..40 {
+        if session.has_value("Value 19") {
+            break;
+        }
+        session.harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(-3.0, 0.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers: NONE,
+        });
+        session.settle();
+    }
+    session.click_value("Value 19");
+    session.select_all();
+    session.type_text("WIDE_EDIT");
+    session.assert_saved(
+        "Larga.md",
+        source.replace("Value 19", "WIDE_EDIT").as_bytes(),
+        "última coluna",
+    );
+}
