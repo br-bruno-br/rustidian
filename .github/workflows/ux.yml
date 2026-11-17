@@ -85,9 +85,9 @@ jobs:
           [[ "$REUSE_RUN" =~ ^[0-9]+$ ]]
           gh run view "$REUSE_RUN" --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion,url > "$RUNNER_TEMP/reused-run.json"
           source_commit=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"]=="completed"; print(d["headSha"])' "$RUNNER_TEMP/reused-run.json")
-          python3 scripts/reuse-actions-candidate.py --source-commit "$source_commit" --check-source
+          cargo xtask reuse-candidate --source-commit "$source_commit" --check-source
           gh run download "$REUSE_RUN" --repo "$GITHUB_REPOSITORY" --name "rustidian-candidate-$source_commit" --dir "$RUNNER_TEMP/reused-candidate"
-          python3 scripts/reuse-actions-candidate.py --source-commit "$source_commit" --artifact-dir "$RUNNER_TEMP/reused-candidate" --run-metadata "$RUNNER_TEMP/reused-run.json"
+          cargo xtask reuse-candidate --source-commit "$source_commit" --artifact-dir "$RUNNER_TEMP/reused-candidate" --run-metadata "$RUNNER_TEMP/reused-run.json"
       - name: Verify and obtain dependency notices
         if: ${{ !inputs.gui_only || inputs.package_after_checks || contains(inputs.sections, 'html-import') }}
         env:
@@ -95,7 +95,7 @@ jobs:
         run: |
           cargo fetch --locked --target x86_64-unknown-linux-gnu
           gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" --pattern THIRD_PARTY_NOTICES.txt --dir reports/baseline-notices/ --skip-existing
-          python3 scripts/language-notices.py --baseline-notices reports/baseline-notices/THIRD_PARTY_NOTICES.txt --output reports/THIRD_PARTY_NOTICES.txt | tee reports/notices-generation.json
+          cargo xtask language-notices --baseline-notices reports/baseline-notices/THIRD_PARTY_NOTICES.txt --output reports/THIRD_PARTY_NOTICES.txt | tee reports/notices-generation.json
       - name: Rust behavior checks
         if: ${{ !inputs.gui_only }}
         run: cargo test --locked --all-targets --no-fail-fast 2>&1 | tee reports/rust-tests.log
@@ -165,10 +165,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/package-linux.py --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-x86_64.tar.gz
-          python3 scripts/package-deb.py --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-amd64.deb
-          python3 tests/linux_bundle.py --binary target/release/rustidian 2>&1 | tee reports/package-tests.log
-          python3 tests/debian_package.py --binary target/release/rustidian --package reports/rustidian-linux-amd64.deb --notices reports/THIRD_PARTY_NOTICES.txt --system 2>&1 | tee reports/debian-tests.log
+          cargo xtask package-linux --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-x86_64.tar.gz
+          cargo xtask package-deb --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-amd64.deb
+          cargo xtask test-bundle --binary target/release/rustidian 2>&1 | tee reports/package-tests.log
+          cargo xtask test-deb --binary target/release/rustidian --package reports/rustidian-linux-amd64.deb --notices reports/THIRD_PARTY_NOTICES.txt --system 2>&1 | tee reports/debian-tests.log
       - name: Exact optimized app workflows
         if: ${{ !inputs.gui_only }}
         run: |
@@ -228,10 +228,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GUI_SECTIONS: ${{ inputs.sections }}
         run: |
-          python3 scripts/package-deb.py --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-amd64.deb
-          python3 tests/debian_package.py --binary target/release/rustidian --package reports/rustidian-linux-amd64.deb --notices reports/THIRD_PARTY_NOTICES.txt --system | tee reports/debian-verification.json
-          python3 scripts/package-linux.py --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-x86_64.tar.gz
-          python3 tests/linux_bundle.py --binary target/release/rustidian --archive reports/rustidian-linux-x86_64.tar.gz | tee reports/portable-verification.log
+          cargo xtask package-deb --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-amd64.deb
+          cargo xtask test-deb --binary target/release/rustidian --package reports/rustidian-linux-amd64.deb --notices reports/THIRD_PARTY_NOTICES.txt --system | tee reports/debian-verification.json
+          cargo xtask package-linux --binary target/release/rustidian --notices reports/THIRD_PARTY_NOTICES.txt --output reports/rustidian-linux-x86_64.tar.gz
+          cargo xtask test-bundle --binary target/release/rustidian --archive reports/rustidian-linux-x86_64.tar.gz | tee reports/portable-verification.log
           python3 - <<'INFO'
           import hashlib,json,os,subprocess
           from pathlib import Path
@@ -325,5 +325,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends xvfb xdotool xclip x11-utils x11-xserver-utils python3-pil python3-xlib desktop-file-utils xdg-utils libgl1-mesa-dri fontconfig fonts-dejavu-core fonts-liberation
+      - name: Install declared Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal && rustup default 1.95.0
       - name: Publish the verified installers directly from GitHub
-        run: python3 scripts/publish-checked-release.py --run "$VERIFIED_RUN"
+        run: cargo xtask publish-release --run "$VERIFIED_RUN"

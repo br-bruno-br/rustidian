@@ -68,8 +68,8 @@ jobs:
           target/release/rustidian --version | tee reports/version.txt
       - name: Real package and installation checks
         run: |
-          python3 tests/linux_bundle.py --binary target/release/rustidian 2>&1 | tee reports/package-tests.log
-          python3 scripts/package-linux.py --binary target/release/rustidian --output reports/rustidian-linux-x86_64.tar.gz
+          cargo xtask test-bundle --binary target/release/rustidian 2>&1 | tee reports/package-tests.log
+          cargo xtask package-linux --binary target/release/rustidian --output reports/rustidian-linux-x86_64.tar.gz
       - name: Exact optimized app workflows
         run: |
           gui_status=0

@@ -24,7 +24,7 @@ cargo test --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-Linux builds need the X11, Wayland, EGL and xkbcommon development libraries. [Native Rust Actions](.github/workflows/native.yml) lists the exact Ubuntu packages. Font data is bundled; no account, API key or network service is needed to run the editor. Package a verified Linux binary with `python3 scripts/package-linux.py --binary target/release/rustidian --output rustidian-linux-x86_64.tar.gz`.
+Linux builds need the X11, Wayland, EGL and xkbcommon development libraries. [Native Rust Actions](.github/workflows/native.yml) lists the exact Ubuntu packages. Font data is bundled; no account, API key or network service is needed to run the editor. Package a verified Linux binary with `cargo xtask package-linux --binary target/release/rustidian --output rustidian-linux-x86_64.tar.gz`.
 
 This maintainer workspace uses [Native Rust Actions](.github/workflows/native.yml) for
 compilation, Rust tests, Clippy, native GUI checks and performance gates. Keep

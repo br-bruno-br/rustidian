@@ -39,3 +39,7 @@ jobs:
         run: cargo +1.95.0 test --locked --no-default-features --lib --tests --no-fail-fast
       - name: Run desktop binary unit tests
         run: cargo +1.95.0 test --locked --bin rustidian --no-fail-fast
+      - name: Lint and test the xtask (packaging, benchmark and release tasks)
+        run: |
+          cargo +1.95.0 clippy --locked -p xtask --all-targets -- -D warnings
+          cargo +1.95.0 test --locked -p xtask

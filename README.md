@@ -79,7 +79,7 @@ mkdir rustidian && tar -xzf rustidian-linux-x86_64.tar.gz -C rustidian
 cd rustidian && ./rustidian
 ```
 
-The bundled demo opens immediately. To add Rustidian to your applications menu, run `python3 install.py`; it installs for your user without root. You can also run it from the extracted folder:
+The bundled demo opens immediately. To add Rustidian to your applications menu, run `./rustidian --install`; it installs for your user without root. You can also run it from the extracted folder:
 
 ```sh
 ./rustidian "/path/to/vault copy"

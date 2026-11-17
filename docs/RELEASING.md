@@ -2,12 +2,12 @@
 
 A release needs a version bump, one verified commit and a few Actions runs, in this order. Rust builds and tests run on
 GitHub, not on this machine. Run every network command without the proxy variables (expensive network mode: downloads
-never use the VPN); `scripts/preflight-release.py` and `scripts/upload-snap.sh` already do.
+never use the VPN); `cargo xtask preflight-release` and `scripts/upload-snap.sh` already do.
 
 1. **Version.** Bump `version` in `Cargo.toml` and `Cargo.lock` (the `rustidian` entry), `pkgver` in
    `packaging/aur-bin/PKGBUILD` and the `<release>` in `packaging/rustidian.metainfo.xml`. Rewrite the release notes
-   in `scripts/publish-checked-release.py`: they are hard-coded text for one release.
-2. **Local lint.** `python3 scripts/lint-packaging.py` (about a second). It checks the snap recipe, AppImage layout,
+   in `xtask/src/release.rs` (`release_notes`): they are hard-coded text for one release.
+2. **Local lint.** `cargo xtask lint-packaging` (about a second). It checks the snap recipe, AppImage layout,
    AppStream and desktop files, workflow pins, licence notices, brand icons, personal paths and that the quick CI check
    runs the same clippy command as the full run.
 3. **Quick CI.** Push the branch. `native.yml` (fmt, clippy on every target with `-D warnings`, tests) and
@@ -15,7 +15,7 @@ never use the VPN); `scripts/preflight-release.py` and `scripts/upload-snap.sh` 
 4. **Full verification.** `gh workflow run ux.yml --ref BRANCH`. It runs clippy, tests and the GUI checks (about 30 min).
 5. **Verified package.** `gh workflow run ux.yml --ref BRANCH -f gui_only=true -f package_after_checks=true`.
    Only this run creates the `rustidian-verified-<commit>` artifact that publishing needs. Artifacts live one day.
-6. **Preflight.** `python3 scripts/preflight-release.py RUN_ID_OF_STEP_5`. Fix every FAIL before going on.
+6. **Preflight.** `cargo xtask preflight-release RUN_ID_OF_STEP_5`. Fix every FAIL before going on.
 7. **Publish.** `gh workflow run ux.yml --ref BRANCH -f publish_run=RUN_ID_OF_STEP_5`. It creates the release and
    fast-forwards `main`. `main` must be an ancestor of the branch: cherry-pick onto the current `main`, never merge.
 8. **Snap.** `scripts/upload-snap.sh PACKAGES_RUN_ID edge`, run `store-smoke.yml`, then
