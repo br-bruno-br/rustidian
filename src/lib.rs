@@ -13,6 +13,7 @@ pub mod html_layout;
 pub mod i18n;
 pub mod index_photo;
 pub mod inline_style;
+pub mod install_linux;
 pub mod math;
 pub mod metadata;
 pub mod native_picker;

@@ -36,6 +36,37 @@ mod workspace_ui;
 use rustidian::vaults::resolve_input;
 use std::{path::PathBuf, time::Instant};
 
+/// `rustidian --install`: instala o pacote portátil extraído (sem root), no lugar do antigo install.py.
+fn install_bundle(arguments: impl Iterator<Item = std::ffi::OsString>) -> eframe::Result {
+    let arguments: Vec<String> = arguments
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let result = if cfg!(target_os = "linux") {
+        rustidian::install_linux::Options::parse(arguments).and_then(|options| {
+            let bundle = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+                .ok_or_else(|| "Não achei a pasta do pacote".to_owned())?;
+            let version = format!("{} {}", rustidian::APP_NAME, env!("CARGO_PKG_VERSION"));
+            rustidian::install_linux::install(&bundle, &options, &version)
+                .map(|installed| (version, installed))
+        })
+    } else {
+        Err("--install só existe no Linux".to_owned())
+    };
+    match result {
+        Ok((version, installed)) => {
+            println!("{version} installed. Open Rustidian from your applications menu.");
+            println!("Command: {}", installed.launcher.display());
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+    }
+}
+
 fn main() -> eframe::Result {
     let started = Instant::now();
     #[cfg(target_os = "linux")]
@@ -66,6 +97,9 @@ fn main() -> eframe::Result {
             rustidian::APP_NAME
         );
         return Ok(());
+    }
+    if first.as_deref() == Some(std::ffi::OsStr::new("--install")) {
+        return install_bundle(arguments);
     }
     if first.as_deref() == Some(std::ffi::OsStr::new("--check-vault")) {
         let Some(root) = arguments.next() else {
