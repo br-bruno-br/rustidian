@@ -2,6 +2,7 @@
 //! Substitui os scripts Python de `scripts/` e `tests/` (a lista está em `docs/bruno/PLANO.md`).
 
 mod bench;
+mod lint;
 mod package_appimage;
 mod package_deb;
 mod package_linux;
@@ -43,6 +44,7 @@ fn dispatch(command: &str, args: &[String]) -> Result<()> {
         "package-linux" => package_linux::run(args),
         "package-deb" => package_deb::run(args),
         "package-appimage" => package_appimage::run(args),
+        "lint-packaging" => lint::run_all(args),
         other => util::fail(format!("Comando desconhecido: {other}\n\n{HELP}")),
     }
 }
