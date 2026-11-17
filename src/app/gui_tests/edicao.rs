@@ -1323,7 +1323,10 @@ fn tabela_na_leitura_mostra_as_celulas_e_abre_link_com_apelido() {
     session.command("Reading view");
     session.settle();
     assert!(session.has_value("Home note"));
-    assert!(session.has_value("Empty"), "a leitura mostra as células vazias e cheias");
+    assert!(
+        session.has_value("Empty"),
+        "a leitura mostra as células vazias e cheias"
+    );
     assert_eq!(
         std::fs::read(session.path("Leitura.md")).unwrap(),
         source.as_bytes()
@@ -1357,7 +1360,6 @@ impl Session {
     }
 }
 
-
 impl Session {
     /// Quantas seções estão dobradas: cada título dobrado oferece "Expandir seção". (Os títulos
     /// escondidos dentro de uma seção dobrada não desenham botão.)
@@ -1386,7 +1388,11 @@ fn dobrar_titulos_na_edicao_guarda_o_estado_e_nunca_grava() {
         assert_eq!(session.folded_sections(), 1, "{mode}: Child dobrado");
         session.click_label_nth("Recolher seção", 1);
         // O título filho some com o pai: só o Parent e a raiz seguem com botão de dobrar...
-        assert_eq!(session.folded_sections(), 1, "{mode}: só o Parent aparece dobrado");
+        assert_eq!(
+            session.folded_sections(),
+            1,
+            "{mode}: só o Parent aparece dobrado"
+        );
         assert_eq!(
             session.foldable_sections(),
             2,
@@ -1394,7 +1400,11 @@ fn dobrar_titulos_na_edicao_guarda_o_estado_e_nunca_grava() {
         );
         // ...e desdobrar o pai mantém o filho dobrado.
         session.click_label_nth("Expandir seção", 0);
-        assert_eq!(session.folded_sections(), 1, "{mode}: o filho segue dobrado");
+        assert_eq!(
+            session.folded_sections(),
+            1,
+            "{mode}: o filho segue dobrado"
+        );
         assert_eq!(session.foldable_sections(), 3, "{mode}");
         // Seguir o link interno abre os ancestrais e o alvo.
         session.key(CTRL, egui::Key::End);
@@ -1426,4 +1436,127 @@ fn editar_com_uma_secao_dobrada_preserva_o_fonte_escondido() {
     session.key(CTRL, egui::Key::Z);
     session.assert_saved("Dobras.md", FOLDING.as_bytes(), "desfazer");
     assert_eq!(session.folded_sections(), 1, "a dobra sobrevive à edição");
+}
+
+// ---------------------------------------------------------------- callouts
+
+const CALLOUTS: &str = "# Callout checks\n\n> [!warning]- **Careful** π\n> Hidden body\n>\n> > [!tip]+ Nested advice\n> > Nested body\n\n> [!info] Title only\n\n```md\n> [!danger] Literal\n```\n\nFollowing prose.\n";
+
+impl Session {
+    fn has_button(&self, label: &str) -> bool {
+        self.harness
+            .query_all_by_role_and_label(egui::Role::Button, label)
+            .next()
+            .is_some()
+    }
+}
+
+#[test]
+fn callout_no_source_e_texto_literal_e_a_cerca_nao_vira_callout() {
+    let mut session = Session::open_with(&[("Callout.md", CALLOUTS.as_bytes())]);
+    session.edit("Callout", "Source editing");
+    session.settle();
+    assert!(
+        !session.has_button("**Careful** π"),
+        "o Source não desenha callouts"
+    );
+    session.type_text("PROSE_CONTROL");
+    session.assert_saved(
+        "Callout.md",
+        format!("{CALLOUTS}PROSE_CONTROL").as_bytes(),
+        "digitação comum",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Callout.md", CALLOUTS.as_bytes(), "desfazer");
+}
+
+#[test]
+fn callouts_no_live_dobram_e_trocam_de_tipo_com_desfazer_do_documento() {
+    let mut session = Session::open_with(&[("Callout.md", CALLOUTS.as_bytes())]);
+    session.edit("Callout", "Live preview");
+    session.key(NONE, egui::Key::Escape);
+    session.settle();
+    assert!(session.has_button("**Careful** π"));
+    assert!(session.has_button("Title only"));
+    assert!(
+        !session.has_button("Literal"),
+        "o marcador dentro da cerca é literal"
+    );
+    // O callout aninhado só aparece com o pai aberto; a dobra por padrão de `-` vale.
+    assert!(!session.has_button("Nested advice"));
+    session.click_label("**Careful** π");
+    assert!(session.has_button("Nested advice"), "abrir mostra o filho");
+    session.click_label("**Careful** π");
+    assert!(
+        !session.has_button("Nested advice"),
+        "fechar esconde o filho"
+    );
+    assert_eq!(
+        std::fs::read(session.path("Callout.md")).unwrap(),
+        CALLOUTS.as_bytes(),
+        "dobrar não grava"
+    );
+    // O menu de tipo troca só o marcador e compartilha o desfazer do documento.
+    session.right_click_label("**Careful** π");
+    session.click_label("success");
+    session.assert_saved(
+        "Callout.md",
+        CALLOUTS.replacen("[!warning]", "[!success]", 1).as_bytes(),
+        "troca de tipo",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Callout.md", CALLOUTS.as_bytes(), "desfazer o tipo");
+}
+
+#[test]
+fn callout_dobrado_no_fim_do_arquivo_abre_com_ctrl_end_e_aceita_digitacao() {
+    let source = "# End fold\n\n> [!note]- End\n> Last body.";
+    let mut session = Session::open_with(&[("Fim.md", source.as_bytes())]);
+    session.open_note("Fim");
+    session.command("Live preview");
+    session.settle();
+    session.key(CTRL, egui::Key::End);
+    session.type_text(" EOF_EDIT");
+    session.assert_saved(
+        "Fim.md",
+        format!("{source} EOF_EDIT").as_bytes(),
+        "digitação no fim",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Fim.md", source.as_bytes(), "desfazer");
+}
+
+#[test]
+fn callout_na_leitura_dobra_e_guarda_tarefa_tabela_e_codigo() {
+    let rich = "# Rich callout\n\n> [!tip]+ Rich content\n> - [ ] Callout task\n>\n> | Name | Count |\n> | --- | --- |\n> | [[Home]] | 2 |\n>\n> ```rust\n> let value = 7;\n> ```\n>\n> π\n\nFollowing prose.\n";
+    let mut session = Session::open_with(&[("Rico.md", rich.as_bytes())]);
+    session.open_note("Rico");
+    session.command("Reading view");
+    session.settle();
+    assert_eq!(
+        session.count_role(egui::Role::CheckBox),
+        1,
+        "tarefa dentro do callout"
+    );
+    assert!(session.has_value("Count"), "tabela dentro do callout");
+    assert!(
+        session.has_label("Copiar código"),
+        "código dentro do callout"
+    );
+    session.click_role_nth(egui::Role::CheckBox, 0);
+    let checked = rich.replace("[ ] Callout task", "[x] Callout task");
+    session.assert_saved("Rico.md", checked.as_bytes(), "tarefa marcada na leitura");
+    // No Live, trocar o tipo antes de um deslocamento Unicode preserva o resto e o desfazer.
+    session.command("Live preview");
+    session.key(NONE, egui::Key::Escape);
+    session.settle();
+    session.right_click_label("Rich content");
+    session.click_label("warning");
+    session.assert_saved(
+        "Rico.md",
+        checked.replacen("[!tip]", "[!warning]", 1).as_bytes(),
+        "tipo alterado",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Rico.md", checked.as_bytes(), "desfazer");
 }
