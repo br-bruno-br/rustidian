@@ -1,6 +1,7 @@
 //! `cargo xtask <comando>`: empacotamento, benchmark e release do Rustidian, tudo em Rust (R8).
 //! Substitui os scripts Python de `scripts/` e `tests/` (a lista está em `docs/bruno/PLANO.md`).
 
+mod bench;
 mod util;
 
 /// O mesmo arquivo do app: o instalador do pacote portátil não depende de mais nada.
@@ -33,6 +34,9 @@ Release
 
 fn dispatch(command: &str, args: &[String]) -> Result<()> {
     match command {
+        "benchmark-vault" => bench::vault(args),
+        "benchmark-editor" => bench::editor(args),
+        "check-editor-timings" => bench::check_timings(args),
         other => util::fail(format!("Comando desconhecido: {other}\n\n{HELP}")),
     }
 }
