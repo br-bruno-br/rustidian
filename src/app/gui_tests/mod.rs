@@ -9,8 +9,11 @@ use super::*;
 use egui_kittest::{Harness, kittest::Queryable};
 use std::time::Duration;
 
+mod edicao;
+mod navegacao;
+
 /// Ctrl no Windows/Linux: o egui precisa dos dois marcadores para casar `COMMAND` e `CTRL`.
-const CTRL: egui::Modifiers = egui::Modifiers {
+pub(super) const CTRL: egui::Modifiers = egui::Modifiers {
     alt: false,
     ctrl: true,
     shift: false,
@@ -18,14 +21,14 @@ const CTRL: egui::Modifiers = egui::Modifiers {
     command: true,
 };
 
-const HOME: &str = "# Home\n\nVeja [[Second]] e [[Alpha]].\n";
-const SECOND: &str = "# Second\n\nDe volta para [[Home]].\n";
-const ALPHA: &str = "# Alpha\n\nA palavra rara é zebra, escrita só aqui.\n";
+pub(super) const HOME: &str = "# Home\n\nVeja [[Second]] e [[Alpha]].\n";
+pub(super) const SECOND: &str = "# Second\n\nDe volta para [[Home]].\n";
+pub(super) const ALPHA: &str = "# Alpha\n\nA palavra rara é zebra, escrita só aqui.\n";
 
 /// Manda o estado por usuário (sessão, lista de cofres, preferências) para uma pasta descartável.
 /// Roda uma vez por processo, antes do primeiro app; sem isso o teste leria e gravaria o
 /// perfil real de quem roda `cargo test`.
-fn isolate_user_state() {
+pub(super) fn isolate_user_state() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let folder = tempfile::tempdir()
@@ -47,14 +50,14 @@ fn isolate_user_state() {
     });
 }
 
-struct Session {
+pub(super) struct Session {
     /// A pasta do cofre fica viva enquanto o teste roda.
     folder: tempfile::TempDir,
     harness: Harness<'static, NotesApp>,
 }
 
 impl Session {
-    fn open() -> Self {
+    pub(super) fn open() -> Self {
         isolate_user_state();
         let folder = tempfile::tempdir().expect("cofre temporário");
         for (name, text) in [
@@ -77,16 +80,16 @@ impl Session {
         session
     }
 
-    fn app(&self) -> &NotesApp {
+    pub(super) fn app(&self) -> &NotesApp {
         self.harness.state()
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(super) fn path(&self, name: &str) -> PathBuf {
         self.folder.path().join(name)
     }
 
     /// Passa quadros até a condição valer (o índice do cofre carrega numa thread própria).
-    fn wait_for(&mut self, condition: impl Fn(&NotesApp) -> bool) {
+    pub(super) fn wait_for(&mut self, condition: impl Fn(&NotesApp) -> bool) {
         for _ in 0..600 {
             self.harness.step();
             if condition(self.harness.state()) {
@@ -97,24 +100,24 @@ impl Session {
         panic!("a condição da GUI não chegou em 6 s");
     }
 
-    fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         for _ in 0..4 {
             self.harness.step();
         }
     }
 
-    fn key(&mut self, modifiers: egui::Modifiers, key: egui::Key) {
+    pub(super) fn key(&mut self, modifiers: egui::Modifiers, key: egui::Key) {
         self.harness.key_press_modifiers(modifiers, key);
         self.settle();
     }
 
-    fn type_text(&mut self, text: &str) {
+    pub(super) fn type_text(&mut self, text: &str) {
         self.harness.event(egui::Event::Text(text.to_owned()));
         self.settle();
     }
 
     /// Abre uma nota como o usuário: Ctrl+O, o nome, Enter.
-    fn open_note(&mut self, name: &str) {
+    pub(super) fn open_note(&mut self, name: &str) {
         self.key(CTRL, egui::Key::O);
         self.type_text(name);
         self.key(egui::Modifiers::NONE, egui::Key::Enter);
@@ -127,13 +130,13 @@ impl Session {
     }
 
     /// Roda um comando pela paleta: Ctrl+P, o nome, Enter.
-    fn command(&mut self, name: &str) {
+    pub(super) fn command(&mut self, name: &str) {
         self.key(CTRL, egui::Key::P);
         self.type_text(name);
         self.key(egui::Modifiers::NONE, egui::Key::Enter);
     }
 
-    fn active_text(&self) -> String {
+    pub(super) fn active_text(&self) -> String {
         self.app()
             .tabs
             .get(self.app().active)
@@ -141,7 +144,7 @@ impl Session {
             .unwrap_or_default()
     }
 
-    fn has_label(&self, text: &str) -> bool {
+    pub(super) fn has_label(&self, text: &str) -> bool {
         self.harness
             .query_all_by_label_contains(text)
             .next()
@@ -261,7 +264,7 @@ fn painel_de_links_de_entrada_lista_quem_aponta_para_a_nota() {
 
 impl Session {
     /// Os arquivos que o cofre diz apontarem para `note` (o mesmo cálculo do painel).
-    fn sources_linking_to(&self, note: &str) -> Vec<String> {
+    pub(super) fn sources_linking_to(&self, note: &str) -> Vec<String> {
         let vault = self.app().vault.as_ref().expect("cofre aberto");
         vault
             .backlink_mentions(Path::new(note), &[])
@@ -270,7 +273,7 @@ impl Session {
             .collect()
     }
 
-    fn app_mut(&mut self) -> &mut NotesApp {
+    pub(super) fn app_mut(&mut self) -> &mut NotesApp {
         self.harness.state_mut()
     }
 }
