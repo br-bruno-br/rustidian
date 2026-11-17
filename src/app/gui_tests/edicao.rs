@@ -5,6 +5,7 @@
 //! (o mesmo critério do smoke em Python, que lia o arquivo depois de Ctrl+S).
 
 use super::*;
+use egui_kittest::kittest::NodeT;
 
 const NONE: egui::Modifiers = egui::Modifiers::NONE;
 const SHIFT: egui::Modifiers = egui::Modifiers::SHIFT;
@@ -701,4 +702,359 @@ fn texto_puro_nao_ganha_pares_de_markdown() {
     session.open_file("Par-literal.txt");
     session.type_chars("(");
     session.assert_saved("Par-literal.txt", b"(", "texto puro");
+}
+
+// ---------------------------------------------------------------- ajudantes de widgets
+
+impl Session {
+    /// Papéis, rótulos e valores da árvore de acessibilidade, para mensagens de falha.
+    fn tree_summary(&self) -> String {
+        self.harness
+            .query_all_by(|_| true)
+            .filter_map(|node| {
+                let node = node.accesskit_node();
+                let label = node.label();
+                let value = node.value();
+                (label.is_some() || value.is_some()).then(|| {
+                    format!(
+                        "{:?} label={:?} value={:?}",
+                        node.role(),
+                        label.unwrap_or_default(),
+                        value.unwrap_or_default()
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn count_role(&self, role: egui::Role) -> usize {
+        self.harness.query_all_by_role(role).count()
+    }
+
+    fn has_value(&self, value: &str) -> bool {
+        self.harness.query_all_by_value(value).next().is_some()
+    }
+
+    fn click_role_nth(&mut self, role: egui::Role, nth: usize) {
+        {
+            let nodes: Vec<_> = self.harness.query_all_by_role(role).collect();
+            nodes
+                .get(nth)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "não há o {nth}º {role:?}; há {}\n{}",
+                        nodes.len(),
+                        self.tree_summary()
+                    )
+                })
+                .click();
+        }
+        self.settle();
+    }
+
+    fn click_value(&mut self, value: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_value(value)
+                .next()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sem controle com o valor {value:?}\n{}",
+                        self.tree_summary()
+                    )
+                });
+            node.click();
+        }
+        self.settle();
+    }
+
+    fn click_label(&mut self, label: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_label(label)
+                .next()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sem controle com o rótulo {label:?}\n{}",
+                        self.tree_summary()
+                    )
+                });
+            node.click();
+        }
+        self.settle();
+    }
+
+    fn right_click_label(&mut self, label: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_label(label)
+                .next()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sem controle com o rótulo {label:?}\n{}",
+                        self.tree_summary()
+                    )
+                });
+            node.click_secondary();
+        }
+        self.settle();
+    }
+
+    fn right_click_value(&mut self, value: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_value(value)
+                .next()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sem controle com o valor {value:?}\n{}",
+                        self.tree_summary()
+                    )
+                });
+            node.click_secondary();
+        }
+        self.settle();
+    }
+
+    fn ctrl_click_value(&mut self, value: &str) {
+        {
+            let node = self
+                .harness
+                .query_all_by_value(value)
+                .next()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "sem controle com o valor {value:?}\n{}",
+                        self.tree_summary()
+                    )
+                });
+            node.click_modifiers(CTRL);
+        }
+        self.settle();
+    }
+
+    fn active_path_ends_with(&self, name: &str) -> bool {
+        self.app()
+            .tabs
+            .get(self.app().active)
+            .is_some_and(|tab| tab.document.path.ends_with(name))
+    }
+
+    /// Espera o disco ter exatamente estes bytes (o autosave e a janela do watcher são
+    /// assíncronos), em vez de supor um tempo fixo.
+    fn wait_for_file(&mut self, name: &str, expected: &[u8]) {
+        let path = self.path(name);
+        for _ in 0..300 {
+            if std::fs::read(&path).is_ok_and(|bytes| bytes == expected) {
+                return;
+            }
+            self.harness.step();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            String::from_utf8_lossy(&std::fs::read(&path).unwrap_or_default()),
+            String::from_utf8_lossy(expected),
+            "o arquivo {name} não chegou ao conteúdo esperado em 3 s"
+        );
+    }
+}
+
+// ---------------------------------------------------------------- tasks
+
+const TASKS: &str = "# Task GUI\n\n- [ ] Native task\n- [x] Done فارسی\n  - [ ] Nested\n\n```md\n- [ ] Literal code\n```\n";
+
+#[test]
+fn tarefas_na_leitura_e_no_live_gravam_markdown_exato_com_desfazer_e_refazer() {
+    let mut session = Session::open_with(&[("Tarefas.md", TASKS.as_bytes())]);
+    session.edit("Tarefas", "Source editing");
+    session.type_text("control");
+    session.assert_saved(
+        "Tarefas.md",
+        format!("{TASKS}control").as_bytes(),
+        "digitação comum no Source",
+    );
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Tarefas.md", TASKS.as_bytes(), "desfazer o controle");
+    assert_eq!(
+        session.count_role(egui::Role::CheckBox),
+        0,
+        "o Source mantém a sintaxe literal, sem caixas"
+    );
+
+    let checked = TASKS.replace("- [ ] Native task", "- [x] Native task");
+    session.command("Reading view");
+    session.settle();
+    assert_eq!(
+        session.count_role(egui::Role::CheckBox),
+        3,
+        "a leitura mostra as três tarefas e ignora a do bloco de código"
+    );
+    session.click_role_nth(egui::Role::CheckBox, 0);
+    session.assert_saved("Tarefas.md", checked.as_bytes(), "marcar na leitura");
+    session.click_role_nth(egui::Role::CheckBox, 0);
+    session.assert_saved("Tarefas.md", TASKS.as_bytes(), "desmarcar na leitura");
+
+    session.command("Live preview");
+    session.settle();
+    assert_eq!(
+        session.count_role(egui::Role::CheckBox),
+        3,
+        "Live: três caixas"
+    );
+    session.click_role_nth(egui::Role::CheckBox, 0);
+    session.assert_saved("Tarefas.md", checked.as_bytes(), "marcar no Live");
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved("Tarefas.md", TASKS.as_bytes(), "desfazer a marcação");
+    session.key(CTRL, egui::Key::Y);
+    session.assert_saved("Tarefas.md", checked.as_bytes(), "refazer a marcação");
+    session.command("Source editing");
+    session.settle();
+    assert_eq!(
+        session.count_role(egui::Role::CheckBox),
+        0,
+        "voltar ao Source tira as caixas"
+    );
+}
+
+#[test]
+fn lista_de_tarefas_frouxa_nao_muda_os_bytes_na_leitura() {
+    let loose = "# Loose checklist\n\n- [ ] First paragraph\n\n- [x] Second paragraph\n";
+    let mut session = Session::open_with(&[("Frouxa.md", loose.as_bytes())]);
+    session.open_note("Frouxa");
+    session.command("Reading view");
+    session.settle();
+    assert_eq!(session.count_role(egui::Role::CheckBox), 2);
+    assert_eq!(
+        std::fs::read(session.path("Frouxa.md")).unwrap(),
+        loose.as_bytes()
+    );
+}
+
+// ---------------------------------------------------------------- tables
+
+const TABLE_INPUT: &str =
+    "# Table input\n\n| A | B |\n| --- | --- |\n| old | 1 |\n| other | 2 |\n\nAfter\n";
+
+#[test]
+fn celula_de_tabela_recebe_texto_tab_e_enter_no_mesmo_quadro() {
+    let mut session = Session::open_with(&[("Entrada.md", TABLE_INPUT.as_bytes())]);
+    session.open_note("Entrada");
+    session.command("Live preview");
+    session.settle();
+    session.click_value("old");
+    session.select_all();
+    session.queued(&[
+        Step::Text("First | queued"),
+        Step::Key(NONE, egui::Key::Tab),
+        Step::Text("8"),
+        Step::Key(NONE, egui::Key::Enter),
+        Step::Text("9"),
+        Step::Key(CTRL, egui::Key::S),
+    ]);
+    let expected = TABLE_INPUT
+        .replace("old | 1", "First \\| queued | 8")
+        .replace("other | 2", "other | 9");
+    session.wait_for_file("Entrada.md", expected.as_bytes());
+    // Escape devolve a digitação imediata ao texto comum.
+    session.key(NONE, egui::Key::Escape);
+    session.key(CTRL, egui::Key::End);
+    session.type_text("PROSE");
+    session.assert_saved(
+        "Entrada.md",
+        format!("{expected}PROSE").as_bytes(),
+        "prosa depois da tabela",
+    );
+}
+
+const TABLE_LINKS: &str =
+    "# Table links\n\n| Destination | Literal |\n| --- | --- |\n| [[Home]] | `[[Never open]]` |\n";
+
+#[test]
+fn links_em_celulas_abrem_com_ctrl_enter_e_ctrl_clique_menos_dentro_de_codigo() {
+    let mut session = Session::open_with(&[("Links.md", TABLE_LINKS.as_bytes())]);
+    session.open_note("Links");
+    session.command("Live preview");
+    session.settle();
+    // O link dentro de código inline continua literal.
+    session.click_value("`[[Never open]]`");
+    session.key(CTRL, egui::Key::Enter);
+    assert!(session.active_path_ends_with("Links.md"));
+    assert!(!session.path("Never open.md").exists());
+    // O link de verdade abre, inclusive digitado e seguido no mesmo quadro.
+    session.click_value("[[Home]]");
+    session.select_all();
+    session.queued(&[Step::Text("[[Home]]"), Step::Key(CTRL, egui::Key::Enter)]);
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with("Home.md"))
+    });
+    assert_eq!(
+        std::fs::read(session.path("Links.md")).unwrap(),
+        TABLE_LINKS.as_bytes()
+    );
+    // Ctrl+clique também segue.
+    session.open_note("Links");
+    session.command("Live preview");
+    session.settle();
+    session.ctrl_click_value("[[Home]]");
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path.ends_with("Home.md"))
+    });
+    assert_eq!(
+        std::fs::read(session.path("Links.md")).unwrap(),
+        TABLE_LINKS.as_bytes()
+    );
+}
+
+const TABLE_EDIT: &str = "# Visual table GUI\n\n| Item | Value |\n| :--- | ---: |\n| **Alpha** | 2 |\n| Beta | 1 |\n\nAfter table π\n";
+
+#[test]
+fn tabela_visual_edita_celulas_com_unicode_barra_escapada_tab_e_desfazer() {
+    let mut session = Session::open_with(&[("Visual.md", TABLE_EDIT.as_bytes())]);
+    session.open_note("Visual");
+    session.command("Source editing");
+    session.settle();
+    assert!(
+        !session.has_value("**Alpha**"),
+        "o Source não mostra células editáveis"
+    );
+    session.command("Live preview");
+    session.settle();
+    session.click_value("**Alpha**");
+    session.select_all();
+    session.type_text("Edited π | value");
+    session.key(NONE, egui::Key::Tab);
+    session.type_text("5");
+    let expected = TABLE_EDIT
+        .replace("**Alpha**", "Edited π \\| value")
+        .replace("| 2 |", "| 5 |");
+    session.assert_saved("Visual.md", expected.as_bytes(), "edição de células");
+    // O desfazer é o do documento inteiro.
+    session.key(CTRL, egui::Key::Z);
+    session.assert_saved(
+        "Visual.md",
+        expected.replace("| 5 |", "| 2 |").as_bytes(),
+        "desfazer",
+    );
+    session.key(CTRL, egui::Key::Y);
+    session.assert_saved("Visual.md", expected.as_bytes(), "refazer");
+    // Enter desce, Shift+Tab volta; o último trecho vai no mesmo quadro.
+    session.key(NONE, egui::Key::Enter);
+    session.type_text("7");
+    session.key(SHIFT, egui::Key::Tab);
+    session.queued(&[
+        Step::Text("Queued | cell"),
+        Step::Key(NONE, egui::Key::Tab),
+        Step::Key(CTRL, egui::Key::S),
+    ]);
+    let expected = expected.replace("| Beta | 1 |", "| Queued \\| cell | 7 |");
+    session.wait_for_file("Visual.md", expected.as_bytes());
 }
