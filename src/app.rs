@@ -189,6 +189,10 @@ pub struct NotesApp {
         f64,
         Vec<rustidian::vault::LinkedMention>,
     )>,
+    /// H2a: em quais quadros cada nota aparece, e quando (tempo da interface) e para qual nota
+    /// o painel de links o conferiu pela última vez.
+    canvas_index: rustidian::canvas_index::CanvasIndex,
+    canvas_index_check: Option<(std::path::PathBuf, f64)>,
     pub(crate) ui_zoom: f32,
     pub(crate) document_font_size: u8,
     pub(crate) fonts: theme::fonts::Fonts,
@@ -307,6 +311,8 @@ impl NotesApp {
             right_tab: 0,
             unlinked_open: false,
             unlinked_cache: None,
+            canvas_index: Default::default(),
+            canvas_index_check: None,
             ui_zoom: 1.0,
             document_font_size: theme::DEFAULT_DOCUMENT_FONT_SIZE,
             fonts: Default::default(),
@@ -3056,6 +3062,42 @@ impl NotesApp {
             })
             .unwrap_or_default();
         let now = self.ctx.input(|input| input.time);
+        let on_boards = if self.right_tab == 1 {
+            document.map(|document| document.path.clone())
+        } else {
+            None
+        };
+        let on_boards = match (on_boards, self.vault.as_ref()) {
+            (Some(path), Some(vault)) => {
+                let stale = match &self.canvas_index_check {
+                    Some((checked, at)) => checked != &path || now - at > 1.0,
+                    None => true,
+                };
+                if stale {
+                    let boards: Vec<_> = vault
+                        .attachments
+                        .iter()
+                        .filter(|file| rustidian::canvas::is_canvas(file))
+                        .cloned()
+                        .collect();
+                    let open: Vec<_> = self
+                        .tabs
+                        .iter()
+                        .filter(|tab| rustidian::canvas::is_canvas(&tab.document.path))
+                        .map(|tab| (tab.document.path.as_path(), tab.document.text.as_str()))
+                        .collect();
+                    self.canvas_index.sync(&vault.root, &boards, &open);
+                    self.canvas_index_check = Some((path.clone(), now));
+                }
+                self.canvas_index
+                    .occurrences(&path)
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+            }
+            _ => Vec::new(),
+        };
+        let mut open_board = None;
         let unlinked = if self.right_tab == 1 && self.unlinked_open {
             let path = document.map(|document| document.path.clone());
             let stale = match (&self.unlinked_cache, &path) {
@@ -3240,6 +3282,45 @@ impl NotesApp {
                             }
                             ui.add_space(theme::space::XS);
                         }
+                        if !on_boards.is_empty() {
+                            ui.add_space(theme::space::M);
+                            ui.label(
+                                RichText::new(format!("Nos quadros ({})", on_boards.len()))
+                                    .size(14.0)
+                                    .strong(),
+                            );
+                            ui.add_space(theme::space::S);
+                            for occurrence in &on_boards {
+                                let name = occurrence
+                                    .board
+                                    .file_stem()
+                                    .map(|stem| stem.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                let text = match &occurrence.group {
+                                    Some(group) => format!("{name} · {group}"),
+                                    None => name,
+                                };
+                                let row = ui
+                                    .add(
+                                        egui::Button::new(RichText::new(text).size(12.0))
+                                            .frame_when_inactive(false),
+                                    )
+                                    .on_hover_text(occurrence.board.display().to_string());
+                                crate::ui_probe::record(
+                                    ui.ctx(),
+                                    format!(
+                                        "board-occurrence:{}:{}",
+                                        occurrence.board.display(),
+                                        occurrence.node_id
+                                    ),
+                                    row.rect,
+                                );
+                                if theme::link_clicked(&row) {
+                                    open_board = Some(occurrence.clone());
+                                }
+                                ui.add_space(theme::space::XS);
+                            }
+                        }
                         ui.add_space(theme::space::M);
                         let title = if self.unlinked_open {
                             format!("▾ {} menções sem link", unlinked.len())
@@ -3360,6 +3441,9 @@ impl NotesApp {
         if let Some(mention) = selected_backlink {
             self.open_linked_mention(mention);
         }
+        if let Some(occurrence) = open_board {
+            self.open_board_at(&occurrence);
+        }
         if let Some(mention) = link_unlinked {
             self.link_unlinked_mention(mention);
         }
@@ -3414,6 +3498,18 @@ impl NotesApp {
         document.text.replace_range(mention.range, &link);
         if let Err(error) = vault.save(&mut document) {
             self.error = Some(error.to_string());
+        }
+    }
+
+    /// Abre o quadro onde a nota aparece e centraliza o cartão dela.
+    fn open_board_at(&mut self, occurrence: &rustidian::canvas_index::Occurrence) {
+        self.open_note(&occurrence.board);
+        if let Some(tab) = self
+            .tabs
+            .get(self.active)
+            .filter(|tab| tab.document.path == occurrence.board)
+        {
+            self.canvases.focar_no(tab, &occurrence.node_id);
         }
     }
 

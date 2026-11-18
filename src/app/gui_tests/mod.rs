@@ -13,6 +13,7 @@ mod canvas;
 mod dividir;
 mod edicao;
 mod navegacao;
+mod onde_aparece;
 mod prints;
 mod tabela;
 
