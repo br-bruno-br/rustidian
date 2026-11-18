@@ -42,6 +42,8 @@ pub fn t(english: &str) -> &str {
         "Delete file" => "Excluir arquivo",
         "Close others" => "Fechar as outras",
         "Close tabs to the right" => "Fechar abas à direita",
+        "Split right" => "Dividir à direita",
+        "Split down" => "Dividir abaixo",
         "Unpin" => "Desafixar",
         "Pin" => "Fixar",
         "Copy path" => "Copiar caminho",
