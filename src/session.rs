@@ -14,6 +14,9 @@ struct Session {
     editing_modes: Vec<View>,
     #[serde(default)]
     pinned: Vec<bool>,
+    /// Quais quadros estavam na visão Lista (H2b), na ordem das abas.
+    #[serde(default)]
+    board_lists: Vec<bool>,
     #[serde(default)]
     scrolls: Vec<f32>,
     active: usize,
@@ -117,6 +120,8 @@ impl Session {
             let mut tab = Tab::new(document);
             ids[index] = Some(tab.id());
             tab.pinned = self.pinned.get(index).copied().unwrap_or(false);
+            tab.board_list = self.board_lists.get(index).copied().unwrap_or(false)
+                && rustidian::canvas::is_canvas(&tab.document.path);
             tab.restore_scroll = self
                 .scrolls
                 .get(index)
@@ -253,6 +258,7 @@ impl NotesApp {
         let session = Session {
             editing_modes: self.tabs.iter().map(Tab::editing_view).collect(),
             pinned: self.tabs.iter().map(|tab| tab.pinned).collect(),
+            board_lists: self.tabs.iter().map(|tab| tab.board_list).collect(),
             scrolls: self.tabs.iter().map(|tab| tab.scroll_y).collect(),
             tabs: self
                 .tabs
@@ -383,6 +389,37 @@ mod tests {
             assert!(tabs[2].document.is_blank());
         }
         assert_eq!(std::fs::read(root.path().join("Home.md")).unwrap(), bytes);
+    }
+
+    #[test]
+    fn the_board_list_mode_comes_back_only_for_boards() {
+        use rustidian::vault::Vault;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("Home.md"),
+            "# Home
+",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("Home.canvas"),
+            rustidian::canvas::EMPTY.as_bytes(),
+        )
+        .unwrap();
+        let mut vault = Vault::open(root.path()).unwrap();
+        let state: Session = serde_json::from_str(
+            r#"{"tabs":[["Home.md","Live"],["Home.canvas","Read"]],"active":1,"left":true,"right":false,"dark":true,"board_lists":[true,true]}"#,
+        )
+        .unwrap();
+        let (tabs, _) = state.restore_tabs(&mut vault);
+        assert!(!tabs[0].board_list, "uma nota nunca abre como Lista");
+        assert!(tabs[1].board_list, "o quadro volta na Lista");
+        // Sessão antiga, sem o campo: tudo abre desenhado.
+        let old: Session = serde_json::from_str(
+            r#"{"tabs":[["Home.canvas","Read"]],"active":0,"left":true,"right":false,"dark":true}"#,
+        )
+        .unwrap();
+        assert!(!old.restore_tabs(&mut vault).0[0].board_list);
     }
 
     #[test]
