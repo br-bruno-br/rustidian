@@ -15,4 +15,4 @@ export NDK_HOME="${NDK_HOME:-$ANDROID_NDK_HOME}"
 export PATH="$JAVA_HOME/bin:$PATH"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 dx bundle --android --release --target aarch64-linux-android --features mobile --package-types apk
-echo "O APK fica em <CARGO_TARGET_DIR>/dx/rustidian-android/release/android/app/app/build/outputs/apk/debug/app-debug.apk"
+echo "O APK fica em <CARGO_TARGET_DIR>/dx/rustidian/release/android/app/app/build/outputs/apk/debug/app-debug.apk"

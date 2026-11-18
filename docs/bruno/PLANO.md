@@ -209,7 +209,7 @@ O app Android é o projeto `android/` (pacote `rustidian-android`, `dev.rustidia
 ### Verificação e build
 - Gate em `android/`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (a feature `mobile` fica desligada: no Windows o `dioxus::launch` não abre janela).
 - Prints sem celular: `src/prints.rs` renderiza as telas reais com `dioxus-ssr` (testes comuns conferem o conteúdo; o teste `#[ignore]` `gravar_html_das_telas` grava os HTML) e o Chrome headless do Playwright fotografa em 390x844, claro e escuro. Nunca abre janela nem clica na tela do dono. O que o print **não** prova: o comportamento do teclado e do Voltar no aparelho.
-- APK: `android/construir.sh` (`dx bundle --android --release --target aarch64-linux-android --features mobile --package-types apk`, com `JAVA_HOME`, `ANDROID_HOME` e `ANDROID_NDK_HOME` de `C:\dev\_ferramentas`), assinado com a chave de debug do Android (sem keystore de release).
+- APK: `android/construir.sh` (`dx bundle --android --release --target aarch64-linux-android --features mobile --package-types apk`, com `JAVA_HOME`, `ANDROID_HOME` e `ANDROID_NDK_HOME` de `C:\dev\_ferramentas`), assinado com a chave de debug do Android (sem keystore de release). Primeiro build (18/11, PC carregado): 503 crates em ~35 min mais ~9 min do Gradle; APK de 13,7 MB, `minSdk 24`, `targetSdk 34`, só `arm64-v8a`, rótulo "Rustidian", pacote `dev.rustidian.app` (conferido com `aapt dump badging`). O `nota-sync` (blake3, redb, ureq sem TLS) compila para Android sem ajuste.
 - Crates novas, só para teste: `dioxus-ssr =0.7.10` (mesmo número do Dioxus) e `tempfile`. `chrono` (já no lock do app) dá a data da lixeira.
 
 ### Fatias
