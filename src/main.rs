@@ -38,8 +38,14 @@ use std::{path::PathBuf, time::Instant};
 
 /// `rustidian --install`: instala o pacote portátil extraído (sem root), no lugar do antigo install.py.
 fn install_bundle(arguments: impl Iterator<Item = std::ffi::OsString>) -> eframe::Result {
+    // `--sem-assinatura`: flag de desenvolvedor (R16), pula a conferência da assinatura.
+    let mut sem_assinatura = false;
     let arguments: Vec<String> = arguments
         .map(|argument| argument.to_string_lossy().into_owned())
+        .filter(|argument| {
+            sem_assinatura |= argument == "--sem-assinatura";
+            argument != "--sem-assinatura"
+        })
         .collect();
     let result = if cfg!(target_os = "linux") {
         rustidian::install_linux::Options::parse(arguments).and_then(|options| {
@@ -47,6 +53,12 @@ fn install_bundle(arguments: impl Iterator<Item = std::ffi::OsString>) -> eframe
                 .ok()
                 .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
                 .ok_or_else(|| "Não achei a pasta do pacote".to_owned())?;
+            // R16: só instala o que está no SHA256SUMS assinado com a chave embutida.
+            if let Some(aviso) =
+                rustidian::atualizacao::liberar_instalacao(&bundle, sem_assinatura)?
+            {
+                eprintln!("{aviso}");
+            }
             let version = format!("{} {}", rustidian::APP_NAME, env!("CARGO_PKG_VERSION"));
             rustidian::install_linux::install(&bundle, &options, &version)
                 .map(|installed| (version, installed))
@@ -62,6 +74,33 @@ fn install_bundle(arguments: impl Iterator<Item = std::ffi::OsString>) -> eframe
         }
         Err(error) => {
             eprintln!("{error}");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// `rustidian --verificar <pasta ou arquivo>`: confere a assinatura e os hashes de um download
+/// (R16) sem instalar nada. Sai com 0 se tudo confere, 2 se recusou.
+fn verificar_atualizacao(mut arguments: impl Iterator<Item = std::ffi::OsString>) -> ! {
+    use rustidian::atualizacao::{chave_embutida, verificar_arquivo, verificar_lista};
+    let Some(alvo) = arguments.next().map(PathBuf::from) else {
+        eprintln!("Uso: rustidian --verificar <pasta ou arquivo baixado>");
+        std::process::exit(2);
+    };
+    let resultado = chave_embutida().and_then(|chave| {
+        if alvo.is_dir() {
+            verificar_lista(&alvo, &chave).map(|total| format!("{total} arquivos conferidos"))
+        } else {
+            verificar_arquivo(&alvo, &chave).map(|()| "1 arquivo conferido".to_owned())
+        }
+    });
+    match resultado {
+        Ok(resumo) => {
+            println!("OK: assinatura válida e hashes conferem ({resumo}).");
+            std::process::exit(0);
+        }
+        Err(recusa) => {
+            eprintln!("Atualização recusada: {recusa}\nNada foi instalado ou substituído.");
             std::process::exit(2);
         }
     }
@@ -93,10 +132,13 @@ fn main() -> eframe::Result {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "{} — native Markdown notebook and text editor\n\nUsage: rustidian [VAULT_FOLDER | FILE]\n       rustidian --check-vault VAULT_FOLDER\n\nOpen Markdown, plain text and supported source-code files. RUSTIDIAN_DEFAULT_VAULT selects the default vault; otherwise opens the included demo vault. Ctrl+P opens commands.",
+            "{} — native Markdown notebook and text editor\n\nUsage: rustidian [VAULT_FOLDER | FILE]\n       rustidian --check-vault VAULT_FOLDER\n       rustidian --verificar PASTA_OU_ARQUIVO\n\nOpen Markdown, plain text and supported source-code files. RUSTIDIAN_DEFAULT_VAULT selects the default vault; otherwise opens the included demo vault. Ctrl+P opens commands.",
             rustidian::APP_NAME
         );
         return Ok(());
+    }
+    if first.as_deref() == Some(std::ffi::OsStr::new("--verificar")) {
+        verificar_atualizacao(arguments);
     }
     if first.as_deref() == Some(std::ffi::OsStr::new("--install")) {
         return install_bundle(arguments);
