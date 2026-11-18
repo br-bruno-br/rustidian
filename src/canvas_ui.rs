@@ -579,7 +579,7 @@ fn show_list(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.add_space(24.0);
+                ui.add_space(theme::space::XL);
                 ui.vertical(|ui| {
                     ui.set_max_width((ui.available_width() - 24.0).clamp(200.0, 780.0));
                     ui.add_space(theme::space::L);
@@ -614,7 +614,7 @@ fn show_list(
                     }
                     for item in &list.items {
                         ui.horizontal(|ui| {
-                            ui.add_space(item.depth as f32 * 20.0);
+                            ui.add_space(item.depth as f32 * theme::space::XL);
                             ui.vertical(|ui| match &item.kind {
                                 ItemKind::Heading { level } => {
                                     ui.add_space(theme::space::S);
