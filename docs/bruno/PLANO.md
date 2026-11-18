@@ -176,6 +176,9 @@ Acentos funcionaram (a tradução do IME serve). Falhas: (1) Enter não pulava l
 ### Palpite
 **O Dioxus deve ganhar na digitação e na sensação de edição** (alças de seleção, lupa, menu copiar/colar, rolagem com inércia, emoji, ditado: tudo do motor do Chrome). O egui só chegou ao mínimo (acentos) depois de duas pontes escritas à mão (IME e toque), e ainda sem alças nem lupa. O argumento a favor do egui é reaproveitar o app inteiro (renderização de Markdown, abas, tela de sync, patches de bidi); mas o editor do Rustidian é um `TextEdit` do egui, e é justamente ele que não tem experiência móvel pronta. Recomendação provisória: **no Android, UI em Dioxus (ou WebView) e o miolo em Rust (`nota-cripto`, `nota-sync`) reaproveitado como biblioteca**; o egui só volta à mesa se a v2 passar nos passos 3 a 10 do roteiro e o dono achar a sensação aceitável. A decisão final sai do teste do dono com `rustidian-proto-dioxus.apk` e `rustidian-proto-egui-v2.apk`.
 
+### Decisão do dono (18/11/2026)
+**Fica o Dioxus.** No teste no celular dele o `rustidian-proto-dioxus.apk` se saiu melhor que o egui v2. O app Android (R7b) sai em Dioxus, com o miolo em Rust (`nota-cripto`, `nota-sync`) como biblioteca. Referência para montar o Android: o SoloMD (MIT, Tauri 2, já na Play Store; ver `COMPARACAO-2026-11.md`), o plano B se o caminho do Dioxus emperrar. Do Onyx (AGPL) só ideias, nenhum código.
+
 ### Riscos e pendências
 - O Dioxus ainda não foi executado em lugar nenhum: só se sabe que compila e empacota. A pasta `/data/data/dev.rustidian.protodioxus/files` é escrita pelo caminho fixo do pacote.
 - O APK do Dioxus sai da variante `debug` do Gradle do `dx` (com o Rust em `--release`) e é assinado com a chave de debug do Android, a mesma do egui. Não há keystore de release.
