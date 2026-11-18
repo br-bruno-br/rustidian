@@ -213,7 +213,7 @@ const PIECES: &[&str] = &[
 fn soup(rng: &mut Rng, pieces: usize) -> String {
     let mut text = String::new();
     for _ in 0..pieces {
-        text.push_str(rng.pick(PIECES));
+        text.push_str(rng.pick::<&str>(PIECES));
         if rng.chance(15) {
             text.push_str(["a", "bc", "Texto", "x y"][rng.below(4)]);
         }
@@ -297,7 +297,7 @@ fn mutated(rng: &mut Rng) -> String {
                 let copy = text[a..b].to_owned();
                 text.insert_str(a, &copy);
             }
-            2 => text.insert_str(a, rng.pick(PIECES)),
+            2 => text.insert_str(a, rng.pick::<&str>(PIECES)),
             3 => text.truncate(b),
             _ => {
                 let copy = text[a..b].to_owned();
@@ -619,7 +619,7 @@ fn query_parse_and_matching_survive_hostile_input() {
         let mut query = String::new();
         for _ in 0..rng.below(14) {
             if rng.chance(70) {
-                query.push_str(rng.pick(&operators));
+                query.push_str(rng.pick::<&str>(&operators));
             } else {
                 query.push_str(&rng.random_chars(0, 12));
             }
