@@ -23,6 +23,10 @@ pub const ADD_UNIQUE_LINK: &str = "Unique note creator: Add unique internal link
 pub const DUPLICATE_FILE: &str = "Make a copy of the current file";
 pub const MOVE_FILE: &str = "Move current file to another folder";
 pub const UNDO_CLOSE_TAB: &str = "Undo close tab";
+pub const SPLIT_RIGHT: &str = "Split right";
+pub const SPLIT_DOWN: &str = "Split down";
+pub const CLOSE_PANE: &str = "Close split pane";
+pub const FOCUS_OTHER_PANE: &str = "Focus the other pane";
 pub const CLOSE_OTHER_TABS: &str = "Close all other tabs";
 pub const OPEN_FILE: &str = "Open file…";
 pub const OPEN_FOLDER: &str = "Open folder…";
@@ -96,6 +100,26 @@ pub const ALL: &[Command] = &[
     Command {
         name: UNDO_CLOSE_TAB,
         shortcut: "Ctrl+Shift+T",
+        scope: Scope::Global,
+    },
+    Command {
+        name: SPLIT_RIGHT,
+        shortcut: "",
+        scope: Scope::Tab,
+    },
+    Command {
+        name: SPLIT_DOWN,
+        shortcut: "",
+        scope: Scope::Tab,
+    },
+    Command {
+        name: CLOSE_PANE,
+        shortcut: "",
+        scope: Scope::Global,
+    },
+    Command {
+        name: FOCUS_OTHER_PANE,
+        shortcut: "",
         scope: Scope::Global,
     },
     Command {
@@ -398,6 +422,10 @@ pub fn label(name: &str) -> &str {
         DUPLICATE_FILE => "Fazer uma cópia do arquivo atual",
         MOVE_FILE => "Mover o arquivo atual para outra pasta",
         UNDO_CLOSE_TAB => "Reabrir aba fechada",
+        SPLIT_RIGHT => "Dividir à direita",
+        SPLIT_DOWN => "Dividir abaixo",
+        CLOSE_PANE => "Fechar o painel dividido",
+        FOCUS_OTHER_PANE => "Ir para o outro painel",
         CLOSE_OTHER_TABS => "Fechar todas as outras abas",
         OPEN_FILE => "Abrir arquivo…",
         OPEN_FOLDER => "Abrir pasta…",
@@ -502,6 +530,24 @@ pub fn ranked(query: &str, scope: Scope) -> Vec<&'static Command> {
             None => scored.push((shown.0, score)),
         }
     }
+    // O casamento por pedaços do nucleo falha quando o nome mostrado tem letra acentuada e a
+    // busca não (digitar "direita" não achava "Dividir à direita"). Este complemento compara sem
+    // acento nem maiúscula e só acrescenta o que o nucleo não achou.
+    let words: Vec<String> = query.split_whitespace().map(fold).collect();
+    if !words.is_empty() {
+        for command in available() {
+            if scored
+                .iter()
+                .any(|(known, _)| std::ptr::eq(*known, command))
+            {
+                continue;
+            }
+            let shown = fold(label(command.name));
+            if words.iter().all(|word| shown.contains(word.as_str())) {
+                scored.push((command, 1));
+            }
+        }
+    }
     scored.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     let mut matches: Vec<_> = scored.into_iter().map(|(command, _)| command).collect();
     if let Some(index) = matches.iter().position(|command| {
@@ -511,6 +557,23 @@ pub fn ranked(query: &str, scope: Scope) -> Vec<&'static Command> {
         matches.insert(0, exact);
     }
     matches
+}
+
+/// Minúsculas e sem acento (só o que o português usa), para comparar o que se digita com o nome
+/// mostrado.
+fn fold(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|character| match character {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            other => other,
+        })
+        .collect()
 }
 
 struct Shown(&'static Command);
@@ -543,6 +606,24 @@ mod tests {
         }
         assert!(ranked("not an available command 987654", Scope::Editor).is_empty());
     }
+    #[test]
+    fn a_busca_acha_o_nome_mostrado_com_ou_sem_acento() {
+        for query in [
+            "Dividir à direita",
+            "dividir a direita",
+            "direita",
+            "à direita",
+        ] {
+            assert_eq!(ranked(query, Scope::Editor)[0].name, SPLIT_RIGHT, "{query}");
+        }
+        assert_eq!(ranked("Dividir abaixo", Scope::Tab)[0].name, SPLIT_DOWN);
+        assert!(ranked("Dividir à direita", Scope::Global).is_empty());
+        assert_eq!(
+            ranked("outro painel", Scope::Global)[0].name,
+            FOCUS_OTHER_PANE
+        );
+    }
+
     #[test]
     fn native_color_toggles_require_an_actual_document_editor() {
         for color in crate::highlight::NativeColor::ALL {
