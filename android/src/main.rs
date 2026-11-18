@@ -14,6 +14,8 @@ mod rota;
 mod servicos;
 mod ui;
 
+#[cfg(test)]
+mod prints;
 
 fn main() {
     dioxus::launch(ui::App);
