@@ -344,13 +344,13 @@ impl Manager {
 }
 
 fn show_error(ui: &mut egui::Ui, tab: &mut Tab, message: &str) {
-    ui.add_space(48.0);
+    ui.add_space(theme::space::XXL + theme::space::L);
     ui.vertical_centered(|ui| {
         ui.label(egui::RichText::new("Não foi possível abrir este quadro").strong());
-        ui.add_space(6.0);
+        ui.add_space(theme::space::XS);
         ui.label(message);
         ui.label("O arquivo não foi alterado.");
-        ui.add_space(10.0);
+        ui.add_space(theme::space::S);
         if ui.button("Abrir como código-fonte").clicked() {
             tab.set_view(View::Source);
         }
@@ -915,7 +915,7 @@ fn show_editor(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> boo
                 .font(FontId::new(size, theme::fonts::text("regular")))
                 .frame(
                     egui::Frame::NONE
-                        .inner_margin(4.0)
+                        .inner_margin(theme::space::XS)
                         .fill(ui.visuals().extreme_bg_color)
                         .stroke(Stroke::new(1.5, theme::accent(ui))),
                 )
@@ -1149,7 +1149,7 @@ fn show_toolbar(
     let mut changed = false;
     ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
         egui::Frame::popup(ui.style())
-            .inner_margin(egui::Margin::symmetric(6, 3))
+            .inner_margin(theme::space::margin(theme::space::S, theme::space::XS))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui
