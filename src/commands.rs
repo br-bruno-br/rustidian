@@ -28,6 +28,11 @@ pub const SPLIT_DOWN: &str = "Split down";
 pub const CLOSE_PANE: &str = "Close split pane";
 pub const TOGGLE_CANVAS_LIBRARY: &str = "Canvas: Toggle note library";
 pub const FOCUS_OTHER_PANE: &str = "Focus the other pane";
+pub const TOGGLE_NOTE_BOARD: &str = "Board: Toggle between note and board";
+pub const TOGGLE_NOTE_BOARD_SHORTCUT: &str = "Ctrl+Shift+B";
+pub const OPEN_BOARD_NOTE: &str = "Board: Open the board's note";
+pub const OPEN_BOARD_NOTE_SHORTCUT: &str = "Ctrl+Alt+B";
+pub const EXPORT_BOARD_AS_NOTE: &str = "Board: Export the list as a note (copy)";
 pub const CLOSE_OTHER_TABS: &str = "Close all other tabs";
 pub const OPEN_FILE: &str = "Open file…";
 pub const OPEN_FOLDER: &str = "Open folder…";
@@ -125,6 +130,21 @@ pub const ALL: &[Command] = &[
     },
     Command {
         name: TOGGLE_CANVAS_LIBRARY,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: TOGGLE_NOTE_BOARD,
+        shortcut: TOGGLE_NOTE_BOARD_SHORTCUT,
+        scope: Scope::Document,
+    },
+    Command {
+        name: OPEN_BOARD_NOTE,
+        shortcut: OPEN_BOARD_NOTE_SHORTCUT,
+        scope: Scope::Document,
+    },
+    Command {
+        name: EXPORT_BOARD_AS_NOTE,
         shortcut: "",
         scope: Scope::Document,
     },
@@ -433,6 +453,9 @@ pub fn label(name: &str) -> &str {
         CLOSE_PANE => "Fechar o painel dividido",
         FOCUS_OTHER_PANE => "Ir para o outro painel",
         TOGGLE_CANVAS_LIBRARY => "Quadro: Mostrar ou esconder a biblioteca de notas",
+        TOGGLE_NOTE_BOARD => "Quadro: Alternar entre nota e quadro (e Lista)",
+        OPEN_BOARD_NOTE => "Quadro: Abrir a nota do quadro",
+        EXPORT_BOARD_AS_NOTE => "Quadro: Exportar a lista como nota (cópia)",
         CLOSE_OTHER_TABS => "Fechar todas as outras abas",
         OPEN_FILE => "Abrir arquivo…",
         OPEN_FOLDER => "Abrir pasta…",
@@ -695,6 +718,28 @@ mod tests {
                     .all(|command| command.name != OPEN_LOCAL_GRAPH)
             );
         }
+    }
+
+    #[test]
+    fn os_atalhos_do_quadro_sao_unicos_e_os_comandos_aparecem_na_busca() {
+        let mut seen = std::collections::HashSet::new();
+        for command in ALL.iter().filter(|command| !command.shortcut.is_empty()) {
+            assert!(
+                seen.insert(command.shortcut),
+                "atalho repetido: {}",
+                command.shortcut
+            );
+        }
+        assert_eq!(TOGGLE_NOTE_BOARD_SHORTCUT, "Ctrl+Shift+B");
+        assert_eq!(
+            ranked("alternar nota quadro", Scope::Document)[0].name,
+            TOGGLE_NOTE_BOARD
+        );
+        assert_eq!(
+            ranked("nota do quadro", Scope::Document)[0].name,
+            OPEN_BOARD_NOTE
+        );
+        assert!(ranked(EXPORT_BOARD_AS_NOTE, Scope::Global).is_empty());
     }
 
     #[test]

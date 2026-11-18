@@ -121,6 +121,40 @@ fn occurrences_of(board: &Path, canvas: &Canvas) -> Vec<(String, Occurrence)> {
     found
 }
 
+/// Aponta de novo os cartões de arquivo de um quadro quando uma nota (ou uma pasta inteira) muda
+/// de nome ou de lugar pelo app: todo cartão cujo `file` é `from` (ou está dentro da pasta
+/// `from`) passa a apontar para `to`. Devolve o texto novo do quadro, ou `None` se nenhum cartão
+/// apontava para lá (ou o texto não é um quadro válido, que nunca é mexido). Os cartões que
+/// seguem apontando para outro lugar ficam como estão.
+pub fn retarget_files(text: &str, from: &str, to: &str) -> Option<String> {
+    let mut canvas = Canvas::parse(text).ok()?;
+    let from_key = key(from);
+    if from_key.is_empty() {
+        return None;
+    }
+    let to = to.replace('\\', "/");
+    let to = to.trim_end_matches('/');
+    let mut changed = false;
+    for node in &mut canvas.nodes {
+        let Some(file) = node.file.as_deref() else {
+            continue;
+        };
+        let current = key(file);
+        let new = if current == from_key {
+            Some(to.to_owned())
+        } else {
+            current
+                .strip_prefix(&format!("{from_key}/"))
+                .map(|rest| format!("{to}/{rest}"))
+        };
+        if let Some(new) = new {
+            node.file = Some(new);
+            changed = true;
+        }
+    }
+    changed.then(|| canvas.to_json())
+}
+
 impl CanvasIndex {
     /// Onde a nota aparece: um item por cartão, por quadro e depois pela posição.
     pub fn occurrences(&self, note: &Path) -> Vec<&Occurrence> {
@@ -376,5 +410,48 @@ mod tests {
         // Quadro apagado do cofre.
         assert!(index.sync(root, &both[1..], &[]));
         assert!(index.occurrences(Path::new("Alpha.md")).is_empty());
+    }
+
+    #[test]
+    fn renomear_ou_mover_atualiza_so_os_cartoes_que_apontavam_para_a_nota_ou_a_pasta() {
+        let quadro = r##"{"nodes":[
+            {"id":"a","type":"file","x":0,"y":0,"width":100,"height":100,"file":"Notas/Velha.md","subpath":"#Seção"},
+            {"id":"b","type":"file","x":0,"y":0,"width":100,"height":100,"file":"./Notas\\Velha.md"},
+            {"id":"c","type":"file","x":0,"y":0,"width":100,"height":100,"file":"Notas/Outra.md"},
+            {"id":"d","type":"file","x":0,"y":0,"width":100,"height":100,"file":"Velha.md"},
+            {"id":"e","type":"file","x":0,"y":0,"width":100,"height":100,"file":"Arquivo/x/Dentro.md"},
+            {"id":"t","type":"text","x":0,"y":0,"width":100,"height":100,"text":"Notas/Velha.md"}],
+            "edges":[],"metadata":{"v":1}}"##;
+        let novo = retarget_files(quadro, "Notas/Velha.md", "Notas/Nova.md").expect("mudou");
+        let canvas = Canvas::parse(&novo).unwrap();
+        let file = |id: &str| canvas.node(id).unwrap().file.clone().unwrap();
+        assert_eq!(file("a"), "Notas/Nova.md");
+        assert_eq!(file("b"), "Notas/Nova.md");
+        assert_eq!(file("c"), "Notas/Outra.md");
+        assert_eq!(
+            file("d"),
+            "Velha.md",
+            "outra nota com o mesmo nome em outra pasta"
+        );
+        assert_eq!(canvas.node("a").unwrap().subpath.as_deref(), Some("#Seção"));
+        assert_eq!(
+            canvas.node("t").unwrap().text.as_deref(),
+            Some("Notas/Velha.md")
+        );
+        assert!(
+            canvas.extra.contains_key("metadata"),
+            "o resto do quadro fica"
+        );
+        // Mover uma pasta inteira leva os cartões que estão dentro dela.
+        let pasta = retarget_files(quadro, "Arquivo", "Morto/Arquivo").expect("mudou");
+        let canvas = Canvas::parse(&pasta).unwrap();
+        assert_eq!(
+            canvas.node("e").unwrap().file.as_deref(),
+            Some("Morto/Arquivo/x/Dentro.md")
+        );
+        // Nada apontava para lá, ou o texto não é quadro: nada muda.
+        assert_eq!(retarget_files(quadro, "Nenhuma.md", "Outra.md"), None);
+        assert_eq!(retarget_files("não é json", "Notas/Velha.md", "X.md"), None);
+        assert_eq!(retarget_files(quadro, "", "X.md"), None);
     }
 }

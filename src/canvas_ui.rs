@@ -17,6 +17,7 @@ use eframe::egui::{
     text::TextFormat,
 };
 use rustidian::{
+    board_list::{self, ItemKind},
     canvas::{
         self, BlockKind, Canvas, GROUP_LABEL_HEIGHT, Handle, Node, NodeKind, Side, color_rgb,
     },
@@ -93,6 +94,8 @@ enum Action {
     Aside,
     /// Recolher (só o título) ou expandir o cartão de nota.
     Collapse,
+    /// Transformar o cartão de texto numa nota do cofre (H2b).
+    ToNote,
 }
 
 /// A rolagem de um cartão de nota (H1): onde está e até onde vai (medido ao desenhar).
@@ -427,6 +430,17 @@ pub struct Outcome {
     pub aside: Option<String>,
     /// Um aviso para o app mostrar (nota que não abriu para edição, por exemplo).
     pub error: Option<String>,
+    /// "Transformar em nota" no menu de um cartão de texto (H2b): o app cria a nota e devolve o
+    /// caminho por `Manager::convert_to_note`.
+    pub to_note: Option<ToNote>,
+    /// O botão "Exportar como nota" da Lista foi apertado (H2b).
+    pub export_list: bool,
+}
+
+/// O pedido de transformar um cartão de texto em nota.
+pub struct ToNote {
+    pub node_id: String,
+    pub text: String,
 }
 
 pub fn is_canvas_tab(tab: &Tab) -> bool {
@@ -487,8 +501,26 @@ impl Manager {
             show_error(ui, tab, &message);
             return outcome;
         }
-        show_canvas(ui, state, tab, notes, &mut outcome);
+        if tab.board_list {
+            show_list(ui, state, tab, notes, &mut outcome);
+        } else {
+            show_canvas(ui, state, tab, notes, &mut outcome);
+        }
         outcome
+    }
+
+    /// Troca o cartão de texto `node_id` pelo cartão vivo da nota `path` (que o app acabou de
+    /// criar com o texto do cartão): mesma posição, tamanho, cor e ligações, e um passo de
+    /// desfazer do quadro. `false` se o cartão já não é de texto.
+    pub fn convert_to_note(&mut self, tab: &mut Tab, node_id: &str, path: &str) -> bool {
+        let Some(state) = self.states.get_mut(&tab.id()) else {
+            return false;
+        };
+        if !state.canvas.text_to_file(node_id, path) {
+            return false;
+        }
+        state.select_only(node_id);
+        state.commit(tab)
     }
 }
 
@@ -504,6 +536,205 @@ fn show_error(ui: &mut egui::Ui, tab: &mut Tab, message: &str) {
             tab.set_view(View::Source);
         }
     });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Lista (H2b)
+// ---------------------------------------------------------------------------------------------
+
+/// O começo do texto de uma nota para o trecho da Lista (`None` se ela não existe).
+fn note_head(notes: &Notes, path: &str) -> Option<String> {
+    match notes.content(Path::new(path)) {
+        Content::Text(text) => Some(text.chars().take(2000).collect()),
+        Content::Missing => None,
+    }
+}
+
+/// A visão Lista do quadro da aba como texto Markdown (para "Exportar como nota").
+pub fn list_markdown(tab: &Tab, notes: &Notes) -> Result<String, String> {
+    let canvas = Canvas::parse(&tab.document.text)?;
+    let list = board_list::build(&canvas, |path| note_head(notes, path));
+    Ok(board_list::to_markdown(
+        &rustidian::board_note::board_title(&tab.document.path),
+        &list,
+    ))
+}
+
+/// O quadro lido como uma nota: grupos viram títulos, cartões viram itens, ligações viram linhas.
+/// Não é arquivo nenhum: sai do quadro (e do começo das notas) a cada desenho, então nunca
+/// diverge dele. Clicar num item volta ao quadro com o cartão centralizado e selecionado.
+fn show_list(
+    ui: &mut egui::Ui,
+    state: &mut CanvasState,
+    tab: &mut Tab,
+    notes: &Notes,
+    outcome: &mut Outcome,
+) {
+    let list = board_list::build(&state.canvas, |path| note_head(notes, path));
+    let weak = ui.visuals().weak_text_color();
+    let accent = theme::accent(ui);
+    let mut go_to: Option<String> = None;
+    let mut back = false;
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(theme::space::XL);
+                ui.vertical(|ui| {
+                    ui.set_max_width((ui.available_width() - 24.0).clamp(200.0, 780.0));
+                    ui.add_space(theme::space::L);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new("Lista do quadro").size(20.0).strong());
+                        if ui
+                            .button("Voltar ao quadro")
+                            .on_hover_text("Ctrl+Shift+B alterna")
+                            .clicked()
+                        {
+                            back = true;
+                        }
+                        if ui
+                            .button("Exportar como nota (cópia)")
+                            .on_hover_text(
+                                "Cria uma nota nova com esta lista. É uma cópia: não acompanha o quadro.",
+                            )
+                            .clicked()
+                        {
+                            outcome.export_list = true;
+                        }
+                    });
+                    ui.label(
+                        egui::RichText::new(
+                            "O quadro lido como uma nota. Não é um arquivo: muda quando o quadro muda.",
+                        )
+                        .color(weak),
+                    );
+                    ui.add_space(theme::space::M);
+                    if list.items.is_empty() {
+                        ui.label(egui::RichText::new("Quadro vazio.").color(weak));
+                    }
+                    for item in &list.items {
+                        ui.horizontal(|ui| {
+                            ui.add_space(item.depth as f32 * theme::space::XL);
+                            ui.vertical(|ui| match &item.kind {
+                                ItemKind::Heading { level } => {
+                                    ui.add_space(theme::space::S);
+                                    let size = match level {
+                                        1 => 20.0,
+                                        2 => 17.0,
+                                        _ => 15.0,
+                                    };
+                                    let title = egui::RichText::new(&item.title)
+                                        .size(size)
+                                        .strong()
+                                        .color(accent);
+                                    if ui
+                                        .add(egui::Label::new(title).sense(Sense::click()))
+                                        .clicked()
+                                    {
+                                        go_to = Some(item.node_id.clone());
+                                    }
+                                }
+                                ItemKind::Note {
+                                    path,
+                                    snippet,
+                                    missing,
+                                } => {
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .link(egui::RichText::new(&item.title).strong())
+                                            .on_hover_text("Mostrar no quadro")
+                                            .clicked()
+                                        {
+                                            go_to = Some(item.node_id.clone());
+                                        }
+                                        if !missing && ui.small_button("abrir nota").clicked() {
+                                            outcome.follow = Some(path.clone());
+                                        }
+                                    });
+                                    if *missing {
+                                        ui.label(
+                                            egui::RichText::new("Nota não encontrada no cofre.")
+                                                .color(weak),
+                                        );
+                                    } else if !snippet.is_empty() {
+                                        ui.label(egui::RichText::new(snippet).color(weak));
+                                    }
+                                }
+                                ItemKind::File { path } => {
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui.link(&item.title).clicked() {
+                                            go_to = Some(item.node_id.clone());
+                                        }
+                                        if ui.small_button("abrir").clicked() {
+                                            outcome.follow = Some(path.clone());
+                                        }
+                                    });
+                                }
+                                ItemKind::Text { text } => {
+                                    egui::Frame::NONE
+                                        .fill(ui.visuals().faint_bg_color)
+                                        .corner_radius(4.0)
+                                        .inner_margin(theme::space::margin(
+                                            theme::space::S,
+                                            theme::space::XS,
+                                        ))
+                                        .show(ui, |ui| {
+                                            if ui
+                                                .add(
+                                                    egui::Label::new(text.trim())
+                                                        .sense(Sense::click()),
+                                                )
+                                                .clicked()
+                                            {
+                                                go_to = Some(item.node_id.clone());
+                                            }
+                                        });
+                                }
+                                ItemKind::Link { url } => {
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui.link(url).on_hover_text("Mostrar no quadro").clicked()
+                                        {
+                                            go_to = Some(item.node_id.clone());
+                                        }
+                                        if ui.small_button("abrir link").clicked() {
+                                            outcome.follow = Some(url.clone());
+                                        }
+                                    });
+                                }
+                                ItemKind::Other => {
+                                    if ui.link(&item.title).clicked() {
+                                        go_to = Some(item.node_id.clone());
+                                    }
+                                }
+                            });
+                        });
+                        ui.add_space(theme::space::XS);
+                    }
+                    if !list.relations.is_empty() {
+                        ui.add_space(theme::space::M);
+                        ui.label(egui::RichText::new("Ligações").size(17.0).strong().color(accent));
+                        for relation in &list.relations {
+                            if ui
+                                .add(egui::Label::new(&relation.text).sense(Sense::click()))
+                                .on_hover_text("Mostrar no quadro")
+                                .clicked()
+                            {
+                                go_to = Some(relation.from.clone());
+                            }
+                        }
+                    }
+                    ui.add_space(theme::space::XXL);
+                });
+            });
+        });
+    if let Some(id) = go_to {
+        state.focus = Some(id);
+        back = true;
+    }
+    if back {
+        tab.board_list = false;
+        ui.ctx().request_repaint();
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1384,6 +1615,13 @@ fn show_context_menu(response: &egui::Response, state: &mut CanvasState) -> Opti
                     }
                 }
                 if let Some(node) = state.canvas.node(id)
+                    && node.node_kind() == NodeKind::Text
+                    && ui.button("Transformar em nota").clicked()
+                {
+                    action = Some(Action::ToNote);
+                    ui.close();
+                }
+                if let Some(node) = state.canvas.node(id)
                     && matches!(node.node_kind(), NodeKind::Group | NodeKind::Text)
                     && ui
                         .button(if node.node_kind() == NodeKind::Group {
@@ -1547,6 +1785,18 @@ fn apply_action(
             };
             state.canvas.toggle_collapsed(&id) && state.commit(tab)
         }
+        Action::ToNote => {
+            if let Target::Node(id) = target
+                && let Some(node) = state.canvas.node(&id)
+                && node.node_kind() == NodeKind::Text
+            {
+                outcome.to_note = Some(ToNote {
+                    text: node.text.clone().unwrap_or_default(),
+                    node_id: id,
+                });
+            }
+            false
+        }
     }
 }
 
@@ -1647,6 +1897,13 @@ fn show_toolbar(
                         state.fit();
                     }
                     ui.label(format!("{:.0}%", state.camera.zoom * 100.0));
+                    if ui
+                        .button("Lista")
+                        .on_hover_text("Ler o quadro como uma nota (Ctrl+Shift+B alterna)")
+                        .clicked()
+                    {
+                        tab.board_list = true;
+                    }
                     ui.separator();
                     if ui
                         .add_enabled(!state.undo.is_empty(), egui::Button::new("Desfazer"))

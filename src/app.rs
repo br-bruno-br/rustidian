@@ -2067,6 +2067,16 @@ impl NotesApp {
         }
         if self.dialog.is_none() {
             // Ctrl+Shift+A só abre a aba do agente com a feature `agente`; sem ela nada acontece.
+            // H2b: Ctrl+Shift+B alterna nota/quadro (e Lista); Ctrl+Alt+B vai do quadro à nota.
+            if ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::B)
+            }) {
+                self.toggle_note_board();
+            } else if ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::B)
+            }) {
+                self.open_board_note();
+            }
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::A)
             }) {
@@ -4396,11 +4406,42 @@ impl NotesApp {
             if let Some(error) = outcome.error {
                 self.error = Some(error);
             }
+            if let Some(request) = outcome.to_note {
+                let board = tab.document.path.clone();
+                let made = match self.vault.as_mut() {
+                    Some(vault) => write_new_note(
+                        vault,
+                        board.parent().unwrap_or(Path::new("")),
+                        &request.text,
+                        |taken| rustidian::board_note::note_file_name(&request.text, taken),
+                    ),
+                    None => Err("Abra um cofre primeiro.".to_owned()),
+                };
+                match made {
+                    Ok(path) => {
+                        let slashed = path.to_string_lossy().replace('\\', "/");
+                        if self
+                            .canvases
+                            .convert_to_note(tab, &request.node_id, &slashed)
+                        {
+                            self.status = format!(
+                                "Cartão transformado na nota {} (desfazer volta o cartão de texto; a nota fica)",
+                                path.display()
+                            );
+                        }
+                        self.refresh_file_views();
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
             if let Some(target) = outcome.aside {
                 self.open_note_in_other_pane(
                     Path::new(&target),
                     rustidian::panes::Orientation::Side,
                 );
+            }
+            if outcome.export_list {
+                self.export_board_list();
             }
             if let Some(target) = outcome.follow {
                 self.follow_link(&target);
@@ -5832,7 +5873,21 @@ impl NotesApp {
                     }
                     if !tab.is_some_and(crate::canvas_ui::is_canvas_tab) {
                         matches.retain(|command| {
-                            command.name != rustidian::commands::TOGGLE_CANVAS_LIBRARY
+                            !matches!(
+                                command.name,
+                                rustidian::commands::TOGGLE_CANVAS_LIBRARY
+                                    | rustidian::commands::OPEN_BOARD_NOTE
+                                    | rustidian::commands::EXPORT_BOARD_AS_NOTE
+                            )
+                        });
+                    }
+                    if !tab.is_some_and(|tab| {
+                        crate::canvas_ui::is_canvas_tab(tab)
+                            || (rustidian::vault::is_markdown(&tab.document.path)
+                                && !tab.document.is_blank())
+                    }) {
+                        matches.retain(|command| {
+                            command.name != rustidian::commands::TOGGLE_NOTE_BOARD
                         });
                     }
                     if !self.panes.is_split() {
@@ -6016,6 +6071,7 @@ impl NotesApp {
     }
 
     fn relocate_tabs(&mut self, source: &Path, destination: &Path) {
+        self.retarget_boards(source, destination);
         crate::explorer_selection::moved(&self.ctx, source, destination);
         self.page_preview.close();
         if let Some(vault) = &self.vault {
@@ -6735,6 +6791,9 @@ impl NotesApp {
                     self.canvases.toggle_library(tab.id());
                 }
             }
+            rustidian::commands::TOGGLE_NOTE_BOARD => self.toggle_note_board(),
+            rustidian::commands::OPEN_BOARD_NOTE => self.open_board_note(),
+            rustidian::commands::EXPORT_BOARD_AS_NOTE => self.export_board_list(),
             rustidian::commands::FOCUS_OTHER_PANE => {
                 if let Some(other) = self.panes.other() {
                     self.focus_pane(other);
@@ -7034,6 +7093,196 @@ impl NotesApp {
                 }
             }
             Err(error) => self.error = Some(error),
+        }
+    }
+
+    /// H2b: alterna nota e quadro. Numa nota `X.md`, abre o quadro par `X.canvas` (cria a
+    /// partir da nota se não existe, sem tocar no `.md`). Num quadro, alterna a mesma aba entre
+    /// o quadro e a Lista; do código-fonte volta ao quadro desenhado.
+    fn toggle_note_board(&mut self) {
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        if tab.document.is_blank() || tab.document.is_image() || tab.view == View::Graph {
+            return;
+        }
+        if rustidian::canvas::is_canvas(&tab.document.path) {
+            if tab.view == View::Source {
+                tab.set_view(View::Read);
+                tab.board_list = false;
+            } else {
+                tab.board_list = !tab.board_list;
+            }
+            self.status = if tab.board_list {
+                "Lista do quadro (Ctrl+Shift+B volta ao quadro)".into()
+            } else {
+                "Quadro".into()
+            };
+            return;
+        }
+        if !rustidian::vault::is_markdown(&tab.document.path) {
+            self.status = "Só uma nota ou um quadro alterna.".into();
+            return;
+        }
+        let note = tab.document.path.clone();
+        let text = tab.document.text.clone();
+        let board = rustidian::board_note::board_of(&note);
+        let open_here = self.tabs.iter().any(|tab| tab.document.path == board);
+        let on_disk = self
+            .vault
+            .as_ref()
+            .is_some_and(|vault| std::fs::symlink_metadata(vault.root.join(&board)).is_ok());
+        if !open_here && !on_disk {
+            let Some(vault) = self.vault.as_mut() else {
+                self.error = Some("Abra um cofre antes de criar um quadro.".into());
+                return;
+            };
+            let linked = rustidian::board_note::linked_files(&note, &text, |target| {
+                vault.resolve_destination(&note, target)
+            });
+            let canvas = rustidian::board_note::board_from_note(&note, &linked);
+            let mut document = Document::new(board.clone());
+            document.text = canvas.to_json();
+            if let Err(error) = vault.save(&mut document) {
+                self.error = Some(error);
+                return;
+            }
+            self.refresh_file_views();
+            self.status = format!(
+                "Quadro {} criado a partir da nota ({} ligadas). A nota não foi alterada.",
+                board.display(),
+                linked.len()
+            );
+        }
+        self.open_note(&board);
+    }
+
+    /// H2b: do quadro `X.canvas` à nota par `X.md`, se ela existe.
+    fn open_board_note(&mut self) {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
+        if !crate::canvas_ui::is_canvas_tab(tab)
+            && !rustidian::canvas::is_canvas(&tab.document.path)
+        {
+            return;
+        }
+        let note = rustidian::board_note::note_of(&tab.document.path);
+        let exists = self
+            .vault
+            .as_ref()
+            .is_some_and(|vault| vault.note(&note).is_some());
+        if exists {
+            self.open_note(&note);
+        } else {
+            self.status = format!("Este quadro não tem a nota par {}.", note.display());
+        }
+    }
+
+    /// H2b: grava a visão Lista do quadro ativo como uma nota NOVA (uma cópia: nunca sobrescreve
+    /// nada e não acompanha o quadro).
+    fn export_board_list(&mut self) {
+        if self.active >= self.tabs.len() {
+            return;
+        }
+        let (before, after) = self.tabs.split_at_mut(self.active);
+        let Some((tab, after)) = after.split_first_mut() else {
+            return;
+        };
+        if !crate::canvas_ui::is_canvas_tab(tab) {
+            return;
+        }
+        let notes = crate::canvas_notes::Notes::new(
+            self.vault.as_ref(),
+            before,
+            after,
+            &mut self.card_tabs,
+        );
+        let text = match crate::canvas_ui::list_markdown(tab, &notes) {
+            Ok(text) => text,
+            Err(error) => {
+                self.error = Some(error);
+                return;
+            }
+        };
+        let board = tab.document.path.clone();
+        let Some(vault) = self.vault.as_mut() else {
+            self.error = Some("Abra um cofre primeiro.".into());
+            return;
+        };
+        match write_new_note(
+            vault,
+            board.parent().unwrap_or(Path::new("")),
+            &text,
+            |taken| rustidian::board_note::export_file_name(&board, taken),
+        ) {
+            Ok(path) => {
+                self.refresh_file_views();
+                self.status = format!("Cópia criada: {} (não acompanha o quadro)", path.display());
+                self.open_note_at(&path, true);
+            }
+            Err(error) => self.error = Some(error),
+        }
+    }
+
+    /// H2b: uma nota (ou pasta) mudou de nome ou de lugar pelo app: os cartões dos quadros que
+    /// apontavam para ela passam a apontar para o lugar novo. Quadro aberto numa aba é mexido na
+    /// aba (autosave e portão do sync de sempre); quadro fechado, pelo caminho normal de salvar.
+    fn retarget_boards(&mut self, source: &Path, destination: &Path) {
+        let Some(vault) = self.vault.as_mut() else {
+            return;
+        };
+        let from = source.to_string_lossy().replace('\\', "/");
+        let to = destination.to_string_lossy().replace('\\', "/");
+        let mut changed = 0usize;
+        let mut failed = Vec::new();
+        for tab in self
+            .tabs
+            .iter_mut()
+            .filter(|tab| rustidian::canvas::is_canvas(&tab.document.path))
+        {
+            if let Some(text) =
+                rustidian::canvas_index::retarget_files(&tab.document.text, &from, &to)
+            {
+                tab.document.text = text;
+                tab.edited();
+                changed += 1;
+            }
+        }
+        let open: Vec<PathBuf> = self
+            .tabs
+            .iter()
+            .map(|tab| tab.document.path.clone())
+            .collect();
+        let boards: Vec<PathBuf> = vault
+            .attachments
+            .iter()
+            .filter(|path| rustidian::canvas::is_canvas(path) && !open.contains(path))
+            .cloned()
+            .collect();
+        for board in boards {
+            let Ok(mut document) = vault.open_document(&board) else {
+                continue;
+            };
+            let Some(text) = rustidian::canvas_index::retarget_files(&document.text, &from, &to)
+            else {
+                continue;
+            };
+            document.text = text;
+            match vault.save(&mut document) {
+                Ok(()) => changed += 1,
+                Err(error) => failed.push(format!("{}: {error}", board.display())),
+            }
+        }
+        if changed > 0 && failed.is_empty() {
+            self.canvas_index_check = None;
+            self.ctx.request_repaint();
+        }
+        if !failed.is_empty() {
+            self.error = Some(format!(
+                "Alguns quadros não acompanharam o novo nome: {}",
+                failed.join("; ")
+            ));
         }
     }
 
@@ -7584,6 +7833,33 @@ impl NotesApp {
         self.page_preview.close();
         self.ctx.request_repaint();
     }
+}
+
+/// Grava uma nota NOVA na pasta (nunca sobrescreve: o cofre recusa um nome que já existe e o
+/// nome é escolhido entre os livres). `pick(ocupado)` dá o nome do arquivo; devolve o caminho
+/// relativo ao cofre.
+fn write_new_note(
+    vault: &mut Vault,
+    folder: &Path,
+    text: &str,
+    pick: impl Fn(&dyn Fn(&str) -> bool) -> String,
+) -> Result<PathBuf, String> {
+    for _ in 0..50 {
+        let name = pick(&|name: &str| {
+            std::fs::symlink_metadata(vault.root.join(folder).join(name)).is_ok()
+                || vault.note(&folder.join(name)).is_some()
+        });
+        let path = folder.join(name);
+        let mut document = Document::new(path.clone());
+        document.text = text.to_owned();
+        match vault.save(&mut document) {
+            Ok(()) => return Ok(path),
+            // Outra janela pode ter criado este nome agora: escolhe de novo.
+            Err(_) if std::fs::symlink_metadata(vault.root.join(&path)).is_ok() => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err("Não foi possível achar um nome de nota livre.".into())
 }
 
 /// Fluxos de GUI sem janela (R8a), no módulo-filho para enxergar os campos privados do app.

@@ -199,3 +199,88 @@ fn print_do_quadro_vivo() {
     session.type_text("\n\n- Conferir o orçamento");
     save(&mut session, &dir, "quadro-vivo.png");
 }
+
+/// H2b: um cofre pequeno em volta de uma nota "Projeto Aurora" que liga a outras cinco.
+fn cofre_do_projeto() -> Session {
+    let aurora = "# Projeto Aurora\n\nPlano da nova vitrine da loja.\n\nOlhe a [[Reunião de segunda]] e o [[Diário]]; os preços estão na [[Tabela de preços]].\nO texto final fica em [[Vitrine]] e as fotos na [[Receita de bolo]] (sim, o fotógrafo anotou lá).\n\n## Prazos\n- Layout: segunda\n- Publicar: sexta\n";
+    let reuniao = "# Reunião de segunda\n\nFalamos sobre o prazo da vitrine.\n\n- Pauta fechada\n- Próxima reunião na quarta\n";
+    let diario = "# Diário\n\nHoje avancei no projeto com o fornecedor.\nLigar para o fornecedor e revisar a lista de preços.\n";
+    let precos = "# Tabela de preços\n\nCamiseta 49,90; caneca 29,90; caderno 24,90.\n";
+    let vitrine = "# Vitrine\n\nTexto da vitrine: três destaques e uma chamada para o Pix.\n";
+    let receita = "# Receita de bolo\n\nMisture a farinha com os ovos e leve ao forno.\n";
+    open_with(&[
+        ("Projeto Aurora", aurora),
+        ("Reunião de segunda", reuniao),
+        ("Diário", diario),
+        ("Tabela de preços", precos),
+        ("Vitrine", vitrine),
+        ("Receita de bolo", receita),
+    ])
+}
+
+/// H2b: o quadro gerado a partir da nota (Ctrl+Shift+B). Grava `quadro-da-nota.png` na pasta de
+/// `RUSTIDIAN_PRINTS_DIR` (ex.: `C:\dev\_wt\prints-h2b`).
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_do_quadro_da_nota() {
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    let mut session = cofre_do_projeto();
+    session.open_note("Projeto Aurora");
+    session.app_mut().show_left = false;
+    session.key(CTRL | egui::Modifiers::SHIFT, egui::Key::B);
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path == Path::new("Projeto Aurora.canvas"))
+    });
+    session.settle();
+    save(&mut session, &dir, "quadro-da-nota.png");
+}
+
+/// H2b: a visão Lista do mesmo quadro, depois de o dono agrupar duas notas e juntar um cartão de
+/// texto e uma ligação. Grava `quadro-lista.png`.
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_da_lista_do_quadro() {
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    let mut session = cofre_do_projeto();
+    session.open_note("Projeto Aurora");
+    session.app_mut().show_left = false;
+    session.key(CTRL | egui::Modifiers::SHIFT, egui::Key::B);
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| tab.document.path == Path::new("Projeto Aurora.canvas"))
+    });
+    // O "trabalho do dono" sobre o quadro gerado: um grupo em volta das duas primeiras notas
+    // ligadas, um cartão de texto solto e um link.
+    let index = session.app().active;
+    let mut board =
+        rustidian::canvas::Canvas::parse(&session.app().tabs[index].document.text).unwrap();
+    let first = board.nodes[1].rect();
+    let second = board.nodes[2].rect();
+    let left = first.x.min(second.x) - 30.0;
+    let top = first.y.min(second.y) - 60.0;
+    let right = (first.x + first.w).max(second.x + second.w) + 30.0;
+    let bottom = (first.y + first.h).max(second.y + second.h) + 30.0;
+    let group = board.add_group("Para esta semana", left, top);
+    if let Some(node) = board.node_mut(&group) {
+        node.width = right - left;
+        node.height = bottom - top;
+    }
+    let text = board.add_text(-200.0, 700.0);
+    board.set_text(&text, "Lembrar: confirmar o fornecedor antes de sexta");
+    let link = board.add_link("https://exemplo.com/fornecedor", 200.0, 700.0);
+    board.connect(&text, &link, None, None);
+    session.app_mut().tabs[index].document.text = board.to_json();
+    session.settle();
+    session.key(CTRL | egui::Modifiers::SHIFT, egui::Key::B);
+    assert!(session.app().tabs[index].board_list);
+    save(&mut session, &dir, "quadro-lista.png");
+}

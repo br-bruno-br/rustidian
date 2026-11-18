@@ -508,6 +508,23 @@ impl Canvas {
             .collect()
     }
 
+    /// Troca um cartão de texto por um cartão de arquivo `path` (H2b: "Transformar em nota"),
+    /// na mesma posição e no mesmo tamanho, com o mesmo id (as ligações continuam valendo) e a
+    /// mesma cor. O texto sai do quadro: quem chama já o gravou na nota. `false` se o nó não é
+    /// um cartão de texto.
+    pub fn text_to_file(&mut self, id: &str, path: &str) -> bool {
+        let Some(node) = self.node_mut(id) else {
+            return false;
+        };
+        if node.node_kind() != NodeKind::Text {
+            return false;
+        }
+        node.kind = "file".to_owned();
+        node.text = None;
+        node.file = Some(path.replace('\\', "/"));
+        true
+    }
+
     /// Põe vários arquivos no quadro a partir de `(x, y)` (o primeiro com o centro ali), em
     /// grade de três colunas, e devolve os ids. A mesma nota pode entrar mais de uma vez.
     pub fn add_files_at(&mut self, paths: &[String], x: f64, y: f64) -> Vec<String> {
@@ -1692,6 +1709,39 @@ mod tests {
         assert_eq!(card_body("---\nsem fim"), "---\nsem fim");
         let long = "ã".repeat(30_000);
         assert_eq!(card_body(&long).chars().count(), 20_000);
+    }
+
+    #[test]
+    fn texto_vira_cartao_de_arquivo_na_mesma_posicao_tamanho_cor_e_ligacoes() {
+        let mut canvas = Canvas::parse(
+            r#"{"nodes":[
+                {"id":"t","type":"text","x":40,"y":-20,"width":250,"height":90,"color":"3","text":"Ideia\nsolta","extra":1},
+                {"id":"o","type":"text","x":400,"y":0,"width":100,"height":50,"text":"outro"}],
+              "edges":[{"id":"e","fromNode":"t","toNode":"o"}]}"#,
+        )
+        .unwrap();
+        assert!(canvas.text_to_file("t", "Notas\\Ideia.md"));
+        let node = canvas.node("t").unwrap();
+        assert_eq!(node.node_kind(), NodeKind::File);
+        assert_eq!(node.file.as_deref(), Some("Notas/Ideia.md"));
+        assert_eq!(node.text, None);
+        assert_eq!(
+            node.rect(),
+            Rect {
+                x: 40.0,
+                y: -20.0,
+                w: 250.0,
+                h: 90.0
+            }
+        );
+        assert_eq!(node.color.as_deref(), Some("3"));
+        assert_eq!(node.extra.get("extra"), Some(&Value::from(1)));
+        assert!(node.is_note_card());
+        // A aresta continua ligada ao mesmo id; só cartão de texto se transforma.
+        assert_eq!(canvas.edges[0].from_node, "t");
+        assert!(!canvas.text_to_file("t", "Outra.md"));
+        assert!(!canvas.text_to_file("nada", "Outra.md"));
+        assert_eq!(Canvas::parse(&canvas.to_json()).unwrap(), canvas);
     }
 
     #[test]

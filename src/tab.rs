@@ -30,6 +30,9 @@ pub struct Tab {
     pub history: History,
     pub view: View,
     pub pinned: bool,
+    /// Quadro mostrado como Lista (H2b): a visão de leitura em forma de nota, gerada na hora.
+    /// Só vale para um quadro `.canvas` desenhado; o modo é da aba e volta com a sessão.
+    pub board_list: bool,
     editing_view: View,
     // A plain-text document borrows the tab in Source mode; the note's modes return after it.
     note_views: Option<(View, View)>,
@@ -55,6 +58,7 @@ pub struct ClosedTab {
     editing_view: View,
     note_views: Option<(View, View)>,
     pinned: bool,
+    board_list: bool,
     image_scale: ImageScale,
     saved_fingerprint: Option<u64>,
 }
@@ -90,6 +94,7 @@ impl ClosedTab {
         tab.editing_view = self.editing_view;
         tab.note_views = self.note_views;
         tab.pinned = self.pinned;
+        tab.board_list = self.board_list;
         tab.image_scale = self.image_scale;
         tab
     }
@@ -143,6 +148,7 @@ impl Tab {
             history,
             view,
             pinned: false,
+            board_list: false,
             editing_view,
             note_views,
             image_scale: ImageScale::Fit,
@@ -184,6 +190,7 @@ impl Tab {
             editing_view: self.editing_view,
             note_views: self.note_views,
             pinned: self.pinned,
+            board_list: self.board_list,
             image_scale: self.image_scale,
             saved_fingerprint: fingerprint,
         })
@@ -207,6 +214,7 @@ impl Tab {
         let graph = self.view == View::Graph;
         if self.document.path != document.path {
             self.editor_path = document.path.clone();
+            self.board_list = false;
         }
         if self.document.is_plain_text()
             && !document.is_plain_text()
