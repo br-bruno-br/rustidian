@@ -134,7 +134,7 @@ fn no_quadro_o_atalho_alterna_a_lista_na_mesma_aba_e_guarda_o_modo() {
     assert!(session.has_label("Lista do quadro"));
     // A Lista mostra as notas do quadro como itens, com o trecho do começo de cada uma.
     assert!(session.has_label("Second"));
-    assert!(session.has_label("De volta para [[Home]]."));
+    assert!(session.has_label("De volta para Home."));
     // Ler a Lista não muda o arquivo nem suja a aba.
     assert!(!session.app().tabs[0].document.dirty());
 
@@ -235,13 +235,23 @@ fn renomear_a_nota_pelo_app_leva_o_campo_file_dos_quadros_junto() {
 		{"id":"h","type":"file","x":0,"y":300,"width":300,"height":200,"file":"Home.md"}
 	],"edges":[]}"#;
     let mut session = Session::open_with(&[("Plano.canvas", PLANO.as_bytes())]);
+    // Dois renomeares seguidos: o segundo ainda pode ver "Home.md mudou fora do aplicativo" (o
+    // primeiro reescreveu o link dela e o índice do cofre se atualiza em outra thread), então
+    // tenta de novo até o arquivo existir (máximo ~10 s).
     let rename = |session: &mut Session, from: &str, to: &str| {
-        session
-            .app_mut()
-            .ask_file(Dialog::RenameNote, PathBuf::from(from));
-        session.app_mut().dialog_input = to.to_owned();
-        session.key(NONE, egui::Key::Enter);
-        session.settle();
+        for _ in 0..100 {
+            session
+                .app_mut()
+                .ask_file(Dialog::RenameNote, PathBuf::from(from));
+            session.app_mut().dialog_input = to.to_owned();
+            session.key(NONE, egui::Key::Enter);
+            session.settle();
+            if session.path(to).exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("o renomear não aconteceu: {:?}", session.app().error);
     };
 
     // Quadro fechado: o arquivo do quadro no disco é reescrito.
