@@ -1,0 +1,6 @@
+[application]
+name = "rustidian"
+
+[bundle]
+identifier = "dev.rustidian.app"
+publisher = "Rustidian"

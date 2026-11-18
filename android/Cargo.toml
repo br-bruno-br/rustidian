@@ -1,0 +1,42 @@
+# R7b-1: app Android do Rustidian (Dioxus 0.7, renderer mobile = WebView do Android).
+# NÃO faz parte do workspace do app: o `[workspace]` vazio abaixo (e o `exclude` no Cargo.toml
+# da raiz) isolam este build, para o CI do desktop não compilar o Dioxus.
+[package]
+name = "rustidian-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "Rustidian no Android: caderno de notas Markdown (Dioxus)"
+license = "MIT"
+
+# O nome do executável vira o nome do app no Android (o `dx` converte para "Rustidian").
+[[bin]]
+name = "rustidian"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]
+dioxus = { version = "=0.7.10" }
+# Mesmas regras do cofre em todo aparelho (escrita atômica, lixeira, caminho válido).
+nota-sync = { path = "../crates/nota-sync" }
+nota-cripto = { path = "../crates/nota-cripto" }
+# Data da nota nova e carimbo da lixeira (mesma versão e features do app e do nota-sync).
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+# Só nos testes: renderiza as telas em HTML para conferir e tirar print sem celular.
+dioxus-ssr = { version = "=0.7.10", default-features = false }
+tempfile = "3.27"
+
+[features]
+default = []
+mobile = ["dioxus/mobile"]
+desktop = ["dioxus/desktop"]
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "abort"
+codegen-units = 16
