@@ -2,3 +2,12 @@
 /reports/
 /assets/icons/proof/renders/traced-callout-*.png
 __pycache__/
+
+# R16: chave privada de assinatura das atualizacoes. Ela mora FORA do repositorio; isto e so a rede de seguranca.
+*.chave
+*.chave-privada
+chave-privada*
+*chave_privada*
+/chaves/
+*.key
+*.pem
