@@ -7,8 +7,8 @@
 use super::*;
 use egui_kittest::kittest::NodeT;
 
-const NONE: egui::Modifiers = egui::Modifiers::NONE;
-const SHIFT: egui::Modifiers = egui::Modifiers::SHIFT;
+pub(super) const NONE: egui::Modifiers = egui::Modifiers::NONE;
+pub(super) const SHIFT: egui::Modifiers = egui::Modifiers::SHIFT;
 const MODES: [&str; 2] = ["Source editing", "Live preview"];
 
 fn key_events(modifiers: egui::Modifiers, key: egui::Key) -> Vec<egui::Event> {
@@ -33,7 +33,7 @@ fn key_events(modifiers: egui::Modifiers, key: egui::Key) -> Vec<egui::Event> {
 
 /// Um passo "enfileirado": todos os eventos chegam ao app no mesmo quadro (o smoke em
 /// Python congelava o processo com SIGSTOP para conseguir o mesmo).
-enum Step {
+pub(super) enum Step {
     Text(&'static str),
     Key(egui::Modifiers, egui::Key),
 }
@@ -83,7 +83,7 @@ impl Session {
     }
 
     /// Abre a nota `name` (sem `.md`) no modo pedido, com o cursor no fim.
-    fn edit(&mut self, name: &str, mode: &str) {
+    pub(super) fn edit(&mut self, name: &str, mode: &str) {
         self.open_note(name);
         self.command(mode);
         self.settle();
@@ -91,7 +91,7 @@ impl Session {
     }
 
     /// Todos os eventos no mesmo quadro.
-    fn queued(&mut self, steps: &[Step]) {
+    pub(super) fn queued(&mut self, steps: &[Step]) {
         let mut events = Vec::new();
         for step in steps {
             match step {
@@ -110,7 +110,7 @@ impl Session {
 
     /// Um quadro com o gancho `raw_input_hook` do app, que o harness não chama: é ele que
     /// devolve ao quadro seguinte os eventos adiados (Tab e Enter enfileirados).
-    fn frame(&mut self) {
+    pub(super) fn frame(&mut self) {
         let ctx = self.harness.ctx.clone();
         let mut raw = self.harness.input_mut().clone();
         eframe::App::raw_input_hook(self.harness.state_mut(), &ctx, &mut raw);
@@ -119,7 +119,7 @@ impl Session {
     }
 
     /// Um caractere por evento e por quadro, como o teclado de verdade.
-    fn type_chars(&mut self, text: &str) {
+    pub(super) fn type_chars(&mut self, text: &str) {
         for c in text.chars() {
             self.harness.event(egui::Event::Text(c.to_string()));
             self.harness.step();
@@ -127,22 +127,22 @@ impl Session {
         self.settle();
     }
 
-    fn paste(&mut self, text: &str) {
+    pub(super) fn paste(&mut self, text: &str) {
         self.harness.event(egui::Event::Paste(text.to_owned()));
         self.settle();
     }
 
-    fn select_all(&mut self) {
+    pub(super) fn select_all(&mut self) {
         self.key(CTRL, egui::Key::A);
     }
 
     /// Ctrl+S e os bytes que ficaram no disco.
-    fn save_and_read(&mut self, name: &str) -> Vec<u8> {
+    pub(super) fn save_and_read(&mut self, name: &str) -> Vec<u8> {
         self.key(CTRL, egui::Key::S);
         std::fs::read(self.path(name)).expect("nota gravada")
     }
 
-    fn assert_saved(&mut self, name: &str, expected: &[u8], what: &str) {
+    pub(super) fn assert_saved(&mut self, name: &str, expected: &[u8], what: &str) {
         let actual = self.save_and_read(name);
         assert_eq!(
             String::from_utf8_lossy(&actual),
@@ -732,7 +732,7 @@ impl Session {
         self.harness.query_all_by_role(role).count()
     }
 
-    fn has_value(&self, value: &str) -> bool {
+    pub(super) fn has_value(&self, value: &str) -> bool {
         self.harness.query_all_by_value(value).next().is_some()
     }
 
@@ -753,7 +753,7 @@ impl Session {
         self.settle();
     }
 
-    fn click_value(&mut self, value: &str) {
+    pub(super) fn click_value(&mut self, value: &str) {
         {
             let node = self
                 .harness
@@ -770,7 +770,7 @@ impl Session {
         self.settle();
     }
 
-    fn click_label(&mut self, label: &str) {
+    pub(super) fn click_label(&mut self, label: &str) {
         {
             let node = self
                 .harness
@@ -830,7 +830,7 @@ impl Session {
 
     /// Espera o disco ter exatamente estes bytes (o autosave e a janela do watcher são
     /// assíncronos), em vez de supor um tempo fixo.
-    fn wait_for_file(&mut self, name: &str, expected: &[u8]) {
+    pub(super) fn wait_for_file(&mut self, name: &str, expected: &[u8]) {
         let path = self.path(name);
         for _ in 0..300 {
             if std::fs::read(&path).is_ok_and(|bytes| bytes == expected) {
@@ -1043,7 +1043,7 @@ fn tabela_visual_edita_celulas_com_unicode_barra_escapada_tab_e_desfazer() {
 }
 
 impl Session {
-    fn right_click_role_nth(&mut self, role: egui::Role, nth: usize) {
+    pub(super) fn right_click_role_nth(&mut self, role: egui::Role, nth: usize) {
         {
             let nodes: Vec<_> = self.harness.query_all_by_role(role).collect();
             nodes

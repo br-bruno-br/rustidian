@@ -35,6 +35,7 @@ enum Dialog {
     RenameNote,
     TrashNote,
     AddProperty,
+    InsertTable,
     BookmarkTitle,
     InsertTemplate,
     Settings,
@@ -1560,14 +1561,20 @@ impl NotesApp {
                 })
                 .unwrap_or_else(|| Err("Abra um cofre primeiro.".into()));
         }
-        if matches!(dialog, Dialog::SaveCopy | Dialog::AddProperty) && self.view() == View::Graph {
+        if matches!(
+            dialog,
+            Dialog::SaveCopy | Dialog::AddProperty | Dialog::InsertTable
+        ) && self.view() == View::Graph
+        {
             return;
         }
-        if matches!(dialog, Dialog::SaveCopy | Dialog::AddProperty)
-            && self
-                .tabs
-                .get(self.active)
-                .is_some_and(|tab| tab.document.is_image())
+        if matches!(
+            dialog,
+            Dialog::SaveCopy | Dialog::AddProperty | Dialog::InsertTable
+        ) && self
+            .tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.document.is_image())
         {
             self.error = Some("Escolha uma nota Markdown para esta ação.".into());
             return;
@@ -1603,6 +1610,7 @@ impl NotesApp {
                 .as_ref()
                 .map(|vault| vault.root.display().to_string())
                 .unwrap_or_default(),
+            Dialog::InsertTable => "3x3".into(),
             _ => String::new(),
         };
         self.dialog_selected = 0;
@@ -4824,6 +4832,7 @@ impl NotesApp {
             Dialog::RenameNote => "Renomear ou mover",
             Dialog::TrashNote => "Mover para a Lixeira?",
             Dialog::AddProperty => "Adicionar propriedade",
+            Dialog::InsertTable => "Inserir tabela",
             Dialog::BookmarkTitle => "Editar título do favorito",
             Dialog::Settings => "Configurações",
             Dialog::InsertTemplate => "Inserir modelo",
@@ -4916,6 +4925,7 @@ impl NotesApp {
                 }
                 Dialog::RenameNote | Dialog::TrashNote => "Pasta/Nota.md",
                 Dialog::AddProperty => "Nome da propriedade",
+                Dialog::InsertTable => "Colunas x linhas, por exemplo 3x4",
             };
             let input_id = ui.make_persistent_id(("dialog-input", title));
             let focus_settled = ui.memory(|memory| {
@@ -5203,12 +5213,24 @@ impl NotesApp {
                                 .weak(),
                         );
                     }
+                    if dialog == Dialog::InsertTable {
+                        ui.label(
+                            RichText::new(format!(
+                                "Colunas x linhas; a primeira linha é o cabeçalho. Até {} colunas e {} linhas.",
+                                rustidian::tables::MAX_NEW_COLUMNS,
+                                rustidian::tables::MAX_NEW_ROWS
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                    }
                     let (action, cancel) = theme::dialog_actions(ui, match dialog {
                         Dialog::OpenVault => "Abrir pasta",
                         Dialog::NewFolder => "Criar pasta",
                         Dialog::RenameNote => "Renomear",
                         Dialog::TrashNote => "Mover para a Lixeira",
                         Dialog::AddProperty => "Adicionar propriedade",
+                        Dialog::InsertTable => "Inserir tabela",
                         Dialog::SaveCopy => "Salvar cópia",
                         Dialog::BookmarkTitle => "Salvar título",
                         _ => unreachable!(),
@@ -5679,6 +5701,27 @@ impl NotesApp {
                 }
             };
         }
+        if dialog == Dialog::InsertTable {
+            let Some((columns, rows)) = rustidian::tables::parse_size(&input) else {
+                self.error = Some("Digite colunas x linhas, por exemplo 3x4.".into());
+                return false;
+            };
+            let Some(markdown) = rustidian::tables::blank_table(columns, rows) else {
+                self.error = Some(format!(
+                    "Use de 1 a {} colunas e de 1 a {} linhas.",
+                    rustidian::tables::MAX_NEW_COLUMNS,
+                    rustidian::tables::MAX_NEW_ROWS
+                ));
+                return false;
+            };
+            let Some(tab) = self.tabs.get(self.active) else {
+                return false;
+            };
+            self.editor
+                .table_command(tab, crate::editor_ui::TableEdit::New(markdown));
+            self.error = None;
+            return true;
+        }
         if dialog == Dialog::AddProperty {
             let Some(tab) = self.tabs.get_mut(self.active) else {
                 return false;
@@ -6024,6 +6067,24 @@ impl NotesApp {
                 self.editor.insert_text(tab, text);
             }
             "Open settings" => self.ask(Dialog::Settings),
+            rustidian::commands::INSERT_TABLE if self.editable_note() => {
+                self.ask(Dialog::InsertTable)
+            }
+            rustidian::commands::TABLE_FROM_SELECTION
+            | rustidian::commands::FORMAT_TABLE
+            | rustidian::commands::FORMAT_ALL_TABLES
+                if self.editable_note() =>
+            {
+                let operation = match command {
+                    rustidian::commands::TABLE_FROM_SELECTION => {
+                        crate::editor_ui::TableEdit::FromSelection
+                    }
+                    rustidian::commands::FORMAT_TABLE => crate::editor_ui::TableEdit::FormatAtCaret,
+                    _ => crate::editor_ui::TableEdit::FormatAll,
+                };
+                self.editor
+                    .table_command(&self.tabs[self.active], operation);
+            }
             "New note" => self.create_note(),
             "New canvas" => self.create_canvas_in(Path::new("")),
             "New folder" => self.ask(Dialog::NewFolder),

@@ -72,6 +72,14 @@ pub enum Action {
     RemoveRows(Range<usize>),
     /// At least one column must remain.
     RemoveColumns(Range<usize>),
+    /// Paste a block of cells (a spreadsheet range) with its top left corner on `row`, `column`.
+    /// The table grows with body rows and columns when the block does not fit; the text of each
+    /// cell is plain (pipes are escaped here) and replaces what was there.
+    Fill {
+        row: usize,
+        column: usize,
+        cells: Vec<Vec<String>>,
+    },
 }
 
 impl Table {
@@ -309,6 +317,30 @@ impl Table {
                 }
                 alignments.drain(selected.clone());
             }
+            Action::Fill {
+                row,
+                column,
+                ref cells,
+            } if row < rows.len()
+                && column < columns
+                && !cells.is_empty()
+                && cells.len() <= MAX_PASTE_LINES
+                && cells.iter().all(|line| line.len() <= MAX_PASTE_COLUMNS) =>
+            {
+                let wanted = columns.max(column + cells.iter().map(Vec::len).max().unwrap_or(0));
+                alignments.resize(wanted, Alignment::None);
+                rows.resize(rows.len().max(row + cells.len()), Vec::new());
+                for line in &mut rows {
+                    if line.len() < wanted {
+                        line.resize(wanted, String::new());
+                    }
+                }
+                for (offset, line) in cells.iter().enumerate() {
+                    for (index, text) in line.iter().enumerate() {
+                        rows[row + offset][column + index] = encode_pipes(text);
+                    }
+                }
+            }
             Action::Align { column, alignment } if column < columns => {
                 // Alignment changes need not reformat any content row.
                 let marker = match alignment {
@@ -350,42 +382,173 @@ impl Table {
                 );
             }
         }
+        let replacement = self.render(source, &rows, &alignments, false);
+        source.replace_range(self.range.clone(), &replacement);
+        Ok(())
+    }
+
+    /// The table's own text with every pipe aligned: cells padded to the widest of their
+    /// column, the separator as wide as the column. Cell contents are untouched, so a table
+    /// that is already aligned comes back byte for byte.
+    pub fn formatted(&self, source: &str) -> String {
+        let columns = self.alignments.len();
+        let rows: Vec<Vec<String>> = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                (0..row.cells.len().max(columns))
+                    .map(|column| self.cell(source, index, column).to_owned())
+                    .collect()
+            })
+            .collect();
+        self.render(source, &rows, &self.alignments, true)
+    }
+
+    /// The Markdown for `rows` (header first) inside this table's own prefix (a quote or list
+    /// marker) and line ending. `padded` aligns the pipes; otherwise each cell is `| text |`.
+    fn render(
+        &self,
+        source: &str,
+        rows: &[Vec<String>],
+        alignments: &[Alignment],
+        padded: bool,
+    ) -> String {
         let newline = if self.separator.ending.is_empty() {
             "\n"
         } else {
             &self.separator.ending
         };
         let trailing = source[self.range.clone()].ends_with('\n');
-        let continuation = &self.separator.prefix;
-        let mut replacement = String::new();
-        for (index, row) in rows.iter().enumerate() {
-            let prefix = if index == 0 {
-                &self.rows[0].prefix
-            } else {
-                continuation
-            };
-            write_row(&mut replacement, prefix, row.iter().map(String::as_str));
-            replacement.push_str(newline);
-            if index == 0 {
-                write_row(
-                    &mut replacement,
-                    continuation,
-                    alignments.iter().map(|a| match a {
-                        Alignment::Left => ":---",
-                        Alignment::Center => ":---:",
-                        Alignment::Right => "---:",
-                        Alignment::None => "---",
-                    }),
-                );
-                replacement.push_str(newline);
+        let mut text = render_rows(
+            &self.rows[0].prefix,
+            &self.separator.prefix,
+            rows,
+            alignments,
+            newline,
+            padded,
+        );
+        if !trailing {
+            text.truncate(text.len() - newline.len());
+        }
+        text
+    }
+}
+
+/// Header, separator and body, each line closed by `newline`; later lines use `continuation`.
+fn render_rows(
+    first: &str,
+    continuation: &str,
+    rows: &[Vec<String>],
+    alignments: &[Alignment],
+    newline: &str,
+    padded: bool,
+) -> String {
+    let columns = rows
+        .iter()
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0)
+        .max(alignments.len());
+    // The separator needs three characters (`---`) to be a separator at all.
+    let widths: Vec<usize> = (0..columns)
+        .map(|column| {
+            if !padded {
+                return 0;
+            }
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| display_width(cell))
+                .max()
+                .unwrap_or(0)
+                .max(3)
+        })
+        .collect();
+    let alignment = |column: usize| alignments.get(column).copied().unwrap_or(Alignment::None);
+    let mut output = String::new();
+    for (index, row) in rows.iter().enumerate() {
+        output.push_str(if index == 0 { first } else { continuation });
+        output.push('|');
+        if padded {
+            for (column, width) in widths.iter().enumerate() {
+                let cell = row.get(column).map_or("", String::as_str);
+                output.push(' ');
+                push_aligned(&mut output, cell, *width, alignment(column));
+                output.push_str(" |");
+            }
+        } else {
+            for cell in row {
+                output.push(' ');
+                output.push_str(cell);
+                output.push_str(" |");
             }
         }
-        if !trailing {
-            replacement.truncate(replacement.len() - newline.len());
+        output.push_str(newline);
+        if index == 0 {
+            output.push_str(continuation);
+            output.push('|');
+            for (column, width) in widths.iter().enumerate().take(alignments.len()) {
+                output.push(' ');
+                push_marker(&mut output, alignment(column), *width);
+                output.push_str(" |");
+            }
+            output.push_str(newline);
         }
-        source.replace_range(self.range.clone(), &replacement);
-        Ok(())
     }
+    output
+}
+
+/// `cell` inside `width` columns, placed as `alignment` says.
+fn push_aligned(output: &mut String, cell: &str, width: usize, alignment: Alignment) {
+    let spare = width.saturating_sub(display_width(cell));
+    let (before, after) = match alignment {
+        Alignment::Right => (spare, 0),
+        Alignment::Center => (spare / 2, spare - spare / 2),
+        Alignment::Left | Alignment::None => (0, spare),
+    };
+    output.extend(std::iter::repeat_n(' ', before));
+    output.push_str(cell);
+    output.extend(std::iter::repeat_n(' ', after));
+}
+
+/// The separator cell of one column; `width` 0 gives the short form (`---`, `:---:`).
+fn push_marker(output: &mut String, alignment: Alignment, width: usize) {
+    let (left, right) = match alignment {
+        Alignment::Left => (true, false),
+        Alignment::Center => (true, true),
+        Alignment::Right => (false, true),
+        Alignment::None => (false, false),
+    };
+    // The short form keeps three dashes between the colons.
+    let width = if width == 0 {
+        3 + usize::from(left) + usize::from(right)
+    } else {
+        width
+    };
+    output.push_str(if left { ":" } else { "-" });
+    output.extend(std::iter::repeat_n('-', width.saturating_sub(2)));
+    output.push_str(if right { ":" } else { "-" });
+}
+
+/// Terminal columns of `text`: wide East Asian and emoji characters take two, combining marks
+/// none. Good enough to line pipes up in a monospaced editor without a width table.
+fn display_width(text: &str) -> usize {
+    text.chars()
+        .map(|character| match character as u32 {
+            0x0300..=0x036F | 0x200B..=0x200F | 0xFE00..=0xFE0F => 0,
+            0x1100..=0x115F
+            | 0x2E80..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE6F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x1F300..=0x1F64F
+            | 0x1F900..=0x1F9FF
+            | 0x20000..=0x3FFFD => 2,
+            _ => 1,
+        })
+        .sum()
 }
 
 impl Row {
@@ -507,4 +670,423 @@ fn sort_text(source: &str) -> String {
             _ => None,
         })
         .collect()
+}
+
+/// A paste is a spreadsheet range, not a book: past these it stays plain text.
+const MAX_PASTE_LINES: usize = 2000;
+const MAX_PASTE_COLUMNS: usize = 100;
+/// The size limits of a table made from the palette.
+pub const MAX_NEW_COLUMNS: usize = 30;
+pub const MAX_NEW_ROWS: usize = 500;
+
+/// The Markdown for an empty table of `columns` x `rows` lines (the header counts as one),
+/// pipes aligned, without a final line break. `None` when the size is out of range.
+pub fn blank_table(columns: usize, rows: usize) -> Option<String> {
+    if !(1..=MAX_NEW_COLUMNS).contains(&columns) || !(1..=MAX_NEW_ROWS).contains(&rows) {
+        return None;
+    }
+    let grid = vec![vec![String::new(); columns]; rows];
+    Some(grid_markdown(&grid))
+}
+
+/// "3x4", "3 x 4", "3×4" or "3,4": columns, then lines.
+pub fn parse_size(input: &str) -> Option<(usize, usize)> {
+    let (columns, rows) = input.split_once(['x', 'X', '×', ',', ';'])?;
+    Some((columns.trim().parse().ok()?, rows.trim().parse().ok()?))
+}
+
+/// A grid of cells as a padded Markdown table, the first line as the header and no final break.
+pub fn grid_markdown(grid: &[Vec<String>]) -> String {
+    let columns = grid.iter().map(Vec::len).max().unwrap_or(0);
+    let rows: Vec<Vec<String>> = grid
+        .iter()
+        .map(|line| {
+            let mut line: Vec<String> = line.iter().map(|text| encode_pipes(text)).collect();
+            line.resize(columns, String::new());
+            line
+        })
+        .collect();
+    let mut text = render_rows("", "", &rows, &vec![Alignment::None; columns], "\n", true);
+    text.pop();
+    text
+}
+
+/// Every table of `source` with its pipes aligned; `None` when nothing would change.
+pub fn format_all(source: &str) -> Option<String> {
+    format_where(source, |_| true)
+}
+
+/// Only the table that holds the byte `caret` (its first or last byte included).
+pub fn format_at(source: &str, caret: usize) -> Option<String> {
+    format_where(source, |range| range.start <= caret && caret <= range.end)
+}
+
+fn format_where(source: &str, wanted: impl Fn(&Range<usize>) -> bool) -> Option<String> {
+    let mut result = source.to_owned();
+    // Back to front: an earlier table keeps its offsets while a later one changes length.
+    for table in crate::editor::Markdown::parse(source)
+        .tables
+        .iter()
+        .rev()
+        .filter(|table| wanted(&table.range))
+    {
+        result.replace_range(table.range.clone(), &table.formatted(source));
+    }
+    (result != source).then_some(result)
+}
+
+/// The line breaks to put around a block of `block` text that replaces `start..end` of `source`
+/// so that it stands alone as a paragraph: `(before, after)`.
+pub fn block_padding(source: &str, start: usize, end: usize) -> (&'static str, &'static str) {
+    let head = &source[..start];
+    let tail = &source[end..];
+    let before = if head.is_empty() || head.ends_with("\n\n") {
+        ""
+    } else if head.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    let after = if tail.is_empty() {
+        "\n"
+    } else if tail.starts_with("\n\n") {
+        ""
+    } else if tail.starts_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    (before, after)
+}
+
+/// Cells of delimited text: records end at a line break, fields at `delimiter`, and a field
+/// opened with `"` runs (line breaks included) to the closing quote, `""` being a quote. Line
+/// breaks inside a field become `<br>`; every cell is trimmed.
+fn split_records(text: &str, delimiter: char) -> Vec<Vec<String>> {
+    let mut records = vec![Vec::new()];
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut at_start = true;
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        if quoted {
+            match character {
+                '"' if chars.peek() == Some(&'"') => {
+                    chars.next();
+                    field.push('"');
+                }
+                '"' => quoted = false,
+                '\r' if chars.peek() == Some(&'\n') => {}
+                '\n' | '\r' => field.push_str("<br>"),
+                _ => field.push(character),
+            }
+            continue;
+        }
+        match character {
+            '"' if at_start => {
+                quoted = true;
+                at_start = false;
+            }
+            _ if character == delimiter => {
+                records.last_mut().unwrap().push(field.trim().to_owned());
+                field.clear();
+                at_start = true;
+            }
+            '\r' if chars.peek() == Some(&'\n') => {}
+            '\n' | '\r' => {
+                records.last_mut().unwrap().push(field.trim().to_owned());
+                field.clear();
+                records.push(Vec::new());
+                at_start = true;
+            }
+            _ => {
+                field.push(character);
+                at_start = at_start && character.is_whitespace();
+            }
+        }
+    }
+    if !field.is_empty() || !records.last().unwrap().is_empty() {
+        records.last_mut().unwrap().push(field.trim().to_owned());
+    }
+    if records.last().is_some_and(Vec::is_empty) {
+        records.pop();
+    }
+    records
+}
+
+/// A rectangular grid when `text` is a range copied from a spreadsheet: tab-separated, at least
+/// `min_lines` lines, every line with the same number of cells (two or more) and at least one
+/// non-empty cell in the first column.
+fn tab_grid(text: &str, min_lines: usize) -> Option<Vec<Vec<String>>> {
+    if !text.contains('\t') {
+        return None;
+    }
+    let grid = split_records(text, '\t');
+    let columns = grid.first()?.len();
+    (columns >= 2
+        && grid.len() >= min_lines
+        && grid.len() <= MAX_PASTE_LINES
+        && columns <= MAX_PASTE_COLUMNS
+        && grid.iter().all(|line| line.len() == columns)
+        && grid.iter().any(|line| !line[0].is_empty()))
+    .then_some(grid)
+}
+
+/// The block pasted at the cursor of a note: two or more spreadsheet lines become a table. Plain
+/// prose, a single line and code indented with tabs (lines with an empty first cell, or a
+/// different count of tabs) stay as they are.
+pub fn paste_grid(text: &str) -> Option<Vec<Vec<String>>> {
+    tab_grid(text, 2)
+}
+
+/// What pasting `text` into a table cell fills: any tab-separated range, even one line.
+pub fn paste_cells(text: &str) -> Option<Vec<Vec<String>>> {
+    tab_grid(text, 1)
+}
+
+/// The grid of a selection converted by the palette: tab, `;` or `,` separated text, choosing
+/// the delimiter that gives every line the same number of cells (two or more), tab first.
+pub fn selection_grid(text: &str) -> Option<Vec<Vec<String>>> {
+    ['\t', ';', ','].into_iter().find_map(|delimiter| {
+        let grid = split_records(text, delimiter);
+        let columns = grid.first()?.len();
+        (columns >= 2
+            && grid.len() <= MAX_PASTE_LINES
+            && columns <= MAX_PASTE_COLUMNS
+            && grid.iter().all(|line| line.len() == columns))
+        .then_some(grid)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table(source: &str) -> Table {
+        let mut tables = crate::editor::Markdown::parse(source).tables;
+        assert_eq!(tables.len(), 1, "{source:?}");
+        tables.remove(0)
+    }
+
+    fn cells(rows: &[&[&str]]) -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|row| row.iter().map(|cell| (*cell).to_owned()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn a_new_table_has_the_asked_size_with_aligned_pipes() {
+        assert_eq!(
+            blank_table(3, 2).unwrap(),
+            "|     |     |     |\n| --- | --- | --- |\n|     |     |     |"
+        );
+        assert_eq!(blank_table(1, 1).unwrap(), "|     |\n| --- |");
+        let parsed = table(&blank_table(4, 6).unwrap());
+        assert_eq!((parsed.alignments.len(), parsed.rows.len()), (4, 6));
+        for (columns, rows) in [
+            (0, 2),
+            (2, 0),
+            (MAX_NEW_COLUMNS + 1, 2),
+            (2, MAX_NEW_ROWS + 1),
+        ] {
+            assert!(blank_table(columns, rows).is_none(), "{columns}x{rows}");
+        }
+    }
+
+    #[test]
+    fn the_size_accepts_the_usual_ways_to_write_it() {
+        for input in ["3x4", "3 x 4", " 3X4 ", "3×4", "3,4", "3;4"] {
+            assert_eq!(parse_size(input), Some((3, 4)), "{input:?}");
+        }
+        for input in ["", "3", "x4", "3x", "três x 4", "3x4x5", "-1x2"] {
+            assert_eq!(parse_size(input), None, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn formatting_aligns_the_pipes_by_the_alignment_of_each_column() {
+        let source = "# T\n\n| Item | Valor | Obs |\n| :--- | ---: | :-: |\n| Maçã | 12 | ok |\n| Abacaxi grande | 7,5 | sem açúcar |\n\nFim\n";
+        let expected = "# T\n\n| Item           | Valor |    Obs     |\n| :------------- | ----: | :--------: |\n| Maçã           |    12 |     ok     |\n| Abacaxi grande |   7,5 | sem açúcar |\n\nFim\n";
+        assert_eq!(format_all(source).as_deref(), Some(expected));
+        // Already aligned: nothing to do, and a second pass is the identity.
+        assert_eq!(format_all(expected), None);
+    }
+
+    #[test]
+    fn formatting_keeps_the_prefix_the_line_ending_and_the_content_of_each_cell() {
+        let source =
+            "> | a | b |\r\n> | --- | --- |\r\n> | `x\\|y` | [[Home\\|Alias]] |\r\n\r\nresto";
+        let formatted = format_all(source).unwrap();
+        assert_eq!(
+            formatted,
+            "> | a      | b               |\r\n> | ------ | --------------- |\r\n> | `x\\|y` | [[Home\\|Alias]] |\r\n\r\nresto"
+        );
+        // The same cells come out when the result is read back.
+        let parsed = table(&formatted);
+        assert_eq!(parsed.cell_text(&formatted, 1, 0), "`x|y`");
+    }
+
+    #[test]
+    fn formatting_pads_short_rows_and_counts_wide_characters_as_two_columns() {
+        let source = "| 名前 | b |\n| --- | --- |\n| x |\n";
+        assert_eq!(
+            format_all(source).as_deref(),
+            Some("| 名前 | b   |\n| ---- | --- |\n| x    |     |\n")
+        );
+    }
+
+    #[test]
+    fn formatting_at_the_caret_touches_only_that_table() {
+        let first = "|a|b|\n|-|-|\n|1|2|\n";
+        let second = "| c | d |\n| - | - |\n| 3 | 4 |\n";
+        let source = format!("{first}\ntexto\n\n{second}");
+        let caret_in_second = source.len() - 3;
+        let only_second = format_at(&source, caret_in_second).unwrap();
+        assert!(only_second.starts_with(first), "{only_second}");
+        assert!(only_second.contains("| c   | d   |"), "{only_second}");
+        assert_eq!(
+            format_at(&source, first.len() + 2),
+            None,
+            "caret in the prose"
+        );
+        let both = format_all(&source).unwrap();
+        assert!(both.starts_with("| a   | b   |\n| --- | --- |\n| 1   | 2   |\n"));
+    }
+
+    #[test]
+    fn a_spreadsheet_range_becomes_a_table_but_prose_and_code_do_not() {
+        let excel =
+            "Nome\tQtd\tObs\r\nAna\t3\t\"linha 1\nlinha 2\"\r\nBia\t\t\"diz \"\"oi\"\"\"\r\n";
+        let grid = paste_grid(excel).unwrap();
+        assert_eq!(
+            grid,
+            cells(&[
+                &["Nome", "Qtd", "Obs"],
+                &["Ana", "3", "linha 1<br>linha 2"],
+                &["Bia", "", "diz \"oi\""],
+            ])
+        );
+        assert_eq!(
+            grid_markdown(&grid),
+            "| Nome | Qtd | Obs                |\n| ---- | --- | ------------------ |\n| Ana  | 3   | linha 1<br>linha 2 |\n| Bia  |     | diz \"oi\"           |"
+        );
+        for not_a_table in [
+            "só texto, com vírgulas",
+            "uma\tlinha só\n",
+            "a\tb\nc\td\te\n",
+            "\tum\n\tdois\n",
+            "if x {\n\tfoo();\n\t\tbar();\n}\n",
+            "",
+        ] {
+            assert_eq!(paste_grid(not_a_table), None, "{not_a_table:?}");
+        }
+        // Inside a cell even one copied line fills cells.
+        assert_eq!(paste_cells("a\tb\n"), Some(cells(&[&["a", "b"]])));
+        assert_eq!(paste_cells("a\nb\n"), None);
+    }
+
+    #[test]
+    fn pipes_in_pasted_cells_are_escaped_in_the_table() {
+        let grid = cells(&[&["a|b", "c"], &["1", "2"]]);
+        let markdown = grid_markdown(&grid);
+        let parsed = table(&markdown);
+        assert_eq!(parsed.cell_text(&markdown, 0, 0), "a|b");
+        assert_eq!(parsed.rows.len(), 2);
+    }
+
+    #[test]
+    fn a_selection_converts_from_tab_semicolon_or_comma_in_that_order() {
+        assert_eq!(
+            selection_grid("a\tb,c\n1\t2,3"),
+            Some(cells(&[&["a", "b,c"], &["1", "2,3"]]))
+        );
+        assert_eq!(
+            selection_grid("a;b\n1;2"),
+            Some(cells(&[&["a", "b"], &["1", "2"]]))
+        );
+        assert_eq!(
+            selection_grid("nome,nota\n\"Silva, Ana\",9\nBia,8\n"),
+            Some(cells(&[
+                &["nome", "nota"],
+                &["Silva, Ana", "9"],
+                &["Bia", "8"]
+            ]))
+        );
+        assert_eq!(selection_grid("a,b\n1,2,3"), None, "ragged lines");
+        assert_eq!(selection_grid("sem separador"), None);
+    }
+
+    #[test]
+    fn a_block_gets_the_blank_lines_it_needs_around_it() {
+        let cases = [
+            ("", 0, 0, "", "\n"),
+            ("texto", 5, 5, "\n\n", "\n"),
+            ("texto\n", 6, 6, "\n", "\n"),
+            ("texto\n\n", 7, 7, "", "\n"),
+            ("antes\n\ndepois", 7, 7, "", "\n\n"),
+            ("antes\n\n\ndepois", 7, 7, "", "\n"),
+            ("antes depois", 5, 6, "\n\n", "\n\n"),
+            ("antes\ndepois", 6, 6, "\n", "\n\n"),
+            ("antes\n\ndepois", 5, 5, "\n\n", ""),
+        ];
+        for (source, start, end, before, after) in cases {
+            assert_eq!(
+                block_padding(source, start, end),
+                (before, after),
+                "{source:?} {start}..{end}"
+            );
+        }
+    }
+
+    #[test]
+    fn pasting_a_block_of_cells_grows_the_table_and_replaces_what_was_there() {
+        let base = "| A | B |\n| --- | --- |\n| 1 | 2 |\n\nfim\n";
+        let model = table(base);
+        let mut source = base.to_owned();
+        model
+            .apply(
+                &mut source,
+                Action::Fill {
+                    row: 1,
+                    column: 1,
+                    cells: cells(&[&["x|y", "z"], &["p", "q"], &["r", "s"]]),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            source,
+            "| A | B |  |\n| --- | --- | --- |\n| 1 | x\\|y | z |\n|  | p | q |\n|  | r | s |\n\nfim\n"
+        );
+        let grown = table(&source);
+        assert_eq!((grown.alignments.len(), grown.rows.len()), (3, 4));
+        assert_eq!(grown.cell_text(&source, 1, 1), "x|y");
+        assert_eq!(grown.cell_text(&source, 3, 2), "s");
+    }
+
+    #[test]
+    fn a_paste_that_does_not_fit_is_refused_without_touching_the_source() {
+        let base = "| A | B |\n| --- | --- |\n| 1 | 2 |\n";
+        let model = table(base);
+        for action in [
+            Action::Fill {
+                row: 9,
+                column: 0,
+                cells: cells(&[&["x"]]),
+            },
+            Action::Fill {
+                row: 0,
+                column: 5,
+                cells: cells(&[&["x"]]),
+            },
+            Action::Fill {
+                row: 0,
+                column: 0,
+                cells: Vec::new(),
+            },
+        ] {
+            let mut source = base.to_owned();
+            assert!(model.apply(&mut source, action).is_err());
+            assert_eq!(source, base);
+        }
+    }
 }
