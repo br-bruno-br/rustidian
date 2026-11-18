@@ -3691,11 +3691,16 @@ impl NotesApp {
         let backup = self.tabs.get(self.active).map(Tab::id);
         self.active = own;
         let focus = std::mem::take(&mut self.editor.focus);
+        let jump = self.editor.jump.take();
+        let reveal = self.editor.reveal.take();
         let find = std::mem::take(&mut self.find);
         let anchor = self.pending_anchor.take();
         self.editor.swap_caches(&mut self.pane_caches);
         body(self);
         self.editor.swap_caches(&mut self.pane_caches);
+        // O pulo para um trecho e o "mostrar" são do painel com o foco, não deste.
+        self.editor.jump = jump;
+        self.editor.reveal = reveal;
         if self.tabs.get(self.active).map(Tab::id) == Some(own_id) {
             self.pending_anchor = anchor;
             self.find = find;
