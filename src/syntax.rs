@@ -380,7 +380,7 @@ fn grammar(language: &str) -> Option<String> {
         // Fancy-regex excludes Babel; TypeScriptReact handles JSX too.
         "jsx" | "typescriptreact" => "tsx",
         "pyw" | "python" => "py",
-        "jsonc" => "json",
+        "jsonc" | "canvas" => "json",
         "shell" | "sh" => "bash",
         _ => token.as_str(),
     };
