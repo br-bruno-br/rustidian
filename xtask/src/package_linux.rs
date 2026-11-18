@@ -8,7 +8,7 @@ use std::{fs, path::Path, process::Command};
 
 pub fn run(args: &[String]) -> Result<()> {
     let args = Args::parse(args, &[])?;
-    args.only(&["binary", "output", "notices"])?;
+    args.only(&["binary", "output", "notices", "chave"])?;
     let binary = args.require_path("binary")?;
     let output = args.require_path("output")?;
     let root = root();
@@ -50,15 +50,35 @@ pub fn run(args: &[String]) -> Result<()> {
         format!(
             "{version}\n\nRun ./rustidian to try the included demo.\n\
 Install to your applications menu: ./rustidian --install\n\
+(it checks the signed SHA256SUMS in this folder; an unsigned developer build needs --sem-assinatura)\n\
 Open a copied vault: ./rustidian \"/path/to/vault copy\"\n\n\
 Linux desktop notebook. Existing Obsidian community plugins are unsupported.\n\
 Report a problem: https://github.com/MasihMoafi/rustidian/issues/new/choose\n"
         ),
     )?;
+    // R16: a lista de hashes do pacote vai DENTRO dele, assinada se houver chave (`--chave` ou
+    // RUSTIDIAN_CHAVE_PRIVADA); `rustidian --install` confere isso antes de copiar qualquer coisa.
+    sign_bundle(bundle, args.opt("chave"))?;
     let mtime = source_date_epoch();
     write_archive(bundle, &output, mtime)?;
     write_sha256_sidecar(&output)?;
     println!("{}", output.display());
+    Ok(())
+}
+
+/// Grava `SHA256SUMS` (e a assinatura, com chave) na pasta do pacote.
+fn sign_bundle(bundle: &Path, key: Option<&str>) -> Result<()> {
+    let key = crate::assinatura::carregar_chave(key)?;
+    let embedded =
+        crate::atualizacao::ler_chave_publica(crate::atualizacao::CHAVE_PUBLICA_EMBUTIDA)
+            .map_err(|e| e.to_string())?;
+    let done = crate::assinatura::assinar_pasta(bundle, key.as_ref(), embedded.as_ref())?;
+    if !done.assinado {
+        eprintln!(
+            "AVISO: pacote SEM ASSINATURA (sem chave privada); `rustidian --install` vai recusá-lo \
+             sem --sem-assinatura."
+        );
+    }
     Ok(())
 }
 

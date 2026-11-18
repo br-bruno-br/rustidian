@@ -82,13 +82,26 @@ pub fn bundle(args: &[String]) -> Result<()> {
     let unrelated = base.join("unrelated XDG data");
     let install = |bundle: &Path| -> Result<std::process::Output> {
         Ok(Command::new(bundle.join("rustidian"))
-            .args(["--install", "--prefix"])
+            .args(["--install", "--sem-assinatura", "--prefix"])
             .arg(&prefix)
             .arg("--default-vault")
             .arg(&vault)
             .env("XDG_DATA_HOME", &unrelated)
             .output()?)
     };
+    // R16: sem assinatura o instalador recusa e não toca em nada (o pacote do CI não tem chave).
+    if !bundle.join("SHA256SUMS.sig").exists() {
+        let recusada = Command::new(bundle.join("rustidian"))
+            .args(["--install", "--prefix"])
+            .arg(&prefix)
+            .output()?;
+        ensure!(
+            !recusada.status.success()
+                && String::from_utf8_lossy(&recusada.stderr).contains("Instalação recusada")
+                && !prefix.exists(),
+            "O instalador deveria recusar o pacote sem assinatura"
+        );
+    }
     let first = install(&bundle)?;
     ensure!(
         first.status.success(),

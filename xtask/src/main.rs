@@ -1,6 +1,7 @@
 //! `cargo xtask <comando>`: empacotamento, benchmark e release do Rustidian, tudo em Rust (R8).
 //! Substitui os scripts Python de `scripts/` e `tests/` (a lista está em `docs/bruno/PLANO.md`).
 
+mod assinatura;
 mod bench;
 mod checks;
 mod lint;
@@ -15,6 +16,11 @@ mod util;
 #[allow(dead_code)]
 #[path = "../../src/install_linux.rs"]
 mod install_linux;
+
+/// O mesmo arquivo do app: quem assina e quem confere usam o mesmo formato (R16).
+#[allow(dead_code)]
+#[path = "../../src/atualizacao.rs"]
+mod atualizacao;
 
 use util::Result;
 
@@ -31,6 +37,10 @@ Empacotamento (Linux)
   package-appimage --binary B --notices N --output O
   test-bundle      --binary B [--archive A]
   test-deb         --binary B --notices N [--package P] [--system]
+
+Assinatura das atualizações (R16)
+  chave-nova <arquivo> [--trocar]       gera o par de chaves; a privada vai para <arquivo> (fora do repo)
+  release --dir D [--chave ARQUIVO]     SHA256SUMS de D e a assinatura (sem chave: avisa e não assina)
 
 Release
   lint-packaging                        checagens rápidas dos arquivos de empacotamento
@@ -51,6 +61,8 @@ fn dispatch(command: &str, args: &[String]) -> Result<()> {
         "test-deb" => checks::deb(args),
         "lint-packaging" => lint::run_all(args),
         "language-notices" => notices::run(args),
+        "chave-nova" => assinatura::chave_nova(args),
+        "release" => assinatura::release(args),
         "preflight-release" => release::preflight(args),
         "publish-release" => release::publish(args),
         "reuse-candidate" => release::reuse(args),

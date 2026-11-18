@@ -46,6 +46,9 @@ notify = "8.2"
 nucleo-matcher = "0.3"
 trash = "5.2"
 base64 = "0.22"
+# R16: confere a assinatura ed25519 do SHA256SUMS antes de instalar (so verifica; a chave privada nunca entra no app).
+ed25519-dalek = { version = "2.2", default-features = false, features = ["std"] }
+sha2 = "0.10"
 percent-encoding = "2.3"
 serde_yaml_ng = "0.10"
 serde-saphyr = { version = "2.0", default-features = false, features = ["deserialize"] }
