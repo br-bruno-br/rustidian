@@ -138,3 +138,64 @@ fn print_da_tela_dividida() {
     session.settle();
     save(&mut session, &dir, "dividir.png");
 }
+
+/// H1: um quadro com quatro cartões de nota vivos (um deles em edição) e a biblioteca aberta.
+/// Grava `quadro-vivo.png` na pasta de `RUSTIDIAN_PRINTS_DIR` (ex.: `C:\dev\_wt\prints-h1`).
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_do_quadro_vivo() {
+    use super::canvas::{double_click, drag, state};
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    let aurora = "# Projeto Aurora\n\nPlano da nova vitrine da loja.\n\n## Prazos\n- Layout: **segunda**\n- Fotos dos produtos: quarta\n- Publicar: *sexta*\n\n## Responsáveis\nMaria revisa o texto; Bruno aprova o preço.\n";
+    let reuniao = "# Reunião de segunda\n\nFalamos sobre o Projeto Aurora e definimos o prazo.\n\n> A Maria vai revisar o texto da vitrine até sexta.\n\n- Pauta fechada\n- Próxima reunião na quarta\n- Levar as fotos novas\n- Conferir o estoque da vitrine\n- Separar as caixas\n";
+    let diario = "# Diário\n\nHoje avancei no projeto com o fornecedor.\nTambém vi `Projeto Aurora` de novo.\n\n- Ligar para o fornecedor\n- Revisar a lista de preços\n";
+    let receita = "# Receita de bolo\n\nMisture a farinha com os ovos e leve ao forno por quarenta minutos.\n\n1. Bater os ovos\n2. Juntar a farinha\n3. Assar\n";
+    let notes = [
+        ("Projeto Aurora", aurora),
+        ("Reunião de segunda", reuniao),
+        ("Diário", diario),
+        ("Receita de bolo", receita),
+        ("Ideias", "# Ideias\n"),
+        ("Compras", "# Compras\n"),
+    ];
+    let mut session = open_with(&notes);
+    let board = r#"{
+	"nodes":[
+		{"id":"aurora","type":"file","x":0,"y":0,"width":340,"height":270,"file":"Projeto Aurora.md"},
+		{"id":"reuniao","type":"file","x":380,"y":0,"width":340,"height":270,"file":"Reunião de segunda.md"},
+		{"id":"diario","type":"file","x":0,"y":310,"width":340,"height":250,"file":"Diário.md"},
+		{"id":"receita","type":"file","x":380,"y":310,"width":340,"height":250,"file":"Receita de bolo.md","color":"4"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"aurora","fromSide":"right","toNode":"reuniao","toSide":"left","label":"origem"},
+		{"id":"e2","fromNode":"aurora","fromSide":"bottom","toNode":"diario","toSide":"top"}
+	]
+}"#;
+    std::fs::write(session.path("Projeto.canvas"), board).expect("quadro");
+    session.settle();
+    session
+        .app_mut()
+        .open_note(std::path::Path::new("Projeto.canvas"));
+    session.app_mut().show_left = false;
+    session.settle();
+    // Abre a biblioteca, empurra o quadro para a direita (a biblioteca cobre a esquerda) e entra
+    // em edição no cartão da Aurora.
+    session.command("Canvas: Toggle note library");
+    session.settle();
+    let area = state(&session).node_screen_rect("receita").unwrap();
+    drag(
+        &mut session,
+        egui::pos2(area.right() + 40.0, area.bottom() + 40.0),
+        egui::pos2(area.right() + 40.0 + 230.0, area.bottom() + 40.0),
+    );
+    let body = {
+        let rect = state(&session).node_screen_rect("aurora").unwrap();
+        egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.7)
+    };
+    double_click(&mut session, body);
+    session.type_text("\n\n- Conferir o orçamento");
+    save(&mut session, &dir, "quadro-vivo.png");
+}

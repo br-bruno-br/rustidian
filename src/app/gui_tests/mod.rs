@@ -14,6 +14,7 @@ mod dividir;
 mod edicao;
 mod navegacao;
 mod prints;
+mod quadro_vivo;
 mod tabela;
 
 /// Ctrl no Windows/Linux: o egui precisa dos dois marcadores para casar `COMMAND` e `CTRL`.
