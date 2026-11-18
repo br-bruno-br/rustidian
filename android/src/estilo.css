@@ -1,0 +1,268 @@
+/* Rustidian Android: tema claro e escuro pelo sistema (prefers-color-scheme).
+   Toques com no mínimo 48 px; a altura segue a janela visível (100dvh) para o teclado não
+   cobrir o texto (o viewport usa interactive-widget=resizes-content). */
+:root {
+  color-scheme: light dark;
+  --fundo: #f6f6f3;
+  --superficie: #ffffff;
+  --texto: #1c1c1e;
+  --suave: #67676e;
+  --linha: #e2e2dd;
+  --acento: #2b66d9;
+  --acento-texto: #ffffff;
+  --perigo: #c0392b;
+  --aviso-fundo: #fff3cd;
+  --aviso-texto: #5b4400;
+  --salvo: #2e7d4f;
+  --pressionado: #ececf0;
+  --sombra: rgba(0, 0, 0, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fundo: #121214;
+    --superficie: #1c1c1f;
+    --texto: #ececf0;
+    --suave: #9b9ba5;
+    --linha: #2c2c32;
+    --acento: #7fa8ff;
+    --acento-texto: #0c1a38;
+    --perigo: #ff8f84;
+    --aviso-fundo: #3b3115;
+    --aviso-texto: #f2dd9b;
+    --salvo: #7fd49b;
+    --pressionado: #28282e;
+    --sombra: rgba(0, 0, 0, 0.6);
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: system-ui, Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.35;
+  background: var(--fundo);
+  color: var(--texto);
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; }
+button:active { background: var(--pressionado); }
+
+.tela {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--fundo);
+}
+
+/* Barra do topo */
+.topo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 4px 8px 4px 8px;
+  background: var(--superficie);
+  border-bottom: 1px solid var(--linha);
+}
+.titulos { flex: 1; min-width: 0; padding: 0 8px; }
+.titulos h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub {
+  display: block;
+  font-size: 13px;
+  color: var(--suave);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.icone {
+  flex: none;
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 24px;
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.titulo-nota {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  text-align: left;
+  padding: 2px 10px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.titulo-nota .nome {
+  display: block;
+  font-size: 20px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Busca */
+.busca { padding: 8px 12px; }
+.campo {
+  width: 100%;
+  min-height: 48px;
+  font: inherit;
+  color: var(--texto);
+  background: var(--superficie);
+  border: 1px solid var(--linha);
+  border-radius: 12px;
+  padding: 8px 14px;
+  outline: none;
+}
+.campo:focus { border-color: var(--acento); }
+
+/* Lista */
+.corpo { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.lista { list-style: none; margin: 0; padding: 0; }
+.linha {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--linha);
+  background: var(--superficie);
+}
+.linha-corpo {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px 6px 16px;
+  text-align: left;
+}
+.tipo { flex: none; font-size: 22px; width: 28px; text-align: center; }
+.textos { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.textos .nome {
+  font-size: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trecho {
+  font-size: 14px;
+  color: var(--suave);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.apagar { color: var(--suave); }
+.vazio { margin: 0; padding: 28px 24px; color: var(--suave); text-align: center; }
+.erro { color: var(--perigo); }
+.rodape-cofre {
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--suave);
+  word-break: break-all;
+  text-align: center;
+}
+
+/* Avisos */
+.aviso {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--aviso-fundo);
+  color: var(--aviso-texto);
+  font-size: 15px;
+}
+.aviso span { flex: 1; }
+
+/* Botões */
+.acoes {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom)) 12px;
+  background: var(--superficie);
+  border-top: 1px solid var(--linha);
+}
+.tela:has(.busca .campo:focus) .acoes { display: none; }
+.botao {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1px solid var(--linha);
+  background: var(--superficie);
+  font-weight: 600;
+  flex: 1;
+}
+.botao.principal {
+  background: var(--acento);
+  color: var(--acento-texto);
+  border-color: var(--acento);
+}
+.botao.perigo {
+  background: var(--perigo);
+  color: var(--superficie);
+  border-color: var(--perigo);
+}
+
+/* Editor */
+.editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--texto);
+  background: var(--superficie);
+}
+.estado {
+  flex: none;
+  padding: 6px 16px max(6px, env(safe-area-inset-bottom)) 16px;
+  font-size: 13px;
+  color: var(--suave);
+  background: var(--superficie);
+  border-top: 1px solid var(--linha);
+}
+.estado.salvo { color: var(--salvo); }
+.estado.erro { color: var(--perigo); }
+
+/* Diálogos */
+.fundo {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--sombra);
+  z-index: 10;
+}
+.dialogo {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
+  border-radius: 18px;
+  background: var(--superficie);
+  box-shadow: 0 8px 32px var(--sombra);
+}
+.dialogo h2 { margin: 0 0 14px 0; font-size: 19px; line-height: 1.25; }
+.dialogo .mensagem { margin: 0 0 16px 0; color: var(--suave); font-size: 15px; }
+.dialogo .campo { margin-bottom: 16px; }
+.botoes { display: flex; gap: 10px; }
