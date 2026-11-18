@@ -11,6 +11,7 @@ use std::time::Duration;
 
 mod edicao;
 mod navegacao;
+mod prints;
 
 /// Ctrl no Windows/Linux: o egui precisa dos dois marcadores para casar `COMMAND` e `CTRL`.
 pub(super) const CTRL: egui::Modifiers = egui::Modifiers {

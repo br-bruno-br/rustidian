@@ -95,7 +95,7 @@ egui-winit = { version = "0.37", default-features = false }
 # A real server on a local port for the sync tests.
 nota-servidor = { path = "crates/nota-servidor" }
 # Testes de GUI sem janela e sem X11 (R8): o app roda dentro de um harness em memória.
-egui_kittest = { version = "0.37", default-features = false, features = ["eframe"] }
+egui_kittest = { version = "0.37", default-features = false, features = ["eframe", "wgpu"] }
 
 [profile.release]
 opt-level = 3
