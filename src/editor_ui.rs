@@ -227,6 +227,31 @@ pub struct Editor {
     spell_changed_at: f64,
 }
 
+/// O que o editor guarda do texto que desenhou por último (R15). Com duas notas na tela, o painel
+/// sem foco usa o seu próprio jogo, trocado para dentro do editor só durante o desenho dele; assim
+/// as duas notas não refazem a análise e o layout uma da outra a cada quadro.
+#[derive(Default)]
+pub struct DocCaches {
+    source: String,
+    source_version: u64,
+    parsed: Markdown,
+    sections: rustidian::folding::Sections,
+    layout_cache: Option<LayoutCache>,
+    tables: crate::table_ui::Tables,
+}
+
+impl Editor {
+    /// Troca o que o editor guarda do texto pelo jogo dado (chamar de novo desfaz a troca).
+    pub fn swap_caches(&mut self, other: &mut DocCaches) {
+        std::mem::swap(&mut self.source, &mut other.source);
+        std::mem::swap(&mut self.source_version, &mut other.source_version);
+        std::mem::swap(&mut self.parsed, &mut other.parsed);
+        std::mem::swap(&mut self.sections, &mut other.sections);
+        std::mem::swap(&mut self.layout_cache, &mut other.layout_cache);
+        std::mem::swap(&mut self.tables, &mut other.tables);
+    }
+}
+
 /// A palavra errada em que o dono clicou com o botao direito e as correcoes dela.
 #[derive(Clone)]
 struct SpellTarget {
@@ -1930,7 +1955,14 @@ impl Editor {
                     self.completion_selected = 0;
                     self.completion_dismissed = false;
                 }
-                if consume_action(ui, egui::Modifiers::COMMAND, &[Key::Enter]) {
+                // Ctrl+Enter segue o link; Ctrl+Alt+Enter também (o app o abre no outro painel).
+                if consume_action(ui, egui::Modifiers::COMMAND, &[Key::Enter])
+                    || consume_action(
+                        ui,
+                        egui::Modifiers::COMMAND | egui::Modifiers::ALT,
+                        &[Key::Enter],
+                    )
+                {
                     follow = link_at(&tab.document.text, cursor);
                     action_handled = true;
                 } else if let Some(completion) = completion
