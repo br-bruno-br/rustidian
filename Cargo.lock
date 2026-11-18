@@ -4629,6 +4629,7 @@ dependencies = [
  "tempfile",
  "trash",
  "two-face",
+ "unicode-normalization",
  "ureq",
  "usvg",
  "vt100",

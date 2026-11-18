@@ -4,6 +4,7 @@ pub mod autosave;
 pub mod bookmarks;
 pub mod callouts;
 pub mod canvas;
+pub mod canvas_index;
 pub mod commands;
 pub mod editor;
 pub mod folding;

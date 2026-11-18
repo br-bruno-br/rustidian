@@ -90,6 +90,8 @@ pub struct CanvasState {
     error: Option<String>,
     camera: Camera,
     fitted: bool,
+    /// Cartão a centralizar e selecionar no próximo desenho (H2a: vindo do painel de links).
+    focus: Option<String>,
     selected: Vec<String>,
     selected_edge: Option<String>,
     drag: Option<Drag>,
@@ -115,6 +117,7 @@ impl CanvasState {
             error,
             camera: Camera::default(),
             fitted: false,
+            focus: None,
             selected: Vec::new(),
             selected_edge: None,
             drag: None,
@@ -133,10 +136,12 @@ impl CanvasState {
     fn reload(&mut self, text: &str) {
         let camera = self.camera;
         let fitted = self.fitted;
+        let focus = self.focus.take();
         let selected = std::mem::take(&mut self.selected);
         *self = Self::load(text);
         self.camera = camera;
         self.fitted = fitted;
+        self.focus = focus;
         self.selected = selected
             .into_iter()
             .filter(|id| self.canvas.node(id).is_some())
@@ -156,6 +161,11 @@ impl CanvasState {
     #[cfg(test)]
     pub fn selected(&self) -> &[String] {
         &self.selected
+    }
+
+    #[cfg(test)]
+    pub fn area_for_tests(&self) -> egui::Rect {
+        self.area
     }
 
     #[cfg(test)]
@@ -205,6 +215,20 @@ impl CanvasState {
         self.canvas
             .node(id)
             .map(|node| self.screen_rect(node.rect()))
+    }
+
+    /// Centraliza a câmera no cartão `id` e o seleciona. `false` se o cartão não existe.
+    fn center_on(&mut self, id: &str) -> bool {
+        let Some(rect) = self.canvas.node(id).map(|node| node.rect()) else {
+            return false;
+        };
+        self.camera.pan = [
+            -((rect.x + rect.w / 2.0) as f32) * self.camera.zoom,
+            -((rect.y + rect.h / 2.0) as f32) * self.camera.zoom + TOOLBAR_ROOM / 2.0,
+        ];
+        self.selected = vec![id.to_owned()];
+        self.selected_edge = None;
+        true
     }
 
     fn fit(&mut self) {
@@ -324,6 +348,15 @@ impl Manager {
         self.states.get(&tab_id)
     }
 
+    /// Pede que o quadro da aba centralize e selecione o cartão `node_id` quando for desenhado.
+    pub fn focar_no(&mut self, tab: &Tab, node_id: &str) {
+        let state = self
+            .states
+            .entry(tab.id())
+            .or_insert_with(|| CanvasState::load(&tab.document.text));
+        state.focus = Some(node_id.to_owned());
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, tab: &mut Tab, vault: Option<&Vault>) -> Outcome {
         let id = tab.id();
         let state = self
@@ -373,6 +406,11 @@ fn show_canvas(
     if !state.fitted && rect.width() > 1.0 {
         state.fit();
         state.fitted = true;
+    }
+    if rect.width() > 1.0
+        && let Some(id) = state.focus.take()
+    {
+        state.center_on(&id);
     }
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
