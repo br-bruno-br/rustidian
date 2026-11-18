@@ -108,3 +108,33 @@ fn prints_para_o_dono() {
     session.open_note("Projeto Aurora");
     save(&mut session, &dir, "geral.png");
 }
+
+/// R15: duas notas lado a lado, cada painel com as suas abas. Grava `dividir.png` na pasta de
+/// `RUSTIDIAN_PRINTS_DIR` (ex.: `C:\dev\_wt\prints-r15`).
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_da_tela_dividida() {
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    let notes = [
+        ("Projeto Aurora", AURORA),
+        ("Reunião de segunda", REUNIAO),
+        ("Diário", DIARIO),
+        ("Receita de bolo", RECEITA),
+    ];
+    let mut session = open_with(&notes);
+    // Painel da esquerda com duas abas (Projeto Aurora e Diário); a Reunião abre no da direita.
+    session.open_note("Projeto Aurora");
+    session.app_mut().open_note_at(Path::new("Diário.md"), true);
+    session.settle();
+    session.app_mut().open_note_in_other_pane(
+        Path::new("Reunião de segunda.md"),
+        rustidian::panes::Orientation::Side,
+    );
+    session.settle();
+    session.app_mut().focus_pane(0);
+    session.settle();
+    save(&mut session, &dir, "dividir.png");
+}

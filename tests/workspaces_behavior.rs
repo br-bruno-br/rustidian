@@ -19,6 +19,7 @@ fn layout(path: &str) -> Layout {
         left_width: 320.0,
         right_width: 270.0,
         right_tab: 2,
+        panes: None,
     }
 }
 
@@ -180,4 +181,70 @@ fn linked_files_and_folders_cannot_restore_external_notes() {
         fs::read(outside.path().join("Private.md")).unwrap(),
         b"private"
     );
+}
+
+#[test]
+fn a_tela_dividida_volta_com_o_layout_e_um_layout_antigo_volta_com_um_painel() {
+    use rustidian::panes::{Orientation, Saved, SavedPane};
+    let base = tempfile::tempdir().unwrap();
+    fs::write(base.path().join("Home.md"), "home").unwrap();
+    fs::write(base.path().join("Other.md"), "other").unwrap();
+    let vault = Vault::open(base.path()).unwrap();
+    let mut saved = layout("Home.md");
+    saved.tabs.push(SavedTab {
+        path: "Other.md".into(),
+        view: View::Live,
+        editing_view: View::Live,
+        pinned: false,
+    });
+    saved.panes = Some(Saved {
+        orientation: Orientation::Stacked,
+        weights: vec![2.0, 1.0],
+        panes: vec![
+            SavedPane {
+                tabs: vec![0, 1],
+                active: Some(0),
+            },
+            SavedPane {
+                tabs: vec![1],
+                active: Some(1),
+            },
+        ],
+        focus: 1,
+    });
+    // Ida e volta pelo arquivo de espaços de trabalho.
+    let path = base.path().join("state/layouts.json");
+    let mut store = Workspaces::load(path.clone()).unwrap();
+    store.save("Dividido", saved.clone(), 1).unwrap();
+    let reopened = Workspaces::load(path).unwrap();
+    let restored = reopened.entries()[0].layout.restore(&vault).unwrap();
+    let panes = restored.panes.expect("dois painéis");
+    assert_eq!(panes.len(), 2);
+    assert_eq!(panes.orientation(), Orientation::Stacked);
+    assert_eq!(panes.tabs_of(0).len(), 2);
+    assert_eq!(panes.tabs_of(1), [restored.tabs[1].id()]);
+    assert_eq!(panes.focus(), 1);
+    // Um arquivo antigo, sem o campo `panes`, volta com um painel só.
+    let mut legacy = serde_json::to_value(&saved).unwrap();
+    legacy.as_object_mut().unwrap().remove("panes");
+    let legacy: Layout = serde_json::from_value(legacy).unwrap();
+    assert!(legacy.restore(&vault).unwrap().panes.is_none());
+    // Um painel que aponta para uma aba que não existe é recusado.
+    let mut ruim = saved;
+    ruim.panes.as_mut().unwrap().panes[1].tabs = vec![9];
+    assert!(ruim.restore(&vault).is_err());
+    // Se um dos arquivos sumiu, o painel que só tinha ele some e volta um painel só.
+    fs::remove_file(base.path().join("Other.md")).unwrap();
+    let vault = Vault::open(base.path()).unwrap();
+    let mut so_um = layout("Home.md");
+    so_um.tabs.push(SavedTab {
+        path: "Other.md".into(),
+        view: View::Live,
+        editing_view: View::Live,
+        pinned: false,
+    });
+    so_um.panes = reopened.entries()[0].layout.panes.clone();
+    let restored = so_um.restore(&vault).unwrap();
+    assert!(restored.panes.is_none());
+    assert_eq!(restored.tabs.len(), 1);
 }

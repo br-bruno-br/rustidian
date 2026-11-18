@@ -56,6 +56,9 @@ struct Session {
     table_layouts: crate::table_layout::Layouts,
     #[serde(default)]
     graph: Option<crate::graph_ui::State>,
+    /// A tela dividida (R15), pelas posições em `tabs`; sem o campo, um painel só.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    panes: Option<rustidian::panes::Saved>,
 }
 
 fn default_sidebars() -> [f32; 2] {
@@ -79,8 +82,17 @@ impl Session {
             .unwrap_or_else(|| theme::Appearance::from_dark(self.dark))
     }
 
+    #[cfg(test)]
     fn restore_tabs(&self, vault: &mut Vault) -> (Vec<Tab>, usize) {
+        let (tabs, active, _) = self.restore_tabs_mapped(vault);
+        (tabs, active)
+    }
+
+    /// As abas, a ativa e, para cada posição salva, o id da aba que ficou nela (os arquivos que
+    /// não abrem mais são pulados e deslocam as posições).
+    fn restore_tabs_mapped(&self, vault: &mut Vault) -> (Vec<Tab>, usize, Vec<Option<u64>>) {
         let mut tabs = Vec::new();
+        let mut ids = vec![None; self.tabs.len()];
         let mut active = 0;
         for (index, (path, view)) in self.tabs.iter().enumerate() {
             let document = if path.as_os_str().is_empty() {
@@ -103,6 +115,7 @@ impl Session {
                 active = tabs.len();
             }
             let mut tab = Tab::new(document);
+            ids[index] = Some(tab.id());
             tab.pinned = self.pinned.get(index).copied().unwrap_or(false);
             tab.restore_scroll = self
                 .scrolls
@@ -115,7 +128,7 @@ impl Session {
             tab.set_view(*view);
             tabs.push(tab);
         }
-        (tabs, active)
+        (tabs, active, ids)
     }
 }
 
@@ -139,7 +152,15 @@ impl NotesApp {
         let Ok(session) = serde_json::from_slice::<Session>(&bytes) else {
             return false;
         };
-        (self.tabs, self.active) = session.restore_tabs(vault);
+        let (tabs, active, ids) = session.restore_tabs_mapped(vault);
+        (self.tabs, self.active) = (tabs, active);
+        self.panes = session
+            .panes
+            .as_ref()
+            .and_then(|saved| {
+                rustidian::panes::Panes::load(saved, |index| ids.get(index).copied().flatten())
+            })
+            .unwrap_or_default();
         self.appearance = theme::palette::open_appearance_with(session.appearance());
         self.graph.restore(session.graph.unwrap_or_default());
         self.show_left = session.left;
@@ -260,6 +281,9 @@ impl NotesApp {
             confirm_trash: Some(self.confirm_trash),
             table_layouts: crate::table_layout::snapshot(&self.ctx),
             graph: Some(self.graph.snapshot()),
+            panes: self
+                .panes
+                .save(|id| self.tabs.iter().position(|tab| tab.id() == id)),
         };
         let bytes = serde_json::to_vec(&session).map_err(|error| error.to_string())?;
         let Some(parent) = path.parent().map(Path::to_owned) else {

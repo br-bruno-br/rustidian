@@ -27,11 +27,17 @@ pub struct Layout {
     pub left_width: f32,
     pub right_width: f32,
     pub right_tab: u8,
+    /// A tela dividida (R15): as abas de cada painel, pela posição em `tabs`. Um layout antigo,
+    /// sem este campo, volta com um painel só.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panes: Option<crate::panes::Saved>,
 }
 
 pub struct Restored {
     pub tabs: Vec<Tab>,
     pub active: usize,
+    /// Os painéis de volta, quando o layout salvo era dividido e ainda tem dois painéis com abas.
+    pub panes: Option<crate::panes::Panes>,
 }
 
 impl Layout {
@@ -56,6 +62,17 @@ impl Layout {
         }) {
             return Err("Os arquivos do espaço de trabalho devem ficar dentro deste cofre.".into());
         }
+        if let Some(panes) = &self.panes
+            && panes
+                .panes
+                .iter()
+                .flat_map(|pane| pane.tabs.iter().chain(pane.active.iter()))
+                .any(|index| *index >= self.tabs.len())
+        {
+            return Err(
+                "O espaço de trabalho tem um painel que aponta para uma aba inexistente.".into(),
+            );
+        }
         Ok(())
     }
 
@@ -63,6 +80,8 @@ impl Layout {
         self.validate()?;
         let mut tabs = Vec::new();
         let mut active = 0;
+        // A aba salva em cada posição, se ela abriu (para os painéis).
+        let mut ids = vec![None; self.tabs.len()];
         for (index, saved) in self.tabs.iter().enumerate() {
             let document = if saved.path.as_os_str().is_empty() {
                 Document::blank()
@@ -76,6 +95,7 @@ impl Layout {
                 active = tabs.len();
             }
             let mut tab = Tab::new(document);
+            ids[index] = Some(tab.id());
             tab.set_view(saved.editing_view);
             tab.set_view(saved.view);
             tab.pinned = saved.pinned;
@@ -87,7 +107,14 @@ impl Layout {
                     .into(),
             );
         }
-        Ok(Restored { tabs, active })
+        let panes = self.panes.as_ref().and_then(|saved| {
+            crate::panes::Panes::load(saved, |index| ids.get(index).copied().flatten())
+        });
+        Ok(Restored {
+            tabs,
+            active,
+            panes,
+        })
     }
 }
 

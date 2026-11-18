@@ -22,6 +22,7 @@ pub mod native_picker;
 pub mod navigation;
 pub mod note_aids;
 pub mod operations;
+pub mod panes;
 pub mod paths;
 pub mod perf;
 pub mod query;
