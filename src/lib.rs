@@ -1,6 +1,7 @@
 pub mod assets;
 pub mod atualizacao;
 pub mod autosave;
+pub mod board_note;
 pub mod bookmarks;
 pub mod callouts;
 pub mod canvas;
