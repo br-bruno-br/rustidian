@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod atualizacao;
 pub mod autosave;
 pub mod bookmarks;
 pub mod callouts;
