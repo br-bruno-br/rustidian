@@ -264,10 +264,10 @@ pub fn escrever_atomico(cofre: &Path, rel: &str, bytes: &[u8]) -> io::Result<()>
         let _ = fs::remove_file(&temp); // o temporário é nosso
     }
     #[cfg(unix)]
-    if r.is_ok() {
-        if let Ok(d) = fs::File::open(pai) {
-            let _ = d.sync_all();
-        }
+    if r.is_ok()
+        && let Ok(d) = fs::File::open(pai)
+    {
+        let _ = d.sync_all();
     }
     r
 }
