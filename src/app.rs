@@ -95,7 +95,16 @@ pub struct NotesApp {
     tree: Tree,
     pub(crate) tabs: Vec<Tab>,
     closed_tabs: Vec<ClosedTab>,
+    /// Índice da aba ativa NO PAINEL COM O FOCO: tudo (paleta, busca, atalhos) age nela.
     pub(crate) active: usize,
+    /// Quais abas cada painel mostra e qual está ativa em cada um (R15). As abas ficam todas em
+    /// `tabs`; com um painel só, o app se comporta como antes da divisão.
+    pub(crate) panes: rustidian::panes::Panes,
+    /// O que o editor guarda do texto desenhado, para o painel sem foco (cada painel tem o seu,
+    /// senão duas notas diferentes se desfariam a cada quadro).
+    pane_caches: crate::editor_ui::DocCaches,
+    /// Onde cada painel foi desenhado no último quadro dividido (vazio sem divisão).
+    pub(crate) pane_rects: Vec<egui::Rect>,
     search: String,
     search_cache: rustidian::query::Cache,
     searching: bool,
@@ -160,6 +169,8 @@ pub struct NotesApp {
     title: crate::title_ui::Title,
     pending_anchor: Option<String>,
     new_tab_gesture: bool,
+    /// Ctrl+Alt+clique (ou Ctrl+Alt+Enter) num link: abrir no outro painel.
+    split_gesture: bool,
     properties: crate::properties_ui::Properties,
     pub(crate) sort_descending: bool,
     collapse_epoch: u64,
@@ -229,6 +240,9 @@ impl NotesApp {
             tabs: Vec::new(),
             closed_tabs: Vec::new(),
             active: 0,
+            panes: rustidian::panes::Panes::new(),
+            pane_caches: Default::default(),
+            pane_rects: Vec::new(),
             search: String::new(),
             search_cache: Default::default(),
             searching: false,
@@ -281,6 +295,7 @@ impl NotesApp {
             title: Default::default(),
             pending_anchor: None,
             new_tab_gesture: false,
+            split_gesture: false,
             properties: Default::default(),
             sort_descending: false,
             collapse_epoch: 0,
@@ -1192,10 +1207,11 @@ impl NotesApp {
 
     fn open_note_at(&mut self, path: &Path, new_tab: bool) {
         let new_tab = new_tab
-            || self
-                .tabs
-                .get(self.active)
-                .is_some_and(|tab| tab.pinned && tab.document.path != path);
+            || self.tabs.get(self.active).is_some_and(|tab| {
+                // Aba fixada, ou aba que o outro painel também mostra: abrir outra nota não a
+                // troca no lugar (o outro painel perderia a nota dele).
+                (tab.pinned || self.panes.shown_in(tab.id()) > 1) && tab.document.path != path
+            });
         if !new_tab
             && self
                 .tabs
@@ -1340,7 +1356,12 @@ impl NotesApp {
             self.ctx.open_url(egui::OpenUrl::new_tab(uri));
             return;
         }
-        let new_tab = self.new_tab_gesture
+        let other_pane = self.split_gesture
+            || self
+                .ctx
+                .input(|input| input.modifiers.command && input.modifiers.alt);
+        let new_tab = other_pane
+            || self.new_tab_gesture
             || self.tabs.get(self.active).is_some_and(|tab| tab.pinned)
             || self.ctx.input(|input| {
                 input.modifiers.command || input.pointer.button_clicked(egui::PointerButton::Middle)
@@ -1365,7 +1386,14 @@ impl NotesApp {
                     self.files = rustidian::search::FileMatcher::from_vault(vault);
                     self.search_cache.invalidate();
                 }
-                self.open_note_at(&document.path, new_tab);
+                if other_pane {
+                    self.open_note_in_other_pane(
+                        &document.path,
+                        rustidian::panes::Orientation::Side,
+                    );
+                } else {
+                    self.open_note_at(&document.path, new_tab);
+                }
                 self.jump_to_link_fragment(target);
             }
             Some(Err(error)) => self.error = Some(error),
@@ -1983,7 +2011,7 @@ impl NotesApp {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::W))
             && !self.tabs.is_empty()
         {
-            self.request_close_tab(self.active);
+            self.request_close_tab_in_pane(self.panes.focus(), self.active);
         }
     }
 
@@ -2379,6 +2407,9 @@ impl NotesApp {
             left_width: self.sidebar_widths[0],
             right_width: self.sidebar_widths[1],
             right_tab: self.right_tab,
+            panes: self
+                .panes
+                .save(|id| self.tabs.iter().position(|tab| tab.id() == id)),
         }
     }
 
@@ -2440,6 +2471,7 @@ impl NotesApp {
             Ok((layout, restored)) => {
                 self.tabs = restored.tabs;
                 self.active = restored.active;
+                self.panes = restored.panes.unwrap_or_default();
                 self.show_left = layout.left;
                 self.show_right = layout.right;
                 self.right_tab = layout.right_tab.min(LAST_RIGHT_TAB);
@@ -3488,7 +3520,314 @@ impl NotesApp {
         }
     }
 
+    // -- Tela dividida (R15) ---------------------------------------------------------------
+
+    /// Põe os painéis de acordo com as abas que existem e com a aba ativa do app. Os comandos
+    /// antigos mexem em `tabs` e em `active` sem saber de painéis; isto concilia, uma vez por
+    /// quadro, e devolve ao app a aba que o painel com o foco manda mostrar.
+    fn sync_panes(&mut self) {
+        let live: Vec<u64> = self.tabs.iter().map(Tab::id).collect();
+        let current = self.tabs.get(self.active).map(Tab::id);
+        self.panes.reconcile(&live, current);
+        let wanted = self.panes.focused_active();
+        if wanted != current {
+            self.active_from_panes();
+            self.find = Default::default();
+            self.focus_editor();
+        }
+    }
+
+    /// `active` passa a ser a aba ativa do painel com o foco.
+    fn active_from_panes(&mut self) {
+        if let Some(id) = self.panes.focused_active()
+            && let Some(index) = self.tabs.iter().position(|tab| tab.id() == id)
+        {
+            self.active = index;
+        }
+    }
+
+    /// O foco do teclado vai para o painel: a paleta, a busca e os atalhos passam a agir na aba
+    /// ativa dele.
+    fn focus_pane(&mut self, pane: usize) {
+        if !self.panes.focus_pane(pane) {
+            return;
+        }
+        self.active_from_panes();
+        self.find = Default::default();
+        self.focus_editor();
+        self.persist_session();
+    }
+
+    /// Divide a tela mostrando a aba ativa nos dois painéis (a mesma nota, em memória uma vez).
+    fn split_active(&mut self, orientation: rustidian::panes::Orientation) {
+        if let Some(id) = self.tabs.get(self.active).map(Tab::id) {
+            self.split_tab(id, orientation);
+        }
+    }
+
+    fn split_tab(&mut self, id: u64, orientation: rustidian::panes::Orientation) {
+        if !self
+            .tabs
+            .iter()
+            .any(|tab| tab.id() == id && !tab.document.is_blank())
+        {
+            return;
+        }
+        self.sync_panes();
+        if self.panes.is_split() {
+            // Já dividido: a aba também passa a aparecer num painel que ainda não a mostra.
+            let target = (0..self.panes.len())
+                .find(|pane| !self.panes.shows(*pane, id))
+                .or_else(|| self.panes.other())
+                .unwrap_or(0);
+            self.panes.show_in(target, id);
+        } else if !self.panes.split(orientation, id) {
+            return;
+        }
+        self.active_from_panes();
+        self.find = Default::default();
+        self.focus_editor();
+        self.persist_session();
+    }
+
+    /// Abre a nota no outro painel (cria a divisão se ainda não há). Se a nota já está aberta numa
+    /// aba, é essa mesma aba que aparece no outro painel, então as duas vistas são uma nota só.
+    fn open_note_in_other_pane(&mut self, path: &Path, orientation: rustidian::panes::Orientation) {
+        self.sync_panes();
+        let existing = self
+            .tabs
+            .iter()
+            .find(|tab| tab.document.path == path)
+            .map(Tab::id);
+        let id = match existing {
+            Some(id) => id,
+            None => {
+                let Some(vault) = &self.vault else {
+                    return;
+                };
+                match vault.open_document(path) {
+                    Ok(document) => {
+                        let mut tab = Tab::new(document);
+                        self.editor_preferences.apply(&mut tab);
+                        let id = tab.id();
+                        // Ainda sem painel: só o painel de destino vai listá-la.
+                        self.tabs.push(tab);
+                        id
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        return;
+                    }
+                }
+            }
+        };
+        match self.panes.other() {
+            Some(other) => self.panes.show_in(other, id),
+            None => {
+                if !self.panes.split(orientation, id) {
+                    return;
+                }
+            }
+        }
+        if let Some(index) = self.tabs.iter().position(|tab| tab.id() == id) {
+            self.tabs[index].show_document();
+        }
+        self.active_from_panes();
+        self.cache = CommonMarkCache::default();
+        self.find = Default::default();
+        self.focus_editor();
+        self.persist_session();
+    }
+
+    /// Fecha o painel: as abas dele passam para o vizinho; nenhuma nota é fechada.
+    fn close_pane(&mut self, pane: usize) {
+        if !self.panes.is_split() {
+            return;
+        }
+        self.panes.close_pane(pane);
+        self.active_from_panes();
+        self.find = Default::default();
+        self.focus_editor();
+        self.persist_session();
+    }
+
+    /// Fecha a aba no painel. Se o outro painel também a mostra, ela só sai da lista deste; a
+    /// nota continua aberta (e a pergunta de salvar só vem quando a última vista fecha).
+    fn request_close_tab_in_pane(&mut self, pane: usize, index: usize) {
+        let Some(id) = self.tabs.get(index).map(Tab::id) else {
+            return;
+        };
+        if self.panes.is_split() && self.panes.shown_in(id) > 1 {
+            self.panes.unshow(pane, id);
+            match self.panes.tabs_of(pane).last().copied() {
+                Some(next) => self.panes.show_in(pane, next),
+                None => self.panes.close_pane(pane),
+            }
+            self.active_from_panes();
+            self.focus_editor();
+            self.persist_session();
+            return;
+        }
+        self.request_close_tab(index);
+    }
+
+    /// Roda `body` com a aba ativa do painel no lugar de `active`. O painel com o foco desenha
+    /// como sempre; o outro não pega o cursor nem a busca do painel focado e usa o seu próprio
+    /// jogo de análise do texto. Se o usuário agiu nele (clicou numa aba, abriu uma nova), ele
+    /// passa a ser o painel com o foco.
+    fn pane_scope(&mut self, pane: usize, body: impl FnOnce(&mut Self)) {
+        if pane == self.panes.focus() {
+            body(self);
+            return;
+        }
+        let Some(own) = self
+            .panes
+            .active_of(pane)
+            .and_then(|id| self.tabs.iter().position(|tab| tab.id() == id))
+        else {
+            return;
+        };
+        let own_id = self.tabs[own].id();
+        let backup = self.tabs.get(self.active).map(Tab::id);
+        self.active = own;
+        let focus = std::mem::take(&mut self.editor.focus);
+        let find = std::mem::take(&mut self.find);
+        let anchor = self.pending_anchor.take();
+        self.editor.swap_caches(&mut self.pane_caches);
+        body(self);
+        self.editor.swap_caches(&mut self.pane_caches);
+        if self.tabs.get(self.active).map(Tab::id) == Some(own_id) {
+            self.pending_anchor = anchor;
+            self.find = find;
+            self.editor.focus = focus;
+            if let Some(index) = backup.and_then(|id| self.tabs.iter().position(|t| t.id() == id)) {
+                self.active = index;
+            }
+        } else {
+            // Mexeu na lista de abas deste painel: ele passa a ser o ativo.
+            self.panes.focus_pane(pane);
+            self.persist_session();
+        }
+    }
+
+    /// O pedido de foco por clique: o painel sob o ponteiro, ao apertar o botão, fica com o foco.
+    fn focus_pane_under_pointer(&mut self, ui: &egui::Ui, rects: &[egui::Rect]) {
+        if self.dialog.is_some() || self.pending.is_some() {
+            return;
+        }
+        let pressed = ui.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
+        if let Some(position) = pressed
+            && let Some(pane) = rects.iter().position(|rect| rect.contains(position))
+            && pane != self.panes.focus()
+        {
+            self.focus_pane(pane);
+        }
+    }
+
+    /// A área de edição dividida: um painel em cada retângulo e a divisória arrastável entre eles.
+    fn split_content(&mut self, ui: &mut egui::Ui) {
+        use rustidian::panes::{DIVIDER, Orientation};
+        let area = ui.available_rect_before_wrap();
+        let side = self.panes.orientation() == Orientation::Side;
+        let total = if side { area.width() } else { area.height() };
+        let sizes = self.panes.sizes(total);
+        let mut rects = Vec::with_capacity(sizes.len());
+        let mut at = if side { area.left() } else { area.top() };
+        for size in &sizes {
+            rects.push(if side {
+                egui::Rect::from_min_max(
+                    egui::pos2(at, area.top()),
+                    egui::pos2(at + size, area.bottom()),
+                )
+            } else {
+                egui::Rect::from_min_max(
+                    egui::pos2(area.left(), at),
+                    egui::pos2(area.right(), at + size),
+                )
+            });
+            at += size + DIVIDER;
+        }
+        self.focus_pane_under_pointer(ui, &rects);
+        self.pane_rects.clone_from(&rects);
+        for (pane, rect) in rects.iter().enumerate() {
+            let rect = *rect;
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .id_salt(("pane", pane))
+                    .max_rect(rect)
+                    .layout(Layout::top_down(Align::Min)),
+                |ui| {
+                    ui.set_clip_rect(rect.intersect(ui.clip_rect()));
+                    crate::ui_probe::record(ui.ctx(), format!("pane:{pane}"), rect);
+                    self.pane_scope(pane, |app| app.pane_body(ui, pane));
+                },
+            );
+        }
+        let mut released = false;
+        for divider in 0..rects.len().saturating_sub(1) {
+            let rect = if side {
+                egui::Rect::from_min_max(
+                    egui::pos2(rects[divider].right(), area.top()),
+                    egui::pos2(rects[divider + 1].left(), area.bottom()),
+                )
+            } else {
+                egui::Rect::from_min_max(
+                    egui::pos2(area.left(), rects[divider].bottom()),
+                    egui::pos2(area.right(), rects[divider + 1].top()),
+                )
+            };
+            crate::ui_probe::record(ui.ctx(), format!("pane-divider:{divider}"), rect);
+            let response = ui
+                .interact(
+                    rect,
+                    ui.scope_id().with(("pane-divider", divider)),
+                    egui::Sense::drag(),
+                )
+                .on_hover_cursor(if side {
+                    egui::CursorIcon::ResizeHorizontal
+                } else {
+                    egui::CursorIcon::ResizeVertical
+                });
+            if response.dragged() {
+                let delta = response.drag_delta();
+                self.panes
+                    .drag(divider, if side { delta.x } else { delta.y }, total);
+            }
+            released |= response.drag_stopped();
+            let color = if response.hovered() || response.dragged() {
+                theme::interactive(ui)
+            } else {
+                ui.visuals().widgets.noninteractive.bg_stroke.color
+            };
+            let line = rect.center();
+            ui.painter().line_segment(
+                if side {
+                    [
+                        egui::pos2(line.x, rect.top()),
+                        egui::pos2(line.x, rect.bottom()),
+                    ]
+                } else {
+                    [
+                        egui::pos2(rect.left(), line.y),
+                        egui::pos2(rect.right(), line.y),
+                    ]
+                },
+                Stroke::new(1.5, color),
+            );
+        }
+        if released {
+            self.persist_session();
+        }
+    }
+
     fn content(&mut self, ui: &mut egui::Ui) {
+        self.sync_panes();
         let background = ui.visuals().window_fill;
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
@@ -3503,7 +3842,20 @@ impl NotesApp {
                     });
                     return;
                 }
-                self.tab_strip(ui);
+                if self.panes.is_split() {
+                    self.split_content(ui);
+                } else {
+                    self.pane_rects.clear();
+                    self.pane_body(ui, 0);
+                }
+            });
+    }
+
+    /// Uma faixa de abas e o que ela mostra: o corpo de um painel (o único, sem divisão).
+    fn pane_body(&mut self, ui: &mut egui::Ui, pane: usize) {
+        {
+            {
+                self.tab_strip(ui, pane);
                 if self.view() == View::Graph {
                     egui::Frame::NONE
                         .inner_margin(theme::space::margin(theme::space::M, theme::space::M))
@@ -3538,7 +3890,10 @@ impl NotesApp {
                     });
                     return;
                 }
-                if self.graph.local_open && self.local_graph_available() {
+                if self.graph.local_open
+                    && self.local_graph_available()
+                    && pane == self.panes.focus()
+                {
                     let maximum = (ui.available_width() - 180.0).max(160.0);
                     egui::Panel::right("local-graph-pane")
                         .default_size(440.0)
@@ -3759,7 +4114,8 @@ impl NotesApp {
                         );
                     });
                 self.document_view(ui);
-            });
+            }
+        }
     }
 
     fn document_view(&mut self, ui: &mut egui::Ui) {
@@ -4094,13 +4450,29 @@ impl NotesApp {
         Ok(())
     }
 
-    fn tab_strip(&mut self, ui: &mut egui::Ui) {
+    fn tab_strip(&mut self, ui: &mut egui::Ui, pane: usize) {
         crate::ui_probe::metric(ui.ctx(), "tab-count", self.tabs.len() as f32);
         let mut close = None;
         let mut close_others = None;
         let mut close_right = None;
         let mut pin = None;
         let mut moved = None;
+        let mut split_tab: Option<(u64, rustidian::panes::Orientation)> = None;
+        // As abas que este painel lista (todas, se não há divisão), pelo índice em `tabs`.
+        let visible: Vec<usize> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| self.panes.shows(pane, tab.id()))
+            .map(|(index, _)| index)
+            .collect();
+        let focused_pane = !self.panes.is_split() || pane == self.panes.focus();
+        // Em linha, o botão do painel lateral direito fica no último painel; em coluna, no de cima.
+        let show_chrome = !self.panes.is_split()
+            || match self.panes.orientation() {
+                rustidian::panes::Orientation::Side => pane + 1 == self.panes.len(),
+                rustidian::panes::Orientation::Stacked => pane == 0,
+            };
         let strip = egui::Frame::NONE
             .fill(ui.visuals().panel_fill)
             .inner_margin(theme::space::margin(theme::space::S, 0.0))
@@ -4108,9 +4480,9 @@ impl NotesApp {
                 ui.set_min_width(ui.available_width());
                 ui.spacing_mut().item_spacing = egui::vec2(theme::space::XS, 0.0);
                 ui.horizontal(|ui| {
-                    let count = self.tabs.len().max(1) as f32;
+                    let count = visible.len().max(1) as f32;
                     // With no tabs the strip takes no room, so New tab sits at the left as in Obsidian.
-                    let width = if self.tabs.is_empty() {
+                    let width = if visible.is_empty() {
                         0.0
                     } else {
                         (ui.available_width() - 148.0)
@@ -4122,7 +4494,7 @@ impl NotesApp {
                     let reveal_key = (
                         selected.map_or(0, Tab::id),
                         selected.map(|tab| tab.document.path.clone()),
-                        self.tabs.len(),
+                        visible.len(),
                         width.to_bits(),
                     );
                     let state_id = ui.scope_id().with("tab-reveal");
@@ -4151,7 +4523,8 @@ impl NotesApp {
                                 .show(ui, |ui| {
                                     ui.add_space(theme::space::S);
                                     ui.horizontal(|ui| {
-                                        for (index, tab) in self.tabs.iter().enumerate() {
+                                        for &index in &visible {
+                                            let tab = &self.tabs[index];
                                             let (_, rect) =
                                                 ui.allocate_space(egui::vec2(tab_width, 33.0));
                                             let response = ui.interact(
@@ -4313,30 +4686,34 @@ impl NotesApp {
                                                         },
                                                     );
                                                 });
+                                                let here = visible
+                                                    .iter()
+                                                    .position(|shown| *shown == index)
+                                                    .unwrap_or(0);
                                                 let target = ui.input_mut(|input| {
                                                     if input.consume_key(
                                                         egui::Modifiers::NONE,
                                                         Key::ArrowLeft,
                                                     ) {
                                                         Some(
-                                                            (index + self.tabs.len() - 1)
-                                                                % self.tabs.len(),
+                                                            visible[(here + visible.len() - 1)
+                                                                % visible.len()],
                                                         )
                                                     } else if input.consume_key(
                                                         egui::Modifiers::NONE,
                                                         Key::ArrowRight,
                                                     ) {
-                                                        Some((index + 1) % self.tabs.len())
+                                                        Some(visible[(here + 1) % visible.len()])
                                                     } else if input.consume_key(
                                                         egui::Modifiers::NONE,
                                                         Key::Home,
                                                     ) {
-                                                        Some(0)
+                                                        Some(visible[0])
                                                     } else if input.consume_key(
                                                         egui::Modifiers::NONE,
                                                         Key::End,
                                                     ) {
-                                                        Some(self.tabs.len() - 1)
+                                                        Some(visible[visible.len() - 1])
                                                     } else {
                                                         None
                                                     }
@@ -4442,6 +4819,34 @@ impl NotesApp {
                                                     ui.close();
                                                 }
                                                 ui.separator();
+                                                for (label, orientation) in [
+                                                    (
+                                                        "Split right",
+                                                        rustidian::panes::Orientation::Side,
+                                                    ),
+                                                    (
+                                                        "Split down",
+                                                        rustidian::panes::Orientation::Stacked,
+                                                    ),
+                                                ] {
+                                                    let action = ui
+                                                        .add_enabled_ui(
+                                                            !tab.document.is_blank(),
+                                                            |ui| {
+                                                                theme::menu_item(
+                                                                    ui,
+                                                                    Icon::Split,
+                                                                    label,
+                                                                )
+                                                            },
+                                                        )
+                                                        .inner;
+                                                    if action.clicked() {
+                                                        split_tab = Some((tab.id(), orientation));
+                                                        ui.close();
+                                                    }
+                                                }
+                                                ui.separator();
                                                 let action = ui
                                                     .add_enabled_ui(copy_target.is_some(), |ui| {
                                                         theme::menu_item(
@@ -4517,7 +4922,14 @@ impl NotesApp {
                                             if active {
                                                 ui.painter().line_segment(
                                                     [rect.left_bottom(), rect.right_bottom()],
-                                                    Stroke::new(2.0, theme::interactive(ui)),
+                                                    Stroke::new(
+                                                        2.0,
+                                                        if focused_pane {
+                                                            theme::interactive(ui)
+                                                        } else {
+                                                            ui.visuals().weak_text_color()
+                                                        },
+                                                    ),
                                                 );
                                             }
                                         }
@@ -4554,6 +4966,9 @@ impl NotesApp {
                         self.new_tab();
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if !show_chrome {
+                            return;
+                        }
                         let toggle = icon_button(ui, Icon::SidebarRight, "Toggle right sidebar");
                         crate::ui_probe::record(ui.ctx(), "toggle-right-sidebar", toggle.rect);
                         if toggle.clicked() {
@@ -4585,16 +5000,25 @@ impl NotesApp {
         if let Some((id, slot)) = moved
             && let Some(from) = self.tabs.iter().position(|tab| tab.id() == id)
         {
+            // Largar a aba na lista de outro painel a muda para lá.
+            if !self.panes.shows(pane, id) {
+                self.panes.move_to(pane, id);
+            }
             let to = slot.saturating_sub(usize::from(from < slot));
             if from != to {
                 let tab = self.tabs.remove(from);
                 self.tabs.insert(to, tab);
                 self.active = to;
-                self.persist_session();
+            } else {
+                self.active = from;
             }
+            self.persist_session();
+        }
+        if let Some((id, orientation)) = split_tab {
+            self.split_tab(id, orientation);
         }
         if let Some(index) = close {
-            self.request_close_tab(index);
+            self.request_close_tab_in_pane(pane, index);
         }
         if let Some(keep) = close_others {
             self.request_close_other_tabs_for(keep);
@@ -5133,6 +5557,15 @@ impl NotesApp {
                     }) {
                         matches.retain(|command| {
                             command.name != rustidian::commands::CLOSE_OTHER_TABS
+                        });
+                    }
+                    if !self.panes.is_split() {
+                        matches.retain(|command| {
+                            !matches!(
+                                command.name,
+                                rustidian::commands::CLOSE_PANE
+                                    | rustidian::commands::FOCUS_OTHER_PANE
+                            )
                         });
                     }
                     if self.closed_tabs.is_empty() {
@@ -6004,7 +6437,21 @@ impl NotesApp {
                 self.set_document_font_size(self.document_font_size.saturating_sub(1))
             }
             "New tab" => self.new_tab(),
-            "Close current tab" if !self.tabs.is_empty() => self.request_close_tab(self.active),
+            "Close current tab" if !self.tabs.is_empty() => {
+                self.request_close_tab_in_pane(self.panes.focus(), self.active)
+            }
+            rustidian::commands::SPLIT_RIGHT => {
+                self.split_active(rustidian::panes::Orientation::Side)
+            }
+            rustidian::commands::SPLIT_DOWN => {
+                self.split_active(rustidian::panes::Orientation::Stacked)
+            }
+            rustidian::commands::CLOSE_PANE => self.close_pane(self.panes.focus()),
+            rustidian::commands::FOCUS_OTHER_PANE => {
+                if let Some(other) = self.panes.other() {
+                    self.focus_pane(other);
+                }
+            }
             "Go to next tab" => self.step_tab(false),
             "Go to previous tab" => self.step_tab(true),
             "File recovery: Open local history" => self.open_recovery(true),
@@ -6619,6 +7066,23 @@ impl eframe::App for NotesApp {
                 _ => false,
             })
         });
+        self.split_gesture = ctx.input(|input| {
+            input.events.iter().any(|event| match event {
+                egui::Event::Key {
+                    key: Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                }
+                | egui::Event::PointerButton {
+                    pressed: false,
+                    modifiers,
+                    ..
+                } => modifiers.command && modifiers.alt,
+                _ => false,
+            })
+        });
+        self.sync_panes();
         self.background(&ctx);
         if crate::table_layout::take_changed(&ctx)
             && let Err(error) = self.write_session()
