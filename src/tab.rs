@@ -128,7 +128,7 @@ impl Tab {
             View::Live
         };
         let note_views = document.is_plain_text().then_some((View::Live, View::Live));
-        let view = if document.is_image() {
+        let view = if document.is_image() || crate::canvas::is_canvas(&document.path) {
             View::Read
         } else {
             editing_view
@@ -231,6 +231,10 @@ impl Tab {
             }
             self.view = View::Source;
             self.editing_view = View::Source;
+            // Um quadro abre desenhado (Read); o código-fonte fica a um clique.
+            if crate::canvas::is_canvas(&document.path) {
+                self.view = View::Read;
+            }
         } else if self.document.is_image() {
             self.view = self.editing_view;
         }

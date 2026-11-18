@@ -205,6 +205,7 @@ pub struct NotesApp {
     file_move: crate::file_move_ui::Manager,
     page_preview: crate::page_preview::Manager,
     pub(crate) graph: crate::graph_ui::Manager,
+    pub(crate) canvases: crate::canvas_ui::Manager,
     pub(crate) always_update_links: bool,
     sync: sync_ui::SyncPanel,
 }
@@ -317,6 +318,7 @@ impl NotesApp {
             file_move: Default::default(),
             page_preview: Default::default(),
             graph: Default::default(),
+            canvases: Default::default(),
             always_update_links: false,
             sync: Default::default(),
         };
@@ -332,6 +334,15 @@ impl NotesApp {
     }
 
     fn set_view(&mut self, view: View) {
+        // Um quadro só tem dois modos: desenhado (Read) e código-fonte.
+        let view = if matches!(view, View::Live | View::Split)
+            && self.tabs.get(self.active).is_some_and(|tab| {
+                rustidian::canvas::is_canvas(&tab.document.path) && !tab.document.is_blank()
+            }) {
+            View::Source
+        } else {
+            view
+        };
         if matches!(view, View::Live | View::Read | View::Split)
             && self
                 .tabs
@@ -358,7 +369,11 @@ impl NotesApp {
 
     fn show_view_mode(&mut self, ui: &mut egui::Ui) {
         let current = self.view();
+        let canvas = self.tabs.get(self.active).is_some_and(|tab| {
+            rustidian::canvas::is_canvas(&tab.document.path) && !tab.document.is_blank()
+        });
         let label = match current {
+            View::Read if canvas => "Canvas",
             View::Read => "Reading",
             View::Live => "Live preview",
             View::Source => "Source mode",
@@ -372,16 +387,21 @@ impl NotesApp {
         let plain_text = self.tabs.get(self.active).is_some_and(|tab| {
             tab.document.is_plain_text() && !rustidian::html_import::is_html(&tab.document.path)
         });
-        let response = if current == View::Graph || plain_text {
+        let response = if current == View::Graph || (plain_text && !canvas) {
             ui.label(text)
         } else {
             ui.menu_button(text, |ui| {
                 theme::menu_style(ui);
-                for (name, view) in [
-                    ("Reading", View::Read),
-                    ("Source mode", View::Source),
-                    ("Live Preview", View::Live),
-                ] {
+                let choices: &[(&str, View)] = if canvas {
+                    &[("Canvas", View::Read), ("Source mode", View::Source)]
+                } else {
+                    &[
+                        ("Reading", View::Read),
+                        ("Source mode", View::Source),
+                        ("Live Preview", View::Live),
+                    ]
+                };
+                for &(name, view) in choices {
                     let choice = ui.selectable_label(current == view, rustidian::i18n::t(name));
                     if crate::ui_probe::enabled() {
                         crate::ui_probe::record(
@@ -2925,6 +2945,7 @@ impl NotesApp {
                     self.new_tab_gesture || ui.ctx().input(|i| i.modifiers.command),
                 ),
                 FileAction::NewNote(folder) => self.create_note_in(&folder),
+                FileAction::NewCanvas(folder) => self.create_canvas_in(&folder),
                 FileAction::NewFolder(folder) => {
                     self.ask(Dialog::NewFolder);
                     self.dialog_path = Some(folder);
@@ -3757,6 +3778,14 @@ impl NotesApp {
                     ui.scope_id().with(("image", tab.id(), &tab.document.path)),
                     tab.image_scale,
                 );
+            }
+            return;
+        }
+        if crate::canvas_ui::is_canvas_tab(tab) {
+            self.pending_anchor = None;
+            let outcome = self.canvases.show(ui, tab, self.vault.as_ref());
+            if let Some(target) = outcome.follow {
+                self.follow_link(&target);
             }
             return;
         }
@@ -5996,6 +6025,7 @@ impl NotesApp {
             }
             "Open settings" => self.ask(Dialog::Settings),
             "New note" => self.create_note(),
+            "New canvas" => self.create_canvas_in(Path::new("")),
             "New folder" => self.ask(Dialog::NewFolder),
             "Add property" => self.ask(Dialog::AddProperty),
             "Rename or move file" => {
@@ -6208,6 +6238,61 @@ impl NotesApp {
             }
             Err(error) => self.error = Some(error),
         }
+    }
+
+    /// Cria um quadro vazio (`Quadro.canvas`, `Quadro 1.canvas`...) na pasta e abre numa aba.
+    fn create_canvas_in(&mut self, folder: &Path) {
+        let Some(vault) = &mut self.vault else {
+            self.error = Some("Abra um cofre antes de criar um quadro.".into());
+            return;
+        };
+        let mut created = None;
+        for number in 0..10_000u32 {
+            let name = if number == 0 {
+                "Quadro.canvas".to_owned()
+            } else {
+                format!("Quadro {number}.canvas")
+            };
+            let path = folder.join(name);
+            let absolute = vault.root.join(&path);
+            if std::fs::symlink_metadata(&absolute).is_ok() {
+                continue;
+            }
+            let mut document = Document::new(path);
+            document.text = rustidian::canvas::EMPTY.to_owned();
+            match vault.save(&mut document) {
+                Ok(()) => {
+                    created = Some(document);
+                    break;
+                }
+                // Outra janela pode ter criado este nome agora: tenta o próximo.
+                Err(_) if std::fs::symlink_metadata(&absolute).is_ok() => continue,
+                Err(error) => {
+                    self.error = Some(error);
+                    return;
+                }
+            }
+        }
+        let Some(document) = created else {
+            self.error = Some("Não foi possível achar um nome de quadro livre.".into());
+            return;
+        };
+        let path = document.path.clone();
+        self.refresh_file_views();
+        self.dialog = None;
+        self.error = None;
+        self.status = format!("{} criado", path.display());
+        if self
+            .tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.document.is_blank() && !tab.pinned)
+        {
+            self.tabs[self.active] = Tab::new(document);
+        } else {
+            self.tabs.push(Tab::new(document));
+            self.active = self.tabs.len() - 1;
+        }
+        self.ctx.request_repaint();
     }
 
     fn open_daily(&mut self) {

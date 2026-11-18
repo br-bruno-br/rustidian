@@ -9,6 +9,7 @@ use std::{
 
 pub enum FileAction {
     NewNote(PathBuf),
+    NewCanvas(PathBuf),
     NewFolder(PathBuf),
     Open(PathBuf),
     OpenInNewTab(PathBuf),
@@ -59,6 +60,16 @@ pub(crate) fn creation_menu(ui: &mut egui::Ui, folder: &Path, action: &mut Optio
     );
     if note.clicked() {
         *action = Some(FileAction::NewNote(folder.to_path_buf()));
+        ui.close();
+    }
+    let canvas = ui.button("Novo quadro");
+    crate::ui_probe::record(
+        ui.ctx(),
+        format!("folder-new-canvas:{}", folder.display()),
+        canvas.rect,
+    );
+    if canvas.clicked() {
+        *action = Some(FileAction::NewCanvas(folder.to_path_buf()));
         ui.close();
     }
     let child = ui.button("Nova pasta");

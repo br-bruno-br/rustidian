@@ -9,6 +9,7 @@ use super::*;
 use egui_kittest::{Harness, kittest::Queryable};
 use std::time::Duration;
 
+mod canvas;
 mod edicao;
 mod navegacao;
 mod prints;
