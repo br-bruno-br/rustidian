@@ -175,6 +175,11 @@ pub const ALL: &[Command] = &[
         scope: Scope::Global,
     },
     Command {
+        name: "New canvas",
+        shortcut: "",
+        scope: Scope::Global,
+    },
+    Command {
         name: "New folder",
         shortcut: "",
         scope: Scope::Global,
@@ -396,6 +401,7 @@ pub fn label(name: &str) -> &str {
             "Espaços de trabalho: Salvar e carregar outro layout"
         }
         "New note" => "Nova nota",
+        "New canvas" => "Novo quadro",
         "New folder" => "Nova pasta",
         "Daily notes: Open today's daily note" => "Notas diárias: Abrir a nota diária de hoje",
         "Templates: Insert template" => "Modelos: Inserir modelo",
