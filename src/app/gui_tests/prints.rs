@@ -9,7 +9,8 @@
 
 use super::*;
 
-const AURORA: &str = "# Projeto Aurora\n\nPlano da nova vitrine da loja, com prazos e responsáveis.\n";
+const AURORA: &str =
+    "# Projeto Aurora\n\nPlano da nova vitrine da loja, com prazos e responsáveis.\n";
 const REUNIAO: &str = "# Reunião de segunda\n\nFalamos sobre o Projeto Aurora e definimos o prazo.\nA Maria vai revisar o texto da vitrine até sexta.\n";
 const DIARIO: &str = "# Diário\n\nHoje avancei no projeto aurora com o fornecedor.\nTambém vi [[Projeto Aurora]] de novo, esta menção já tem link.\n";
 const RECEITA: &str = "# Receita de bolo\n\nO caxorro correu pelo jardin e comeu o bolo da vizinha.\n\nMisture a farinha com os ovos e leve ao forno por quarenta minutos. Depois, deixe esfriar e sirva com cafe.\n";
