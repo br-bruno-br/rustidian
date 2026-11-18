@@ -67,107 +67,11 @@ pub fn key_of(path: &Path) -> String {
     key(&path.to_string_lossy())
 }
 
-/// NFC para as letras latinas com acento comum (o que um nome de arquivo em português usa):
-/// letra + marca combinante vira a letra única. O resto passa como está.
+/// NFC (o mesmo que o resto do miolo usa via `nota-cripto`): no Windows e no Android o nome
+/// pode chegar decomposto (letra + marca), e a chave precisa ser a mesma.
 fn compose(text: &str) -> String {
-    const TABLE: &[(char, u32, u32)] = &[
-        ('A', 0x300, 0xC0),
-        ('E', 0x300, 0xC8),
-        ('I', 0x300, 0xCC),
-        ('O', 0x300, 0xD2),
-        ('U', 0x300, 0xD9),
-        ('N', 0x300, 0x1F8),
-        ('Y', 0x300, 0x1EF2),
-        ('a', 0x300, 0xE0),
-        ('e', 0x300, 0xE8),
-        ('i', 0x300, 0xEC),
-        ('o', 0x300, 0xF2),
-        ('u', 0x300, 0xF9),
-        ('n', 0x300, 0x1F9),
-        ('y', 0x300, 0x1EF3),
-        ('A', 0x301, 0xC1),
-        ('E', 0x301, 0xC9),
-        ('I', 0x301, 0xCD),
-        ('O', 0x301, 0xD3),
-        ('U', 0x301, 0xDA),
-        ('C', 0x301, 0x106),
-        ('N', 0x301, 0x143),
-        ('Y', 0x301, 0xDD),
-        ('a', 0x301, 0xE1),
-        ('e', 0x301, 0xE9),
-        ('i', 0x301, 0xED),
-        ('o', 0x301, 0xF3),
-        ('u', 0x301, 0xFA),
-        ('c', 0x301, 0x107),
-        ('n', 0x301, 0x144),
-        ('y', 0x301, 0xFD),
-        ('A', 0x302, 0xC2),
-        ('E', 0x302, 0xCA),
-        ('I', 0x302, 0xCE),
-        ('O', 0x302, 0xD4),
-        ('U', 0x302, 0xDB),
-        ('C', 0x302, 0x108),
-        ('Y', 0x302, 0x176),
-        ('a', 0x302, 0xE2),
-        ('e', 0x302, 0xEA),
-        ('i', 0x302, 0xEE),
-        ('o', 0x302, 0xF4),
-        ('u', 0x302, 0xFB),
-        ('c', 0x302, 0x109),
-        ('y', 0x302, 0x177),
-        ('A', 0x303, 0xC3),
-        ('E', 0x303, 0x1EBC),
-        ('I', 0x303, 0x128),
-        ('O', 0x303, 0xD5),
-        ('U', 0x303, 0x168),
-        ('N', 0x303, 0xD1),
-        ('Y', 0x303, 0x1EF8),
-        ('a', 0x303, 0xE3),
-        ('e', 0x303, 0x1EBD),
-        ('i', 0x303, 0x129),
-        ('o', 0x303, 0xF5),
-        ('u', 0x303, 0x169),
-        ('n', 0x303, 0xF1),
-        ('y', 0x303, 0x1EF9),
-        ('A', 0x308, 0xC4),
-        ('E', 0x308, 0xCB),
-        ('I', 0x308, 0xCF),
-        ('O', 0x308, 0xD6),
-        ('U', 0x308, 0xDC),
-        ('Y', 0x308, 0x178),
-        ('a', 0x308, 0xE4),
-        ('e', 0x308, 0xEB),
-        ('i', 0x308, 0xEF),
-        ('o', 0x308, 0xF6),
-        ('u', 0x308, 0xFC),
-        ('y', 0x308, 0xFF),
-        ('E', 0x327, 0x228),
-        ('C', 0x327, 0xC7),
-        ('N', 0x327, 0x145),
-        ('e', 0x327, 0x229),
-        ('c', 0x327, 0xE7),
-        ('n', 0x327, 0x146),
-    ];
-    if text.is_ascii() {
-        return text.to_owned();
-    }
-    let mut out = String::with_capacity(text.len());
-    for letter in text.chars() {
-        let composed = out.chars().next_back().and_then(|base| {
-            TABLE
-                .iter()
-                .find(|(b, mark, _)| *b == base && *mark == letter as u32)
-                .and_then(|(_, _, whole)| char::from_u32(*whole))
-        });
-        match composed {
-            Some(whole) => {
-                out.pop();
-                out.push(whole);
-            }
-            None => out.push(letter),
-        }
-    }
-    out
+    use unicode_normalization::UnicodeNormalization;
+    text.nfc().collect()
 }
 
 fn hash(text: &str) -> u64 {
