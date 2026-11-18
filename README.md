@@ -35,6 +35,7 @@ Fork do [Rustidian de Masih Moafi](https://github.com/MasihMoafi/rustidian) para
 | **Sync dentro do app** | Tela para configurar endereço, token e frase; ícone de estado; ciclo em segundo plano |
 | **Menções sem link** | No painel de backlinks, lista as notas que citam o título (ou um apelido) da nota aberta sem link, com botão **Link** que transforma a menção em `[[link]]`. Ideia do [RustSidian](https://github.com/siddarth1872004/RustSidian) (MIT) |
 | **Corretor ortográfico pt-BR** | Sublinha palavras erradas, sugere correções no clique direito, lista pessoal de palavras e "Ignorar". Usa o [spellbook](https://github.com/helix-editor/spellbook) e o dicionário VERO (LibreOffice), baixado à parte pelo botão **Baixar dicionário pt-BR** e conferido por sha256 |
+| **Tela dividida** | Dois painéis lado a lado ou um sobre o outro, cada um com as suas abas. A mesma nota nos dois painéis é uma só (edita num, aparece no outro, salva uma vez); Ctrl+Alt+clique num link abre no outro painel; o layout volta ao reabrir. Veja a linha R15 do [plano](docs/bruno/PLANO.md) |
 | **Android** | Protótipos para escolher o toolkit que digita bem pelo Gboard (egui × Dioxus); roteiro em [docs/bruno/R7-TESTE.md](docs/bruno/R7-TESTE.md) |
 | **Interface em português** | Em andamento: menus, botões, configurações e mensagens em pt-BR |
 
