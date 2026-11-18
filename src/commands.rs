@@ -34,6 +34,10 @@ pub const OPEN_GRAPH: &str = "Graph view: Open graph view";
 pub const OPEN_LOCAL_GRAPH: &str = "Graph view: Open local graph";
 pub const INCREASE_FONT_SIZE: &str = "Increase font size";
 pub const DECREASE_FONT_SIZE: &str = "Decrease font size";
+pub const INSERT_TABLE: &str = "Tables: Insert table";
+pub const TABLE_FROM_SELECTION: &str = "Tables: Convert selection to table";
+pub const FORMAT_TABLE: &str = "Tables: Align the table at the cursor";
+pub const FORMAT_ALL_TABLES: &str = "Tables: Align all tables in the note";
 
 pub struct Command {
     pub name: &'static str,
@@ -131,6 +135,26 @@ pub const ALL: &[Command] = &[
     },
     Command {
         name: ADD_UNIQUE_LINK,
+        shortcut: "",
+        scope: Scope::Editor,
+    },
+    Command {
+        name: INSERT_TABLE,
+        shortcut: "",
+        scope: Scope::Editor,
+    },
+    Command {
+        name: TABLE_FROM_SELECTION,
+        shortcut: "",
+        scope: Scope::Editor,
+    },
+    Command {
+        name: FORMAT_TABLE,
+        shortcut: "",
+        scope: Scope::Editor,
+    },
+    Command {
+        name: FORMAT_ALL_TABLES,
         shortcut: "",
         scope: Scope::Editor,
     },
@@ -376,6 +400,10 @@ pub fn label(name: &str) -> &str {
         OPEN_LOCAL_GRAPH => "Visão de grafo: Abrir grafo local",
         INCREASE_FONT_SIZE => "Aumentar tamanho da fonte",
         DECREASE_FONT_SIZE => "Diminuir tamanho da fonte",
+        INSERT_TABLE => "Tabelas: Inserir tabela",
+        TABLE_FROM_SELECTION => "Tabelas: Converter a seleção em tabela",
+        FORMAT_TABLE => "Tabelas: Alinhar a tabela sob o cursor",
+        FORMAT_ALL_TABLES => "Tabelas: Alinhar todas as tabelas da nota",
         "Agent: Open agent tab" => "Agente: Abrir aba do agente",
         "Toggle pin" => "Fixar ou desafixar aba",
         "New tab" => "Nova aba",

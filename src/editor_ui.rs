@@ -392,6 +392,54 @@ enum Edit {
     Insert { text: String, caret_back: usize },
     Wrap(&'static str, &'static str),
     Heading(usize),
+    Table(TableEdit),
+}
+
+/// What the palette's table commands do to the note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TableEdit {
+    /// A new table (already written as Markdown) where the caret is, as a paragraph of its own.
+    New(String),
+    /// The selected text, tab, `;` or `,` separated, as a table.
+    FromSelection,
+    /// Align the pipes of the table the caret is in.
+    FormatAtCaret,
+    /// Align the pipes of every table in the note.
+    FormatAll,
+}
+
+impl TableEdit {
+    /// The note after the command and the caret (in characters) that follows it, or a message
+    /// for the person when there is nothing to do. `characters` is the selection.
+    fn apply(&self, text: &str, characters: Range<usize>) -> Result<(String, usize), &'static str> {
+        let byte = |character: usize| {
+            text.char_indices()
+                .nth(character)
+                .map_or(text.len(), |(index, _)| index)
+        };
+        let (start, end) = (byte(characters.start), byte(characters.end));
+        let block = |markdown: &str| {
+            let (before, after) = rustidian::tables::block_padding(text, start, end);
+            let mut result = text.to_owned();
+            result.replace_range(start..end, &format!("{before}{markdown}{after}"));
+            // The caret goes into the first cell of the header.
+            (result, characters.start + before.chars().count() + 2)
+        };
+        match self {
+            Self::New(markdown) => Ok(block(markdown)),
+            Self::FromSelection => rustidian::tables::selection_grid(&text[start..end])
+                .map(|grid| block(&rustidian::tables::grid_markdown(&grid)))
+                .ok_or(
+                    "Selecione linhas com colunas separadas por tabulação, ponto e vírgula ou vírgula (o mesmo número em cada linha).",
+                ),
+            Self::FormatAtCaret => rustidian::tables::format_at(text, start)
+                .map(|result| (result, characters.start))
+                .ok_or("O cursor não está numa tabela, ou ela já está alinhada."),
+            Self::FormatAll => rustidian::tables::format_all(text)
+                .map(|result| (result, characters.start))
+                .ok_or("Nenhuma tabela precisa de alinhamento."),
+        }
+    }
 }
 
 /// The note menu's formatting, in Obsidian's order: label, shortcut, markers.
@@ -939,6 +987,46 @@ pub fn find_bar(ui: &mut egui::Ui, find: &mut Find, tab: &mut Tab, id: egui::Id)
     ui.separator();
 }
 
+/// A range copied from a spreadsheet (tab-separated lines) pasted into the text becomes a
+/// Markdown table in a paragraph of its own; any other paste is left as it came. Not inside a
+/// code fence or on a table line, where the tabs are what the person wants to paste.
+fn paste_spreadsheet(ui: &egui::Ui, text: &str, id: egui::Id) {
+    let Some(selection) = TextEditState::load(ui.ctx(), id)
+        .and_then(|state| state.cursor.char_range())
+        .map(|range| range.as_sorted_char_range())
+    else {
+        return;
+    };
+    let byte = |character: usize| {
+        text.char_indices()
+            .nth(character)
+            .map_or(text.len(), |(index, _)| index)
+    };
+    let (start, end) = (byte(selection.start.0), byte(selection.end.0));
+    let line = text[..start].rfind('\n').map_or(0, |index| index + 1);
+    let fences = text[..line]
+        .lines()
+        .filter(|line| {
+            let line = line.trim_start();
+            line.starts_with("```") || line.starts_with("~~~")
+        })
+        .count();
+    if fences % 2 == 1 || text[line..start].trim_start().starts_with('|') {
+        return;
+    }
+    ui.input_mut(|input| {
+        for event in &mut input.events {
+            if let egui::Event::Paste(pasted) = event
+                && let Some(grid) = rustidian::tables::paste_grid(pasted)
+            {
+                let (before, after) = rustidian::tables::block_padding(text, start, end);
+                *pasted = format!("{before}{}{after}", rustidian::tables::grid_markdown(&grid));
+                return;
+            }
+        }
+    });
+}
+
 fn replace_chars(text: &mut String, range: Range<usize>, replacement: &str) {
     let offsets: Vec<_> = text
         .char_indices()
@@ -1200,6 +1288,11 @@ impl Editor {
                 caret_back: 2,
             },
         );
+    }
+
+    /// The palette's table commands: new table, selection to table, align the pipes.
+    pub fn table_command(&mut self, tab: &Tab, command: TableEdit) {
+        self.edit(tab, Edit::Table(command));
     }
 
     fn edit(&mut self, tab: &Tab, operation: Edit) {
@@ -1617,6 +1710,9 @@ impl Editor {
         }
         cp.at(1362);
         let dropped = self.import_images(ui, tab, id, vault.as_deref_mut());
+        if !tab.document.is_plain_text() && ui.memory(|memory| memory.has_focus(id)) {
+            paste_spreadsheet(ui, &tab.document.text, id);
+        }
         cp.at(1363);
         let vault = vault.as_deref();
         cp.at(1364);
@@ -2024,13 +2120,23 @@ impl Editor {
             let markers = match operation {
                 Some(Edit::Highlight(color)) => Some(color.markers()),
                 Some(Edit::Wrap(opening, closing)) => Some((*opening, *closing)),
-                Some(Edit::Insert { .. } | Edit::NativeHighlight(_) | Edit::Heading(_)) => None,
+                Some(
+                    Edit::Insert { .. }
+                    | Edit::NativeHighlight(_)
+                    | Edit::Heading(_)
+                    | Edit::Table(_),
+                ) => None,
                 None => shortcut,
             };
             if markers.is_some()
                 || matches!(
                     operation,
-                    Some(Edit::Insert { .. } | Edit::NativeHighlight(_) | Edit::Heading(_))
+                    Some(
+                        Edit::Insert { .. }
+                            | Edit::NativeHighlight(_)
+                            | Edit::Heading(_)
+                            | Edit::Table(_)
+                    )
                 )
             {
                 let mut state = TextEditState::load(ui.ctx(), id).unwrap_or_default();
@@ -2043,6 +2149,7 @@ impl Editor {
                     undoer.add_undo(&(selection, tab.document.text.clone()));
                     let selection_range = selection.as_sorted_char_range();
                     let characters = selection_range.start.0..selection_range.end.0;
+                    let mut refused = false;
                     let range = if let Some(Edit::NativeHighlight(color)) = operation {
                         rustidian::highlight::toggle_native(
                             &mut tab.document.text,
@@ -2056,6 +2163,19 @@ impl Editor {
                         caret..caret
                     } else if let Some(Edit::Heading(level)) = operation {
                         toggle_heading(&mut tab.document.text, characters, *level)
+                    } else if let Some(Edit::Table(command)) = operation {
+                        match command.apply(&tab.document.text, characters.clone()) {
+                            Ok((text, caret)) => {
+                                tab.document.text = text;
+                                caret..caret
+                            }
+                            Err(message) => {
+                                // Nothing changes: keep the selection and say why.
+                                self.error = Some(message.into());
+                                refused = true;
+                                characters
+                            }
+                        }
                     } else {
                         let (opening, closing) = markers.unwrap();
                         wrap(&mut tab.document.text, characters, opening, closing)
@@ -2066,7 +2186,9 @@ impl Editor {
                     undoer.add_undo(&(cursor, tab.document.text.clone()));
                     state.set_undoer(undoer);
                     state.store(ui.ctx(), id);
-                    tab.edited();
+                    if !refused {
+                        tab.edited();
+                    }
                 }
             }
         }
