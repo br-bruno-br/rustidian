@@ -158,6 +158,21 @@ fn take_action(
     Some(action)
 }
 
+/// Takes the first paste of a spreadsheet range out of `events`; the cells to fill.
+fn take_cell_paste(events: &mut Vec<egui::Event>) -> Option<Vec<Vec<String>>> {
+    let (index, cells) = events
+        .iter()
+        .enumerate()
+        .find_map(|(index, event)| match event {
+            egui::Event::Paste(text) => {
+                rustidian::tables::paste_cells(text).map(|cells| (index, cells))
+            }
+            _ => None,
+        })?;
+    events.remove(index);
+    Some(cells)
+}
+
 fn defer_from(events: &mut Vec<egui::Event>, deferred: &mut Vec<egui::Event>, index: usize) {
     for event in events.split_off(index) {
         if matches!(
@@ -741,6 +756,15 @@ impl Tables {
                                 } else {
                                     None
                                 };
+                                // A range copied from a spreadsheet fills cells from this one on,
+                                // instead of landing as text inside it.
+                                if focused
+                                    && let Some(cells) =
+                                        ui.input_mut(|input| take_cell_paste(&mut input.events))
+                                {
+                                    insertion = Some((table, Action::Fill { row, column, cells }));
+                                    menu_focus = Some((table, row, column));
+                                }
                                 let nav = match action {
                                     Some(TableAction::Previous) => Some(-1),
                                     Some(TableAction::Next) => Some(1),
