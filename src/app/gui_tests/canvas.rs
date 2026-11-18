@@ -30,11 +30,11 @@ fn session_with_plan() -> Session {
     session
 }
 
-fn tab_id(session: &Session) -> u64 {
+pub(super) fn tab_id(session: &Session) -> u64 {
     session.app().tabs[session.app().active].id()
 }
 
-fn state(session: &Session) -> &crate::canvas_ui::CanvasState {
+pub(super) fn state(session: &Session) -> &crate::canvas_ui::CanvasState {
     session
         .app()
         .canvases
@@ -42,27 +42,32 @@ fn state(session: &Session) -> &crate::canvas_ui::CanvasState {
         .expect("o quadro foi desenhado")
 }
 
-fn rect_of(session: &Session, id: &str) -> egui::Rect {
+pub(super) fn rect_of(session: &Session, id: &str) -> egui::Rect {
     state(session)
         .node_screen_rect(id)
         .unwrap_or_else(|| panic!("nó {id} não está no quadro"))
 }
 
-fn parsed(session: &Session) -> Canvas {
+pub(super) fn parsed(session: &Session) -> Canvas {
     Canvas::parse(&session.active_text()).expect("o texto da aba é um quadro válido")
 }
 
-fn on_disk(session: &Session, name: &str) -> Value {
+pub(super) fn on_disk(session: &Session, name: &str) -> Value {
     serde_json::from_slice(&std::fs::read(session.path(name)).expect("arquivo gravado"))
         .expect("JSON no disco")
 }
 
-fn move_to(session: &mut Session, pos: egui::Pos2) {
+pub(super) fn move_to(session: &mut Session, pos: egui::Pos2) {
     session.harness.event(egui::Event::PointerMoved(pos));
     session.harness.step();
 }
 
-fn button(session: &mut Session, pos: egui::Pos2, pressed: bool, modifiers: egui::Modifiers) {
+pub(super) fn button(
+    session: &mut Session,
+    pos: egui::Pos2,
+    pressed: bool,
+    modifiers: egui::Modifiers,
+) {
     session.harness.event(egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,
@@ -73,7 +78,7 @@ fn button(session: &mut Session, pos: egui::Pos2, pressed: bool, modifiers: egui
 }
 
 /// Um clique no ponto (movimento, apertar e soltar em quadros seguidos).
-fn click(session: &mut Session, pos: egui::Pos2) {
+pub(super) fn click(session: &mut Session, pos: egui::Pos2) {
     move_to(session, pos);
     button(session, pos, true, egui::Modifiers::NONE);
     button(session, pos, false, egui::Modifiers::NONE);
@@ -81,7 +86,7 @@ fn click(session: &mut Session, pos: egui::Pos2) {
 }
 
 /// Duas vezes seguidas no mesmo quadro: o egui conta o duplo clique.
-fn double_click(session: &mut Session, pos: egui::Pos2) {
+pub(super) fn double_click(session: &mut Session, pos: egui::Pos2) {
     move_to(session, pos);
     // O harness dá um quadro (0,25 s) a cada evento enfileirado, e o duplo clique do egui vale
     // até 0,3 s: os quatro eventos vão direto para o mesmo quadro.
@@ -102,7 +107,7 @@ fn double_click(session: &mut Session, pos: egui::Pos2) {
 }
 
 /// Arrasta de `from` até `to` em passos pequenos.
-fn drag(session: &mut Session, from: egui::Pos2, to: egui::Pos2) {
+pub(super) fn drag(session: &mut Session, from: egui::Pos2, to: egui::Pos2) {
     move_to(session, from);
     button(session, from, true, egui::Modifiers::NONE);
     for step in 1..=6 {

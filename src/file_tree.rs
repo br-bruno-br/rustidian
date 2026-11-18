@@ -180,6 +180,40 @@ struct DropHover {
     since: f64,
 }
 
+/// What an explorer drag carried when the pointer was let go, kept for a few passes so a
+/// drop target drawn after the explorer (or before it, one pass later) can take it.
+#[derive(Clone)]
+struct ReleasedDrag {
+    paths: Vec<PathBuf>,
+    position: egui::Pos2,
+    pass: u64,
+}
+
+fn released_drag_id() -> egui::Id {
+    egui::Id::unique("explorer-released-drag")
+}
+
+/// The files being dragged out of the explorer right now (the canvas shows where they fall).
+pub fn dragged_paths(ctx: &egui::Context) -> Option<Vec<PathBuf>> {
+    egui::DragAndDrop::payload::<Dragged>(ctx).map(|dragged| dragged.paths.clone())
+}
+
+/// The files of an explorer drag released in the last few passes, and where. `None` once
+/// taken or too old.
+pub fn released_drag(ctx: &egui::Context) -> Option<(Vec<PathBuf>, egui::Pos2)> {
+    let released = ctx.data(|data| data.get_temp::<ReleasedDrag>(released_drag_id()))?;
+    if ctx.cumulative_pass_nr().saturating_sub(released.pass) > 3 {
+        ctx.data_mut(|data| data.remove::<ReleasedDrag>(released_drag_id()));
+        return None;
+    }
+    Some((released.paths, released.position))
+}
+
+/// A drop target took the files: nobody else may take them again.
+pub fn clear_released_drag(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<ReleasedDrag>(released_drag_id()));
+}
+
 /// How long a drag rests on a collapsed folder before it opens (Obsidian: 750 ms).
 const EXPAND_AFTER: f64 = 0.75;
 
@@ -323,6 +357,22 @@ pub fn finish_drag(
     }
     if !ctx.input(|input| input.pointer.any_released()) {
         return None;
+    }
+    // Soltar fora do explorador não move nada, mas outra área (o quadro, H1) pode querer o que
+    // foi arrastado: guarda os arquivos e o ponto por alguns quadros.
+    if let Some(position) = ctx.input(|input| input.pointer.latest_pos()) {
+        let pass = ctx.cumulative_pass_nr();
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                released_drag_id(),
+                ReleasedDrag {
+                    paths: dragged.paths.clone(),
+                    position,
+                    pass,
+                },
+            );
+        });
+        ctx.request_repaint();
     }
     egui::DragAndDrop::clear_payload(ctx);
     ctx.data_mut(|data| data.remove::<DropHover>(drop_hover_id()));

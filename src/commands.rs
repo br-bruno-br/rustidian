@@ -26,6 +26,7 @@ pub const UNDO_CLOSE_TAB: &str = "Undo close tab";
 pub const SPLIT_RIGHT: &str = "Split right";
 pub const SPLIT_DOWN: &str = "Split down";
 pub const CLOSE_PANE: &str = "Close split pane";
+pub const TOGGLE_CANVAS_LIBRARY: &str = "Canvas: Toggle note library";
 pub const FOCUS_OTHER_PANE: &str = "Focus the other pane";
 pub const CLOSE_OTHER_TABS: &str = "Close all other tabs";
 pub const OPEN_FILE: &str = "Open file…";
@@ -121,6 +122,11 @@ pub const ALL: &[Command] = &[
         name: FOCUS_OTHER_PANE,
         shortcut: "",
         scope: Scope::Global,
+    },
+    Command {
+        name: TOGGLE_CANVAS_LIBRARY,
+        shortcut: "",
+        scope: Scope::Document,
     },
     Command {
         name: MOVE_FILE,
@@ -426,6 +432,7 @@ pub fn label(name: &str) -> &str {
         SPLIT_DOWN => "Dividir abaixo",
         CLOSE_PANE => "Fechar o painel dividido",
         FOCUS_OTHER_PANE => "Ir para o outro painel",
+        TOGGLE_CANVAS_LIBRARY => "Quadro: Mostrar ou esconder a biblioteca de notas",
         CLOSE_OTHER_TABS => "Fechar todas as outras abas",
         OPEN_FILE => "Abrir arquivo…",
         OPEN_FOLDER => "Abrir pasta…",

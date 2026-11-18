@@ -6,7 +6,11 @@
 //! Enquanto se arrasta, o quadro em memória muda a cada quadro de vídeo e o texto do documento
 //! só é regravado quando o gesto termina (um desfazer por gesto, nada de JSON a 60 Hz).
 
-use crate::theme;
+use crate::{
+    canvas_library::{self, Library},
+    canvas_notes::{Content, Notes},
+    theme,
+};
 use eframe::egui::{
     self, Align2, Color32, FontFamily, FontId, Key, Pos2, Sense, Stroke, StrokeKind, Vec2,
     epaint::{CubicBezierShape, text::LayoutJob},
@@ -18,9 +22,8 @@ use rustidian::{
     },
     graph_layout::Camera,
     tab::{Tab, View},
-    vault::Vault,
 };
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, path::Path, sync::Arc};
 
 /// Distância, em pixels de tela, para pegar uma alça, um ponto de ligação ou uma aresta.
 const GRAB: f32 = 9.0;
@@ -40,6 +43,8 @@ enum Target {
 enum Edit {
     /// O texto de um cartão de texto.
     Text(String),
+    /// O texto da nota de um cartão de nota (H1): escreve direto no `Document` da nota.
+    Note(String),
     /// O rótulo de um grupo.
     Group(String),
     /// O rótulo de uma aresta.
@@ -80,7 +85,21 @@ enum Action {
     Color(Option<&'static str>),
     Delete,
     EditLabel,
-    Arrow { start: bool, on: bool },
+    Arrow {
+        start: bool,
+        on: bool,
+    },
+    /// Abrir a nota do cartão inteira no outro painel.
+    Aside,
+    /// Recolher (só o título) ou expandir o cartão de nota.
+    Collapse,
+}
+
+/// A rolagem de um cartão de nota (H1): onde está e até onde vai (medido ao desenhar).
+#[derive(Clone, Copy, Default)]
+struct CardView {
+    scroll: f32,
+    max: f32,
 }
 
 pub struct CanvasState {
@@ -103,6 +122,10 @@ pub struct CanvasState {
     add_link: Option<String>,
     /// O retângulo da tela onde o quadro foi desenhado pela última vez.
     area: egui::Rect,
+    /// A rolagem de cada cartão de nota, por id do nó.
+    card_view: RefCell<HashMap<String, CardView>>,
+    /// A biblioteca de notas, quando aberta.
+    library: Option<Library>,
 }
 
 impl CanvasState {
@@ -128,6 +151,8 @@ impl CanvasState {
             add_note: None,
             add_link: None,
             area: egui::Rect::NOTHING,
+            card_view: RefCell::default(),
+            library: None,
         }
     }
 
@@ -138,10 +163,14 @@ impl CanvasState {
         let fitted = self.fitted;
         let focus = self.focus.take();
         let selected = std::mem::take(&mut self.selected);
+        let card_view = std::mem::take(&mut self.card_view);
+        let library = self.library.take();
         *self = Self::load(text);
         self.camera = camera;
         self.fitted = fitted;
         self.focus = focus;
+        self.card_view = card_view;
+        self.library = library;
         self.selected = selected
             .into_iter()
             .filter(|id| self.canvas.node(id).is_some())
@@ -175,6 +204,67 @@ impl CanvasState {
 
     pub fn is_editing(&self) -> bool {
         self.editing.is_some()
+    }
+
+    /// O cartão de nota sob o ponteiro que tem mais texto do que cabe: a roda rola ele.
+    fn scrollable_card_at(&self, pointer: Pos2) -> Option<String> {
+        let world = self.to_world(pointer);
+        let node = self.canvas.node_at(world, 0.0)?;
+        if !node.is_note_card() || node.is_collapsed() {
+            return None;
+        }
+        let view = self.card_view.borrow().get(&node.id).copied()?;
+        (view.max > 0.5).then(|| node.id.clone())
+    }
+
+    /// Rola um cartão de nota; `wheel` é o movimento da roda (positivo = para cima).
+    fn scroll_card(&self, id: &str, wheel: f32) {
+        let mut views = self.card_view.borrow_mut();
+        if let Some(view) = views.get_mut(id) {
+            view.scroll = (view.scroll - wheel).clamp(0.0, view.max);
+        }
+    }
+
+    /// O cartão de nota em edição, se for ele (para os testes de GUI).
+    #[cfg(test)]
+    pub fn editing_note(&self) -> Option<&str> {
+        match self.editing.as_ref().map(|editing| &editing.what) {
+            Some(Edit::Note(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Quanto o cartão está rolado e até onde vai (para os testes de GUI).
+    #[cfg(test)]
+    pub fn card_scroll(&self, id: &str) -> Option<(f32, f32)> {
+        self.card_view
+            .borrow()
+            .get(id)
+            .map(|view| (view.scroll, view.max))
+    }
+
+    /// Onde ficam os botões do cabeçalho de um cartão de nota: recolher e abrir ao lado.
+    #[cfg(test)]
+    pub fn note_buttons(&self, id: &str) -> Option<(egui::Rect, egui::Rect)> {
+        let rect = self.node_screen_rect(id)?;
+        let buttons = header_buttons(rect, self.camera.zoom);
+        Some((buttons.collapse, buttons.aside))
+    }
+
+    #[cfg(test)]
+    pub fn library(&self) -> Option<&Library> {
+        self.library.as_ref()
+    }
+
+    /// Os caminhos das notas em edição num cartão: o app mantém um `Document` aberto para elas.
+    fn editing_note_path(&self) -> Option<std::path::PathBuf> {
+        let Some(Edit::Note(id)) = self.editing.as_ref().map(|editing| &editing.what) else {
+            return None;
+        };
+        self.canvas
+            .node(id)
+            .and_then(|node| node.file.as_deref())
+            .map(std::path::PathBuf::from)
     }
 
     fn origin(&self) -> Pos2 {
@@ -333,6 +423,10 @@ pub struct Manager {
 pub struct Outcome {
     /// Um destino para o app abrir: nota do cofre ou endereço da web.
     pub follow: Option<String>,
+    /// Uma nota para abrir inteira no outro painel (cria a divisão à direita se não houver).
+    pub aside: Option<String>,
+    /// Um aviso para o app mostrar (nota que não abriu para edição, por exemplo).
+    pub error: Option<String>,
 }
 
 pub fn is_canvas_tab(tab: &Tab) -> bool {
@@ -357,7 +451,29 @@ impl Manager {
         state.focus = Some(node_id.to_owned());
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, tab: &mut Tab, vault: Option<&Vault>) -> Outcome {
+    /// Abre ou fecha a biblioteca de notas do quadro desta aba. `false` se a aba não tem quadro
+    /// desenhado.
+    pub fn toggle_library(&mut self, tab_id: u64) -> bool {
+        let Some(state) = self.states.get_mut(&tab_id) else {
+            return false;
+        };
+        state.library = match state.library.take() {
+            Some(_) => None,
+            None => Some(Library::opened()),
+        };
+        true
+    }
+
+    /// As notas que algum quadro está editando agora (o app não larga o `Document` delas).
+    pub fn editing_notes(&self, live: impl Fn(u64) -> bool) -> Vec<std::path::PathBuf> {
+        self.states
+            .iter()
+            .filter(|(id, _)| live(**id))
+            .filter_map(|(_, state)| state.editing_note_path())
+            .collect()
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui, tab: &mut Tab, notes: &mut Notes) -> Outcome {
         let id = tab.id();
         let state = self
             .states
@@ -371,7 +487,7 @@ impl Manager {
             show_error(ui, tab, &message);
             return outcome;
         }
-        show_canvas(ui, state, tab, vault, &mut outcome);
+        show_canvas(ui, state, tab, notes, &mut outcome);
         outcome
     }
 }
@@ -398,7 +514,7 @@ fn show_canvas(
     ui: &mut egui::Ui,
     state: &mut CanvasState,
     tab: &mut Tab,
-    vault: Option<&Vault>,
+    notes: &mut Notes,
     outcome: &mut Outcome,
 ) {
     let rect = ui.available_rect_before_wrap();
@@ -426,12 +542,23 @@ fn show_canvas(
                 input.pointer.hover_pos(),
             )
         });
-        let factor = (wheel * 0.003).exp() * pinch;
-        if (factor - 1.0).abs() > 1e-4
-            && let Some(pointer) = pointer
+        // Sobre um cartão de nota que não cabe, a roda rola o cartão; Ctrl+roda e a pinça
+        // seguem dando zoom no quadro.
+        let card = pointer.and_then(|pointer| state.scrollable_card_at(pointer));
+        if let Some(card) = card
+            && wheel != 0.0
+            && (pinch - 1.0).abs() < 1e-4
         {
-            zoom_at(state, factor, pointer);
+            state.scroll_card(&card, wheel);
             ui.input_mut(|input| input.smooth_scroll_delta = Vec2::ZERO);
+        } else {
+            let factor = (wheel * 0.003).exp() * pinch;
+            if (factor - 1.0).abs() > 1e-4
+                && let Some(pointer) = pointer
+            {
+                zoom_at(state, factor, pointer);
+                ui.input_mut(|input| input.smooth_scroll_delta = Vec2::ZERO);
+            }
         }
     }
 
@@ -486,7 +613,27 @@ fn show_canvas(
         && !editing
         && let Some(position) = response.interact_pointer_pos()
     {
-        handle_click(state, position, double, shift, outcome);
+        let aside = ui.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(event, egui::Event::PointerButton {
+                    pressed: false,
+                    modifiers,
+                    ..
+                } if modifiers.command && modifiers.alt)
+            })
+        });
+        changed_text |= handle_click(
+            state,
+            tab,
+            Click {
+                position,
+                double,
+                shift,
+                aside,
+            },
+            notes,
+            outcome,
+        );
     }
 
     // --- Teclado -----------------------------------------------------------------------------
@@ -495,12 +642,12 @@ fn show_canvas(
         && state.add_note.is_none()
         && state.add_link.is_none();
     if keyboard_free {
-        changed_text |= handle_keys(ui, state, tab);
+        changed_text |= handle_keys(ui, state, tab, notes);
     }
 
     // --- Desenho -----------------------------------------------------------------------------
     paint_background(ui, &painter, rect, state);
-    paint_groups_and_nodes(ui, &painter, state, vault);
+    paint_groups_and_nodes(ui, &painter, state, notes);
     paint_edges(ui, &painter, state);
     paint_selection_tools(&painter, state, ui);
     if let Some(Drag::Link {
@@ -516,16 +663,18 @@ fn show_canvas(
     }
 
     // --- Edição de texto no lugar -----------------------------------------------------------
-    changed_text |= show_editor(ui, state, tab);
+    changed_text |= show_editor(ui, state, tab, notes, outcome);
 
     // --- Menu de contexto --------------------------------------------------------------------
     if let Some(action) = show_context_menu(&response, state) {
-        changed_text |= apply_action(state, action, tab);
+        changed_text |= apply_action(state, action, tab, outcome);
     }
 
     // --- Barra de ferramentas e janelas -----------------------------------------------------
     changed_text |= show_toolbar(ui, state, tab, rect);
-    changed_text |= show_dialogs(ui, state, tab, vault);
+    changed_text |= show_dialogs(ui, state, tab, notes.vault);
+    changed_text |= show_library(ui, state, tab, notes, rect);
+    changed_text |= take_drops(ui, state, tab, notes, rect);
 
     if state.canvas.nodes.is_empty() && state.drag.is_none() && !state.is_editing() {
         painter.text(
@@ -748,13 +897,28 @@ fn finish_drag(
     }
 }
 
-fn handle_click(
-    state: &mut CanvasState,
+/// Um clique no quadro: onde, e com que gesto.
+struct Click {
     position: Pos2,
     double: bool,
     shift: bool,
+    /// Ctrl+Alt: abrir a nota no outro painel (o mesmo gesto do R15 para links).
+    aside: bool,
+}
+
+fn handle_click(
+    state: &mut CanvasState,
+    tab: &mut Tab,
+    click: Click,
+    notes: &Notes,
     outcome: &mut Outcome,
-) {
+) -> bool {
+    let Click {
+        position,
+        double,
+        shift,
+        aside,
+    } = click;
     let world = state.to_world(position);
     let tolerance = f64::from(GRAB / state.camera.zoom);
     if let Some(node) = state.canvas.node_at(world, tolerance).cloned() {
@@ -765,9 +929,43 @@ fn handle_click(
                 state.selected.push(node.id.clone());
             }
             state.selected_edge = None;
-            return;
+            return false;
         }
         state.select_only(&node.id);
+        if node.is_note_card()
+            && let Some(file) = node.file.clone()
+        {
+            let rect = state.screen_rect(node.rect());
+            let zoom = state.camera.zoom;
+            if buttons_visible(zoom) {
+                let buttons = header_buttons(rect, zoom);
+                if buttons.collapse.expand(2.0).contains(position) {
+                    state.canvas.toggle_collapsed(&node.id);
+                    return state.commit(tab);
+                }
+                if buttons.aside.expand(2.0).contains(position) {
+                    outcome.aside = Some(file);
+                    return false;
+                }
+            }
+            if aside {
+                outcome.aside = Some(file);
+                return false;
+            }
+            let in_header = world.1 - node.y <= canvas::NOTE_HEADER;
+            if in_header {
+                // O título abre a nota (como no R14).
+                outcome.follow = Some(file);
+            } else if double && notes.exists(Path::new(&file)) {
+                state.editing = Some(Editing {
+                    what: Edit::Note(node.id.clone()),
+                    buffer: String::new(),
+                    fresh: false,
+                    focused: false,
+                });
+            }
+            return false;
+        }
         let in_header = world.1 - node.y <= GROUP_LABEL_HEIGHT.max(24.0);
         match node.node_kind() {
             NodeKind::Text if double => {
@@ -798,7 +996,7 @@ fn handle_click(
             }
             _ => {}
         }
-        return;
+        return false;
     }
     if let Some(edge) = state.canvas.edge_at(world, tolerance).cloned() {
         state.selected.clear();
@@ -811,7 +1009,7 @@ fn handle_click(
                 focused: false,
             });
         }
-        return;
+        return false;
     }
     if !shift {
         state.clear_selection();
@@ -829,9 +1027,10 @@ fn handle_click(
         });
         // O cartão novo só entra no arquivo quando o texto for confirmado.
     }
+    false
 }
 
-fn handle_keys(ui: &egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> bool {
+fn handle_keys(ui: &egui::Ui, state: &mut CanvasState, tab: &mut Tab, notes: &Notes) -> bool {
     let (delete, escape, enter, undo, redo, all, fit) = ui.input(|input| {
         let command = input.modifiers.command;
         (
@@ -857,14 +1056,28 @@ fn handle_keys(ui: &egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> bool {
     if enter
         && state.selected.len() == 1
         && let Some(node) = state.canvas.node(&state.selected[0]).cloned()
-        && node.node_kind() == NodeKind::Text
     {
-        state.editing = Some(Editing {
-            buffer: node.text.unwrap_or_default(),
-            what: Edit::Text(node.id),
-            fresh: false,
-            focused: false,
-        });
+        if node.node_kind() == NodeKind::Text {
+            state.editing = Some(Editing {
+                buffer: node.text.unwrap_or_default(),
+                what: Edit::Text(node.id),
+                fresh: false,
+                focused: false,
+            });
+        } else if node.is_note_card()
+            && !node.is_collapsed()
+            && node
+                .file
+                .as_deref()
+                .is_some_and(|file| notes.exists(Path::new(file)))
+        {
+            state.editing = Some(Editing {
+                buffer: String::new(),
+                what: Edit::Note(node.id),
+                fresh: false,
+                focused: false,
+            });
+        }
     }
     if undo {
         changed |= state.step_history(tab, false);
@@ -903,7 +1116,20 @@ fn delete_selection(state: &mut CanvasState, tab: &mut Tab) -> bool {
 // Edição no lugar
 // ---------------------------------------------------------------------------------------------
 
-fn show_editor(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> bool {
+fn show_editor(
+    ui: &mut egui::Ui,
+    state: &mut CanvasState,
+    tab: &mut Tab,
+    notes: &mut Notes,
+    outcome: &mut Outcome,
+) -> bool {
+    if matches!(
+        state.editing.as_ref().map(|editing| &editing.what),
+        Some(Edit::Note(_))
+    ) {
+        show_note_editor(ui, state, notes, outcome);
+        return false;
+    }
     let Some(mut editing) = state.editing.take() else {
         return false;
     };
@@ -931,6 +1157,7 @@ fn show_editor(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> boo
                 let middle = state.to_screen(curve.at(0.5));
                 egui::Rect::from_center_size(middle, Vec2::new(140.0, 24.0))
             }),
+        Edit::Note(_) => None,
     };
     let Some(area) = area else {
         return false;
@@ -989,15 +1216,130 @@ fn show_editor(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> boo
         Edit::Edge(edge) => {
             state.canvas.set_edge_label(edge, &editing.buffer);
         }
+        Edit::Note(_) => {}
     }
     changed |= state.commit(tab);
     changed
 }
 
+/// Edita a nota de um cartão de nota no lugar: o texto vai direto para o `Document` da nota (o da
+/// aba, se ela está aberta; senão o cartão aberto do app), então a aba e o cartão são sempre a
+/// mesma coisa, e o autosave e o portão do sync são os de qualquer nota. Esc, clique fora ou
+/// perder o foco terminam a edição. Só marca a nota como editada quando o texto mudou.
+fn show_note_editor(
+    ui: &mut egui::Ui,
+    state: &mut CanvasState,
+    notes: &mut Notes,
+    outcome: &mut Outcome,
+) {
+    let Some(mut editing) = state.editing.take() else {
+        return;
+    };
+    let Edit::Note(node_id) = &editing.what else {
+        return;
+    };
+    let Some(node) = state.canvas.node(node_id).cloned() else {
+        return;
+    };
+    let Some(file) = node.file.clone() else {
+        return;
+    };
+    let rect = state.screen_rect(node.rect());
+    let zoom = state.camera.zoom;
+    let body = note_body_rect(rect, zoom);
+    if body.width() < 20.0 || body.height() < 20.0 || node.is_collapsed() {
+        return;
+    }
+    let tab = match notes.edit_target(Path::new(&file)) {
+        Ok(tab) => tab,
+        Err(message) => {
+            outcome.error = Some(message);
+            return;
+        }
+    };
+    let had_focus_before = editing.focused;
+    let size = (14.0 * zoom).clamp(11.0, 40.0);
+    let id = ui.scope_id().with(("canvas-note-edit", &node.id));
+    let accent = theme::accent(ui);
+    let fill = ui.visuals().extreme_bg_color;
+    let mut escape = false;
+    let (response, changed) = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+            let output = egui::ScrollArea::vertical()
+                .id_salt(("canvas-note-scroll", &node.id))
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    egui::TextEdit::multiline(&mut tab.document.text)
+                        .id(id)
+                        .font(FontId::new(size, theme::fonts::text("regular")))
+                        .desired_width(body.width())
+                        .min_size(body.size())
+                        .frame(egui::Frame::NONE.inner_margin(theme::space::XS).fill(fill))
+                        .show(ui)
+                })
+                .inner;
+            (output.response.clone(), output.response.changed())
+        })
+        .inner;
+    ui.painter()
+        .rect_stroke(body, 2.0, Stroke::new(1.5, accent), StrokeKind::Inside);
+    if changed {
+        tab.edited();
+    }
+    if !editing.focused {
+        response.request_focus();
+        editing.focused = true;
+    }
+    ui.input(|input| {
+        escape = input.key_pressed(Key::Escape);
+    });
+    // Sair: Esc, clicar fora (o foco vai embora) ou o texto perder o foco depois de tê-lo.
+    let finished = escape || (had_focus_before && !response.has_focus());
+    ui.ctx().request_repaint();
+    if !finished {
+        state.editing = Some(editing);
+    }
+}
+
+/// A área do corpo de um cartão de nota (abaixo do cabeçalho), na tela.
+fn note_body_rect(rect: egui::Rect, zoom: f32) -> egui::Rect {
+    let pad = 10.0 * zoom;
+    egui::Rect::from_min_max(
+        Pos2::new(
+            rect.min.x + pad,
+            rect.min.y + canvas::NOTE_HEADER as f32 * zoom,
+        ),
+        rect.max - Vec2::splat(pad),
+    )
+}
+
+/// Os botões do cabeçalho de um cartão de nota, na tela.
+struct HeaderButtons {
+    collapse: egui::Rect,
+    aside: egui::Rect,
+}
+
+/// Os botões só aparecem (e só respondem) com zoom de leitura.
+fn buttons_visible(zoom: f32) -> bool {
+    zoom >= 0.3
+}
+
+fn header_buttons(rect: egui::Rect, zoom: f32) -> HeaderButtons {
+    let size = (18.0 * zoom).clamp(13.0, 26.0);
+    let pad = 8.0 * zoom.max(0.6);
+    let top = rect.min.y + (canvas::NOTE_HEADER as f32 * zoom - size) / 2.0;
+    let collapse = egui::Rect::from_min_size(
+        Pos2::new(rect.max.x - pad - size, top.max(rect.min.y + 2.0)),
+        Vec2::splat(size),
+    );
+    let aside = collapse.translate(Vec2::new(-(size + 4.0 * zoom.max(0.6)), 0.0));
+    HeaderButtons { collapse, aside }
+}
+
 impl Editing {
     fn what_id(&self) -> String {
         match &self.what {
-            Edit::Text(id) | Edit::Group(id) | Edit::Edge(id) => id.clone(),
+            Edit::Text(id) | Edit::Group(id) | Edit::Edge(id) | Edit::Note(id) => id.clone(),
         }
     }
 }
@@ -1022,6 +1364,25 @@ fn show_context_menu(response: &egui::Response, state: &mut CanvasState) -> Opti
         theme::menu_style(ui);
         match &target {
             Target::Node(id) => {
+                if let Some(node) = state.canvas.node(id)
+                    && node.is_note_card()
+                {
+                    if ui.button("Abrir ao lado").clicked() {
+                        action = Some(Action::Aside);
+                        ui.close();
+                    }
+                    if ui
+                        .button(if node.is_collapsed() {
+                            "Expandir"
+                        } else {
+                            "Recolher"
+                        })
+                        .clicked()
+                    {
+                        action = Some(Action::Collapse);
+                        ui.close();
+                    }
+                }
                 if let Some(node) = state.canvas.node(id)
                     && matches!(node.node_kind(), NodeKind::Group | NodeKind::Text)
                     && ui
@@ -1097,7 +1458,12 @@ fn show_context_menu(response: &egui::Response, state: &mut CanvasState) -> Opti
     action
 }
 
-fn apply_action(state: &mut CanvasState, action: Action, tab: &mut Tab) -> bool {
+fn apply_action(
+    state: &mut CanvasState,
+    action: Action,
+    tab: &mut Tab,
+    outcome: &mut Outcome,
+) -> bool {
     let Some(target) = state.menu.clone() else {
         return false;
     };
@@ -1167,6 +1533,20 @@ fn apply_action(state: &mut CanvasState, action: Action, tab: &mut Tab) -> bool 
             };
             state.canvas.set_arrow(&id, start, on) && state.commit(tab)
         }
+        Action::Aside => {
+            if let Target::Node(id) = target
+                && let Some(node) = state.canvas.node(&id)
+            {
+                outcome.aside = node.file.clone();
+            }
+            false
+        }
+        Action::Collapse => {
+            let Target::Node(id) = target else {
+                return false;
+            };
+            state.canvas.toggle_collapsed(&id) && state.commit(tab)
+        }
     }
 }
 
@@ -1211,6 +1591,16 @@ fn show_toolbar(
                         .clicked()
                     {
                         state.add_note = Some(String::new());
+                    }
+                    if ui
+                        .selectable_label(state.library.is_some(), "Biblioteca")
+                        .on_hover_text("Lista das notas do cofre para pôr no quadro")
+                        .clicked()
+                    {
+                        state.library = match state.library.take() {
+                            Some(_) => None,
+                            None => Some(Library::opened()),
+                        };
                     }
                     if ui
                         .button("Link")
@@ -1280,7 +1670,7 @@ fn show_dialogs(
     ui: &mut egui::Ui,
     state: &mut CanvasState,
     tab: &mut Tab,
-    vault: Option<&Vault>,
+    vault: Option<&rustidian::vault::Vault>,
 ) -> bool {
     let mut changed = false;
     if let Some(mut query) = state.add_note.take() {
@@ -1385,6 +1775,132 @@ fn show_dialogs(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Biblioteca e notas soltas no quadro (H1)
+// ---------------------------------------------------------------------------------------------
+
+/// O painel da biblioteca, quando aberto: lista as notas do cofre e põe no quadro a que o
+/// usuário escolher (o botão + de cada linha; arrastar é tratado em `take_drops`).
+fn show_library(
+    ui: &mut egui::Ui,
+    state: &mut CanvasState,
+    tab: &mut Tab,
+    notes: &Notes,
+    rect: egui::Rect,
+) -> bool {
+    let Some(mut library) = state.library.take() else {
+        return false;
+    };
+    let paths: Vec<String> = notes
+        .vault
+        .map(|vault| {
+            vault
+                .notes
+                .iter()
+                .filter(|note| rustidian::vault::is_markdown(&note.path))
+                .map(|note| note.path.to_string_lossy().replace('\\', "/"))
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let output = canvas_library::show(ui, rect, &mut library, &state.canvas, &names);
+    let mut changed = false;
+    if let Some(path) = output.add {
+        let (x, y) = state.free_spot(canvas::BOX_SIZE);
+        let id = state.canvas.add_file(&path, x, y);
+        state.select_only(&id);
+        changed |= state.commit(tab);
+    }
+    if !output.close {
+        state.library = Some(library);
+    }
+    changed
+}
+
+/// Notas que chegam ao quadro por arrastar: da biblioteca ou do explorador de arquivos. Cada
+/// uma vira um cartão com o centro onde o ponteiro foi solto.
+fn take_drops(
+    ui: &mut egui::Ui,
+    state: &mut CanvasState,
+    tab: &mut Tab,
+    notes: &Notes,
+    rect: egui::Rect,
+) -> bool {
+    let ctx = ui.ctx().clone();
+    let panel = state
+        .library
+        .as_ref()
+        .map(|_| canvas_library::panel_rect(rect));
+    let outside_panel = |position: Pos2| {
+        rect.contains(position) && panel.is_none_or(|panel| !panel.contains(position))
+    };
+    let pointer = ctx.input(|input| input.pointer.latest_pos());
+    let mut changed = false;
+    let mut hovering = false;
+
+    // Da biblioteca.
+    if let Some(dragged) = egui::DragAndDrop::payload::<canvas_library::Dragged>(&ctx) {
+        hovering = pointer.is_some_and(outside_panel);
+        if ctx.input(|input| input.pointer.any_released()) {
+            if let Some(position) = pointer.filter(|position| outside_panel(*position)) {
+                let world = state.to_world(position);
+                let ids =
+                    state
+                        .canvas
+                        .add_files_at(std::slice::from_ref(&dragged.0), world.0, world.1);
+                state.selected = ids;
+                state.selected_edge = None;
+                changed |= state.commit(tab);
+            }
+            egui::DragAndDrop::clear_payload(&ctx);
+        }
+    }
+
+    // Do explorador de arquivos.
+    if let Some(paths) = crate::file_tree::dragged_paths(&ctx)
+        && paths.iter().any(|path| notes.accepts(path))
+    {
+        hovering |= pointer.is_some_and(outside_panel);
+    }
+    if let Some((paths, position)) = crate::file_tree::released_drag(&ctx)
+        && rect.contains(position)
+    {
+        crate::file_tree::clear_released_drag(&ctx);
+        let accepted: Vec<String> = paths
+            .iter()
+            .filter(|path| notes.accepts(path))
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        if outside_panel(position) && !accepted.is_empty() {
+            let world = state.to_world(position);
+            let ids = state.canvas.add_files_at(&accepted, world.0, world.1);
+            state.selected = ids;
+            state.selected_edge = None;
+            changed |= state.commit(tab);
+        }
+    }
+
+    if hovering {
+        let accent = theme::accent(ui);
+        let painter = ui.painter_at(rect);
+        painter.rect_stroke(
+            rect.shrink(3.0),
+            6.0,
+            Stroke::new(2.5, accent),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            Pos2::new(rect.center().x, rect.min.y + 64.0),
+            Align2::CENTER_CENTER,
+            "Solte para pôr a nota no quadro",
+            FontId::new(14.0, theme::fonts::text("semibold")),
+            accent,
+        );
+        ctx.request_repaint();
+    }
+    changed
+}
+
+// ---------------------------------------------------------------------------------------------
 // Desenho
 // ---------------------------------------------------------------------------------------------
 
@@ -1451,7 +1967,7 @@ fn paint_groups_and_nodes(
     ui: &egui::Ui,
     painter: &egui::Painter,
     state: &CanvasState,
-    vault: Option<&Vault>,
+    notes: &Notes,
 ) {
     let viewport = state.area.expand(40.0);
     let editing_id = state.editing.as_ref().map(|editing| editing.what_id());
@@ -1471,7 +1987,7 @@ fn paint_groups_and_nodes(
             painter.rect_filled(rect, rounding, fill);
             painter.rect_stroke(rect, rounding, stroke, StrokeKind::Inside);
             let editing_this = editing_id.as_deref() == Some(node.id.as_str());
-            paint_content(ui, painter, state, node, rect, vault, editing_this);
+            paint_content(ui, painter, state, node, rect, notes, editing_this);
         }
     }
 }
@@ -1482,9 +1998,10 @@ fn paint_content(
     state: &CanvasState,
     node: &Node,
     rect: egui::Rect,
-    vault: Option<&Vault>,
+    notes: &Notes,
     editing: bool,
 ) {
+    let vault = notes.vault;
     let zoom = state.camera.zoom;
     let text_color = ui.visuals().text_color();
     let weak = ui.visuals().weak_text_color();
@@ -1519,6 +2036,9 @@ fn paint_content(
                     color,
                 );
             }
+        }
+        NodeKind::File if node.is_note_card() => {
+            paint_note_card(ui, painter, state, node, rect, notes, editing);
         }
         NodeKind::File => {
             if zoom < 0.15 {
@@ -1626,10 +2146,22 @@ fn paint_markdown(
     if area.width() < 4.0 || area.height() < 4.0 {
         return;
     }
+    let galley = markdown_galley(painter, area.width(), text, zoom, color);
+    painter.galley(area.min, galley, color);
+}
+
+/// O texto em Markdown simples já disposto na largura dada.
+fn markdown_galley(
+    painter: &egui::Painter,
+    width: f32,
+    text: &str,
+    zoom: f32,
+    color: Color32,
+) -> Arc<egui::Galley> {
     let base = 15.0 * zoom;
     let mut job = LayoutJob {
         wrap: egui::text::TextWrapping {
-            max_width: area.width(),
+            max_width: width,
             ..Default::default()
         },
         ..Default::default()
@@ -1681,8 +2213,181 @@ fn paint_markdown(
             job.append(&span.text, 0.0, format);
         }
     }
-    let galley = painter.layout_job(job);
-    painter.galley(area.min, galley, color);
+    painter.layout_job(job)
+}
+
+/// Um cartão de nota "vivo" (H1): título e botões no cabeçalho e, expandido, o texto da nota
+/// em Markdown simples com rolagem própria. O texto vem da aba aberta (com a edição que ainda
+/// não foi salva) ou do índice do cofre.
+fn paint_note_card(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    state: &CanvasState,
+    node: &Node,
+    rect: egui::Rect,
+    notes: &Notes,
+    editing: bool,
+) {
+    let zoom = state.camera.zoom;
+    if zoom < 0.15 {
+        return;
+    }
+    let text_color = ui.visuals().text_color();
+    let weak = ui.visuals().weak_text_color();
+    let accent = theme::accent(ui);
+    let pad = 10.0 * zoom;
+    let collapsed = node.is_collapsed();
+    let header_height = canvas::NOTE_HEADER as f32 * zoom;
+    let buttons = header_buttons(rect, zoom);
+    let show_buttons = buttons_visible(zoom);
+    let title_right = if show_buttons {
+        buttons.aside.min.x - 6.0
+    } else {
+        rect.max.x - pad
+    };
+    let title_size = (15.0 * zoom).clamp(8.0, 36.0);
+    painter
+        .with_clip_rect(
+            egui::Rect::from_min_max(rect.min, Pos2::new(title_right, rect.max.y))
+                .intersect(painter.clip_rect()),
+        )
+        .text(
+            rect.min + Vec2::new(pad, ((header_height - title_size) / 2.0).max(2.0)),
+            Align2::LEFT_TOP,
+            node.file_title(),
+            FontId::new(title_size, theme::fonts::text("semibold")),
+            accent,
+        );
+    if show_buttons {
+        let pointer = ui.input(|input| input.pointer.hover_pos());
+        let mut label = None;
+        for (button, aside) in [(buttons.collapse, false), (buttons.aside, true)] {
+            let hot = pointer.is_some_and(|pointer| button.contains(pointer));
+            if hot {
+                painter.rect_filled(button, 4.0, accent.gamma_multiply(0.22));
+                label = Some((
+                    button,
+                    if aside {
+                        "Abrir ao lado"
+                    } else if collapsed {
+                        "Expandir"
+                    } else {
+                        "Recolher"
+                    },
+                ));
+            }
+            let color = if hot { accent } else { weak };
+            if aside {
+                let inner = button.shrink(button.width() * 0.2);
+                painter.rect_stroke(inner, 2.0, Stroke::new(1.3, color), StrokeKind::Inside);
+                let divider = inner.min.x + inner.width() * 0.55;
+                painter.line_segment(
+                    [
+                        Pos2::new(divider, inner.min.y),
+                        Pos2::new(divider, inner.max.y),
+                    ],
+                    Stroke::new(1.3, color),
+                );
+                painter.rect_filled(
+                    egui::Rect::from_min_max(Pos2::new(divider, inner.min.y), inner.max),
+                    1.0,
+                    color.gamma_multiply(0.5),
+                );
+            } else {
+                let center = button.center();
+                let half = button.width() * 0.28;
+                let points = if collapsed {
+                    vec![
+                        center + Vec2::new(-half * 0.6, -half),
+                        center + Vec2::new(-half * 0.6, half),
+                        center + Vec2::new(half * 0.8, 0.0),
+                    ]
+                } else {
+                    vec![
+                        center + Vec2::new(-half, -half * 0.6),
+                        center + Vec2::new(half, -half * 0.6),
+                        center + Vec2::new(0.0, half * 0.8),
+                    ]
+                };
+                painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+            }
+        }
+        if let Some((button, text)) = label {
+            let galley =
+                painter.layout_no_wrap(text.to_owned(), FontId::proportional(11.5), text_color);
+            let area = egui::Rect::from_min_size(
+                Pos2::new(button.max.x - galley.size().x - 8.0, button.max.y + 4.0),
+                galley.size() + Vec2::new(8.0, 4.0),
+            );
+            painter.rect_filled(area, 4.0, ui.visuals().extreme_bg_color);
+            painter.rect_stroke(area, 4.0, Stroke::new(1.0, weak), StrokeKind::Inside);
+            painter.galley(area.min + Vec2::new(4.0, 2.0), galley, text_color);
+        }
+    }
+    if collapsed || editing || zoom < 0.3 {
+        return;
+    }
+    let body = note_body_rect(rect, zoom);
+    if body.height() < 8.0 || body.width() < 8.0 {
+        return;
+    }
+    painter.line_segment(
+        [
+            Pos2::new(rect.min.x + pad, rect.min.y + header_height),
+            Pos2::new(rect.max.x - pad, rect.min.y + header_height),
+        ],
+        Stroke::new(1.0, weak.gamma_multiply(0.35)),
+    );
+    let clip = painter.with_clip_rect(body.intersect(painter.clip_rect()));
+    let file = node.file.as_deref().unwrap_or("");
+    let note_size = FontId::proportional((13.0 * zoom).clamp(8.0, 28.0));
+    match notes.content(Path::new(file)) {
+        Content::Missing => {
+            clip.text(
+                body.min,
+                Align2::LEFT_TOP,
+                "Nota não encontrada no cofre",
+                note_size,
+                ui.visuals().warn_fg_color,
+            );
+        }
+        Content::Text(text) => {
+            let text = canvas::card_body(text);
+            if text.trim().is_empty() {
+                clip.text(
+                    body.min,
+                    Align2::LEFT_TOP,
+                    "Nota vazia. Clique duas vezes para escrever.",
+                    note_size,
+                    weak,
+                );
+                return;
+            }
+            let galley = markdown_galley(painter, body.width(), text, zoom * 0.95, text_color);
+            let max = (galley.size().y - body.height()).max(0.0);
+            let scroll = {
+                let mut views = state.card_view.borrow_mut();
+                let view = views.entry(node.id.clone()).or_default();
+                view.max = max;
+                view.scroll = view.scroll.clamp(0.0, max);
+                view.scroll
+            };
+            clip.galley(body.min - Vec2::new(0.0, scroll), galley, text_color);
+            if max > 0.0 {
+                let track = body.height();
+                let thumb = (track * body.height() / (body.height() + max)).max(16.0);
+                let top = body.min.y + (track - thumb) * (scroll / max);
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        Pos2::new(rect.max.x - 5.0, top),
+                        Vec2::new(3.0, thumb),
+                    ),
+                    1.5,
+                    weak.gamma_multiply(0.6),
+                );
+            }
+        }
+    }
 }
 
 fn paint_edges(ui: &egui::Ui, painter: &egui::Painter, state: &CanvasState) {

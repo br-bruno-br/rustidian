@@ -1,5 +1,7 @@
 mod app;
 mod callout_ui;
+mod canvas_library;
+mod canvas_notes;
 mod canvas_ui;
 mod code_ui;
 mod diagrams;

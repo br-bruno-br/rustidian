@@ -19,6 +19,13 @@ pub const TEXT_SIZE: (f64, f64) = (250.0, 60.0);
 pub const BOX_SIZE: (f64, f64) = (400.0, 400.0);
 /// Menor tamanho que o redimensionar aceita.
 pub const MIN_SIZE: (f64, f64) = (40.0, 30.0);
+/// Altura do cabeçalho (título e botões) de um cartão de nota, em unidades do quadro; é também a
+/// altura de um cartão recolhido.
+pub const NOTE_HEADER: f64 = 36.0;
+/// Campos opcionais nossos (H1). O JSON Canvas aceita campos extras e o Obsidian os ignora; o
+/// arquivo continua abrindo lá. Sem eles o cartão é um cartão de nota comum.
+pub const COLLAPSED_KEY: &str = "rustidianCollapsed";
+pub const EXPANDED_HEIGHT_KEY: &str = "rustidianHeight";
 
 pub fn is_canvas(path: &Path) -> bool {
     path.extension()
@@ -80,6 +87,15 @@ fn number<S: Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> 
         serializer.serialize_i64(*value as i64)
     } else {
         serializer.serialize_f64(*value)
+    }
+}
+
+/// Um número JSON que fica inteiro quando o valor é inteiro (a especificação manda inteiros).
+fn json_number(value: f64) -> Value {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        Value::from(value as i64)
+    } else {
+        Value::from(value)
     }
 }
 
@@ -182,6 +198,25 @@ impl Node {
             Side::Bottom => (rect.x + rect.w / 2.0, rect.y + rect.h),
             Side::Left => (rect.x, rect.y + rect.h / 2.0),
         }
+    }
+
+    /// Cartão de uma nota Markdown do cofre (o que o H1 desenha "vivo"): `type: file` apontando
+    /// para um `.md`.
+    pub fn is_note_card(&self) -> bool {
+        self.node_kind() == NodeKind::File
+            && self.file.as_deref().is_some_and(|file| {
+                Path::new(file)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+            })
+    }
+
+    /// O cartão está recolhido (só o título)? Campo opcional nosso; sem ele, está expandido.
+    pub fn is_collapsed(&self) -> bool {
+        self.extra
+            .get(COLLAPSED_KEY)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// Nome do arquivo (sem pasta e sem extensão) de um cartão de nota.
@@ -452,6 +487,82 @@ impl Canvas {
         let mut node = Node::blank(String::new(), "file", x, y, BOX_SIZE);
         node.file = Some(path.replace('\\', "/"));
         self.push_node(node)
+    }
+
+    /// Se o quadro já tem um cartão para este arquivo (`/` e `\` valem igual).
+    pub fn has_file(&self, path: &str) -> bool {
+        let path = path.replace('\\', "/");
+        self.nodes.iter().any(|node| {
+            node.file
+                .as_deref()
+                .is_some_and(|file| file.replace('\\', "/") == path)
+        })
+    }
+
+    /// Os caminhos dos cartões de arquivo do quadro, com barras normais.
+    pub fn file_paths(&self) -> Vec<String> {
+        self.nodes
+            .iter()
+            .filter_map(|node| node.file.as_deref())
+            .map(|file| file.replace('\\', "/"))
+            .collect()
+    }
+
+    /// Põe vários arquivos no quadro a partir de `(x, y)` (o primeiro com o centro ali), em
+    /// grade de três colunas, e devolve os ids. A mesma nota pode entrar mais de uma vez.
+    pub fn add_files_at(&mut self, paths: &[String], x: f64, y: f64) -> Vec<String> {
+        const COLUMNS: usize = 3;
+        const GAP: f64 = 24.0;
+        let (width, height) = BOX_SIZE;
+        paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
+                let column = (index % COLUMNS) as f64;
+                let row = (index / COLUMNS) as f64;
+                self.add_file(
+                    path,
+                    (x - width / 2.0 + column * (width + GAP)).round(),
+                    (y - height / 2.0 + row * (height + GAP)).round(),
+                )
+            })
+            .collect()
+    }
+
+    /// Recolhe (só o título) ou expande um cartão de nota. Recolher guarda a altura num campo
+    /// nosso e expandir a devolve. `false` se o nó não é cartão de nota ou já estava assim.
+    pub fn set_collapsed(&mut self, id: &str, collapsed: bool) -> bool {
+        let Some(node) = self.node_mut(id) else {
+            return false;
+        };
+        if !node.is_note_card() || node.is_collapsed() == collapsed {
+            return false;
+        }
+        if collapsed {
+            node.extra
+                .insert(EXPANDED_HEIGHT_KEY.to_owned(), json_number(node.height));
+            node.extra
+                .insert(COLLAPSED_KEY.to_owned(), Value::Bool(true));
+            node.height = NOTE_HEADER;
+        } else {
+            let height = node
+                .extra
+                .remove(EXPANDED_HEIGHT_KEY)
+                .and_then(|value| value.as_f64())
+                .filter(|height| *height >= MIN_SIZE.1)
+                .unwrap_or(BOX_SIZE.1);
+            node.extra.remove(COLLAPSED_KEY);
+            node.height = height;
+        }
+        true
+    }
+
+    pub fn toggle_collapsed(&mut self, id: &str) -> bool {
+        let Some(node) = self.node(id) else {
+            return false;
+        };
+        let collapsed = node.is_collapsed();
+        self.set_collapsed(id, !collapsed)
     }
 
     pub fn add_link(&mut self, url: &str, x: f64, y: f64) -> String {
@@ -970,6 +1081,94 @@ fn inline_spans(line: &str) -> Vec<Span> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Biblioteca de notas (H1)
+// ---------------------------------------------------------------------------------------------
+
+/// Uma linha da biblioteca: uma nota do cofre e se ela já tem cartão neste quadro.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LibraryEntry {
+    /// Caminho relativo à raiz do cofre, com barras normais.
+    pub path: String,
+    /// Nome da nota (sem pasta e sem extensão).
+    pub title: String,
+    pub in_board: bool,
+}
+
+/// As notas da biblioteca que casam com a busca: cada palavra da busca precisa aparecer no
+/// caminho (sem diferença de maiúsculas nem de acento). As que o nome começa pela busca vêm
+/// primeiro; o resto segue a ordem alfabética do caminho.
+pub fn library_entries<'a>(
+    notes: impl IntoIterator<Item = &'a str>,
+    canvas: &Canvas,
+    query: &str,
+) -> Vec<LibraryEntry> {
+    let terms: Vec<String> = query.split_whitespace().map(fold).collect();
+    let in_board: std::collections::HashSet<String> = canvas.file_paths().into_iter().collect();
+    let mut entries: Vec<(bool, String, LibraryEntry)> = notes
+        .into_iter()
+        .map(|path| path.replace('\\', "/"))
+        .filter_map(|path| {
+            let folded = fold(&path);
+            if !terms.iter().all(|term| folded.contains(term.as_str())) {
+                return None;
+            }
+            let name = path.rsplit('/').next().unwrap_or(&path);
+            let title = match name.rsplit_once('.') {
+                Some((stem, _)) if !stem.is_empty() => stem.to_owned(),
+                _ => name.to_owned(),
+            };
+            let starts = terms
+                .first()
+                .is_some_and(|term| fold(&title).starts_with(term.as_str()));
+            let entry = LibraryEntry {
+                in_board: in_board.contains(&path),
+                title,
+                path,
+            };
+            Some((!starts, folded, entry))
+        })
+        .collect();
+    entries.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    entries.into_iter().map(|(_, _, entry)| entry).collect()
+}
+
+/// Minúsculas e sem acento do português, para a busca da biblioteca.
+fn fold(text: &str) -> String {
+    text.chars()
+        .map(
+            |character| match character.to_lowercase().next().unwrap_or(character) {
+                'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+                'é' | 'è' | 'ê' | 'ë' => 'e',
+                'í' | 'ì' | 'î' | 'ï' => 'i',
+                'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
+                'ú' | 'ù' | 'û' | 'ü' => 'u',
+                'ç' => 'c',
+                other => other,
+            },
+        )
+        .collect()
+}
+
+/// O texto de uma nota como o cartão mostra: sem o bloco de propriedades do topo e limitado
+/// (a rolagem do cartão nunca monta um texto gigante de uma vez).
+pub fn card_body(text: &str) -> &str {
+    const MOST: usize = 20_000;
+    let after_properties = text
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(_, after)| after.trim_start_matches([' ', '\t']));
+    let body = match after_properties {
+        Some(after) => after.trim_start_matches(['\r', '\n']),
+        None => text,
+    };
+    match body.char_indices().nth(MOST) {
+        Some((end, _)) => &body[..end],
+        None => body,
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Testes
 // ---------------------------------------------------------------------------------------------
 
@@ -1367,6 +1566,132 @@ mod tests {
     fn links_em_markdown_mostram_so_o_texto() {
         let blocks = markdown_blocks("veja [o site](https://x.com/a) agora");
         assert_eq!(plain(&blocks), ["veja o site agora"]);
+    }
+
+    #[test]
+    fn recolher_guarda_a_altura_num_campo_nosso_e_expandir_devolve() {
+        let mut canvas = Canvas::parse(SAMPLE).unwrap();
+        let before = canvas.node("n2").unwrap().rect();
+        assert!(canvas.node("n2").unwrap().is_note_card());
+        assert!(!canvas.node("n2").unwrap().is_collapsed());
+        assert!(canvas.set_collapsed("n2", true));
+        let node = canvas.node("n2").unwrap();
+        assert!(node.is_collapsed());
+        assert_eq!(node.height, NOTE_HEADER);
+        assert_eq!((node.x, node.width), (before.x, before.w));
+        // O arquivo continua JSON Canvas: campos extras com inteiros e o resto preservado.
+        let text = canvas.to_json();
+        assert!(text.contains("\"rustidianCollapsed\":true"), "{text}");
+        assert!(text.contains("\"rustidianHeight\":120"), "{text}");
+        assert!(text.contains("\"subpath\":\"#Resumo\""), "{text}");
+        let again = Canvas::parse(&text).unwrap();
+        assert!(again.node("n2").unwrap().is_collapsed());
+        // Recolher de novo não muda nada; expandir devolve a altura e tira os campos.
+        assert!(!canvas.set_collapsed("n2", true));
+        assert!(canvas.set_collapsed("n2", false));
+        assert_eq!(canvas.node("n2").unwrap().rect(), before);
+        assert!(!canvas.to_json().contains("rustidian"));
+        assert_eq!(value(&canvas.to_json()), value(SAMPLE));
+    }
+
+    #[test]
+    fn so_cartao_de_nota_recolhe() {
+        let mut canvas = Canvas::parse(SAMPLE).unwrap();
+        for id in ["n1", "n3", "n4", "g1", "nao-existe"] {
+            assert!(!canvas.set_collapsed(id, true), "{id}");
+        }
+        let image = canvas.add_file("fotos/a.png", 0.0, 0.0);
+        assert!(!canvas.node(&image).unwrap().is_note_card());
+        assert!(!canvas.set_collapsed(&image, true));
+        // Um cartão recolhido sem a altura guardada volta ao tamanho padrão.
+        let note = canvas.add_file("A.MD", 0.0, 0.0);
+        assert!(canvas.node(&note).unwrap().is_note_card());
+        canvas.set_collapsed(&note, true);
+        canvas
+            .node_mut(&note)
+            .unwrap()
+            .extra
+            .remove(EXPANDED_HEIGHT_KEY);
+        canvas.set_collapsed(&note, false);
+        assert_eq!(canvas.node(&note).unwrap().height, BOX_SIZE.1);
+    }
+
+    #[test]
+    fn alternar_recolhimento_vai_e_volta() {
+        let mut canvas = Canvas::parse(SAMPLE).unwrap();
+        assert!(canvas.toggle_collapsed("n2"));
+        assert!(canvas.node("n2").unwrap().is_collapsed());
+        assert!(canvas.toggle_collapsed("n2"));
+        assert!(!canvas.node("n2").unwrap().is_collapsed());
+        assert!(!canvas.toggle_collapsed("n1"));
+    }
+
+    #[test]
+    fn varias_notas_entram_em_grade_com_a_primeira_no_ponto() {
+        let mut canvas = Canvas::default();
+        let paths: Vec<String> = (0..4).map(|n| format!("Pasta\\Nota {n}.md")).collect();
+        let ids = canvas.add_files_at(&paths, 1000.0, 500.0);
+        assert_eq!(ids.len(), 4);
+        let first = canvas.node(&ids[0]).unwrap();
+        assert_eq!(first.file.as_deref(), Some("Pasta/Nota 0.md"));
+        assert_eq!(
+            (first.x + first.width / 2.0, first.y + first.height / 2.0),
+            (1000.0, 500.0)
+        );
+        // A quarta nota abre a segunda fileira, sem cobrir as outras.
+        let rects: Vec<Rect> = ids
+            .iter()
+            .map(|id| canvas.node(id).unwrap().rect())
+            .collect();
+        for (index, rect) in rects.iter().enumerate() {
+            for other in &rects[index + 1..] {
+                assert!(!rect.intersects(other));
+            }
+        }
+        assert!(canvas.has_file("Pasta/Nota 3.md"));
+        assert!(canvas.has_file("Pasta\\Nota 3.md"));
+        assert!(!canvas.has_file("Pasta/Nota 4.md"));
+        assert_eq!(canvas.file_paths().len(), 4);
+    }
+
+    #[test]
+    fn a_biblioteca_filtra_marca_e_ordena() {
+        let mut canvas = Canvas::default();
+        canvas.add_file("Projetos/Aurora.md", 0.0, 0.0);
+        let notes = [
+            "Reuniões/Reunião de segunda.md",
+            "Projetos/Aurora.md",
+            "Projetos\\Plano da Aurora.md",
+            "Diário.md",
+        ];
+        let all = library_entries(notes, &canvas, "");
+        assert_eq!(all.len(), 4);
+        assert!(
+            all.iter()
+                .any(|entry| entry.path == "Projetos/Aurora.md" && entry.in_board)
+        );
+        assert_eq!(all.iter().filter(|entry| entry.in_board).count(), 1);
+        // Sem acento e sem maiúsculas; o nome que começa pela busca vem antes.
+        let found = library_entries(notes, &canvas, "aurora");
+        let paths: Vec<&str> = found.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, ["Projetos/Aurora.md", "Projetos/Plano da Aurora.md"]);
+        assert_eq!(found[0].title, "Aurora");
+        let accent = library_entries(notes, &canvas, "reuniao seg");
+        assert_eq!(accent.len(), 1);
+        assert_eq!(accent[0].title, "Reunião de segunda");
+        assert!(library_entries(notes, &canvas, "zebra").is_empty());
+        assert_eq!(library_entries(notes, &canvas, "diario")[0].title, "Diário");
+    }
+
+    #[test]
+    fn o_corpo_do_cartao_pula_as_propriedades_e_limita_o_tamanho() {
+        assert_eq!(card_body("# T\ntexto"), "# T\ntexto");
+        assert_eq!(card_body("---\ntags: [a]\n---\n# T\n"), "# T\n");
+        assert_eq!(card_body("---\r\nx: 1\r\n---\r\ncorpo"), "corpo");
+        // Sem fechar o bloco, o texto inteiro aparece (não some conteúdo).
+        assert_eq!(card_body("---\nsem fim"), "---\nsem fim");
+        let long = "ã".repeat(30_000);
+        assert_eq!(card_body(&long).chars().count(), 20_000);
     }
 
     #[test]

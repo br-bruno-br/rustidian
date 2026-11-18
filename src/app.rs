@@ -222,6 +222,9 @@ pub struct NotesApp {
     page_preview: crate::page_preview::Manager,
     pub(crate) graph: crate::graph_ui::Manager,
     pub(crate) canvases: crate::canvas_ui::Manager,
+    /// Notas que um cartão do quadro está editando sem que haja aba para elas (H1): um `Tab` sem
+    /// painel, com o autosave e o portão do sync de qualquer nota. Ver `canvas_notes`.
+    pub(crate) card_tabs: Vec<Tab>,
     pub(crate) always_update_links: bool,
     sync: sync_ui::SyncPanel,
 }
@@ -341,6 +344,7 @@ impl NotesApp {
             page_preview: Default::default(),
             graph: Default::default(),
             canvases: Default::default(),
+            card_tabs: Vec::new(),
             always_update_links: false,
             sync: Default::default(),
         };
@@ -859,6 +863,7 @@ impl NotesApp {
                             .or_else(|| vault.notes.first())
                             .map(|n| n.path.clone());
                         self.tabs.clear();
+                        self.card_tabs.clear();
                         self.active = 0;
                         self.search.clear();
                         self.refresh_due = None;
@@ -970,6 +975,7 @@ impl NotesApp {
                 }
             }
         }
+        self.tend_card_tabs();
         let mut saves = Vec::new();
         for (index, tab) in self.tabs.iter().enumerate() {
             if self.autosave_enabled
@@ -990,6 +996,27 @@ impl NotesApp {
         }
         for index in saves {
             self.autosave(index);
+        }
+        let mut card_saves = Vec::new();
+        for (index, tab) in self.card_tabs.iter().enumerate() {
+            if self.autosave_enabled
+                && self.loading_root.is_none()
+                && !self.open_picker.active()
+                && tab.document.dirty()
+                && !tab.autosave_failed
+                && !self.autosave.busy(tab.id())
+                && let Some(edited) = tab.edited_at
+            {
+                let remaining = Duration::from_millis(600).saturating_sub(edited.elapsed());
+                if remaining.is_zero() && self.pending.is_none() {
+                    card_saves.push(index);
+                } else {
+                    ctx.request_repaint_after(remaining.max(Duration::from_millis(20)));
+                }
+            }
+        }
+        for index in card_saves {
+            self.autosave_card(index);
         }
         // A running index wakes the window when it ends; repainting until then
         // would redraw an unchanged window every frame.
@@ -1033,7 +1060,7 @@ impl NotesApp {
                 self.recovery_saved.insert(path, note.text.clone());
             }
         }
-        for tab in &mut self.tabs {
+        for tab in self.tabs.iter_mut().chain(self.card_tabs.iter_mut()) {
             if changed.contains(&tab.document.path)
                 && !tab.document.dirty()
                 && !tab.document.is_blank()
@@ -1513,6 +1540,24 @@ impl NotesApp {
                     && tab.document.path == done.save.path
                     && tab.document.saved_text() == Some(done.save.original())
             }) else {
+                // Um cartão aberto do quadro (H1) passa pelo mesmo caminho.
+                if let Some(index) = self.card_tabs.iter().position(|tab| {
+                    tab.id() == done.tab
+                        && tab.document.path == done.save.path
+                        && tab.document.saved_text() == Some(done.save.original())
+                }) {
+                    match (done.result, &mut self.vault) {
+                        (Ok(()), Some(vault)) => {
+                            vault.commit_save(&mut self.card_tabs[index].document, done.save.text);
+                            self.card_saved(index);
+                        }
+                        (Ok(()), None) => {}
+                        (Err(error), _) => {
+                            self.card_tabs[index].autosave_failed = true;
+                            self.error = Some(error);
+                        }
+                    }
+                }
                 continue;
             };
             match (done.result, &mut self.vault) {
@@ -1538,6 +1583,11 @@ impl NotesApp {
             tab.edited_at = None;
         }
         tab.autosave_failed = false;
+        self.after_note_saved();
+    }
+
+    /// What follows any note's bytes reaching the disk (a tab's or a canvas card's).
+    fn after_note_saved(&mut self) {
         self.error = None;
         if let Some(vault) = &self.vault {
             self.tree = Tree::from_vault(vault);
@@ -1548,9 +1598,114 @@ impl NotesApp {
         self.sync.notify_saved();
     }
 
+    /// Autosave of a note a canvas card is editing (no tab): the same background write.
+    fn autosave_card(&mut self, index: usize) {
+        let Some(tab) = self.card_tabs.get(index) else {
+            return;
+        };
+        if tab.document.saved_text().is_none() {
+            return;
+        }
+        let Some(vault) = &self.vault else {
+            return;
+        };
+        match vault.prepare_save(&tab.document) {
+            Ok(save) => {
+                let wake = self.ctx.clone();
+                self.autosave
+                    .submit(tab.id(), save, move || wake.request_repaint());
+            }
+            Err(error) => {
+                self.card_tabs[index].autosave_failed = true;
+                self.error = Some(error);
+            }
+        }
+    }
+
+    /// What follows a canvas card's note reaching the disk.
+    fn card_saved(&mut self, index: usize) {
+        let tab = &mut self.card_tabs[index];
+        self.status = format!("{} salvo", tab.document.path.display());
+        if !tab.document.dirty() {
+            tab.edited_at = None;
+        }
+        tab.autosave_failed = false;
+        self.after_note_saved();
+    }
+
+    /// Saves every note a canvas card edited and nobody saved yet, now.
+    fn save_cards(&mut self) -> bool {
+        for index in 0..self.card_tabs.len() {
+            if !self.card_tabs[index].document.dirty() {
+                continue;
+            }
+            let saved = match (&mut self.vault, self.card_tabs.get_mut(index)) {
+                (Some(vault), Some(tab)) => vault.save(&mut tab.document),
+                _ => continue,
+            };
+            match saved {
+                Ok(()) => self.card_saved(index),
+                Err(error) => {
+                    self.card_tabs[index].autosave_failed = true;
+                    self.error = Some(error);
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Keeps one `Document` per note (H1). When a note a canvas card edits also has a tab, the
+    /// tab takes over what the card holds (its unsaved edit included) and the card closes; a
+    /// card nobody edits any more and that has nothing to save goes away.
+    fn tend_card_tabs(&mut self) {
+        if self.card_tabs.is_empty() {
+            return;
+        }
+        let live: Vec<u64> = self.tabs.iter().map(Tab::id).collect();
+        let editing = self.canvases.editing_notes(|id| live.contains(&id));
+        let mut index = 0;
+        while index < self.card_tabs.len() {
+            let id = self.card_tabs[index].id();
+            let busy = self.autosave.busy(id);
+            let path = self.card_tabs[index].document.path.clone();
+            if let Some(owner) = self
+                .tabs
+                .iter()
+                .position(|tab| tab.document.path == path && !tab.document.is_blank())
+            {
+                let both_dirty =
+                    self.card_tabs[index].document.dirty() && self.tabs[owner].document.dirty();
+                if busy || both_dirty {
+                    index += 1;
+                    continue;
+                }
+                let card = self.card_tabs.remove(index);
+                let tab = &mut self.tabs[owner];
+                if card.document.dirty() || card.document.text != tab.document.text {
+                    let dirty = card.document.dirty();
+                    tab.replace(card.document);
+                    if dirty {
+                        tab.edited();
+                    }
+                    self.cache = CommonMarkCache::default();
+                }
+                continue;
+            }
+            let card = &self.card_tabs[index];
+            let keep = busy || card.document.dirty() || editing.contains(&card.document.path);
+            if keep {
+                index += 1;
+            } else {
+                self.card_tabs.remove(index);
+            }
+        }
+    }
+
     fn dirty(&mut self) -> bool {
         self.settle_saves();
         self.tabs.iter().any(|tab| tab.document.dirty())
+            || self.card_tabs.iter().any(|tab| tab.document.dirty())
     }
 
     fn new_tab(&mut self) {
@@ -1696,7 +1851,7 @@ impl NotesApp {
                 return false;
             }
         }
-        true
+        self.save_cards()
     }
 
     fn request_close_tab(&mut self, index: usize) {
@@ -4229,6 +4384,29 @@ impl NotesApp {
         }
         let (before, after) = self.tabs.split_at_mut(self.active);
         let (tab, after) = after.split_first_mut().expect("active tab was checked");
+        if crate::canvas_ui::is_canvas_tab(tab) {
+            self.pending_anchor = None;
+            let mut notes = crate::canvas_notes::Notes::new(
+                self.vault.as_ref(),
+                before,
+                after,
+                &mut self.card_tabs,
+            );
+            let outcome = self.canvases.show(ui, tab, &mut notes);
+            if let Some(error) = outcome.error {
+                self.error = Some(error);
+            }
+            if let Some(target) = outcome.aside {
+                self.open_note_in_other_pane(
+                    Path::new(&target),
+                    rustidian::panes::Orientation::Side,
+                );
+            }
+            if let Some(target) = outcome.follow {
+                self.follow_link(&target);
+            }
+            return;
+        }
         let open_notes: Vec<_> = before
             .iter()
             .chain(after.iter())
@@ -4243,14 +4421,6 @@ impl NotesApp {
                     ui.scope_id().with(("image", tab.id(), &tab.document.path)),
                     tab.image_scale,
                 );
-            }
-            return;
-        }
-        if crate::canvas_ui::is_canvas_tab(tab) {
-            self.pending_anchor = None;
-            let outcome = self.canvases.show(ui, tab, self.vault.as_ref());
-            if let Some(target) = outcome.follow {
-                self.follow_link(&target);
             }
             return;
         }
@@ -5660,6 +5830,11 @@ impl NotesApp {
                             command.name != rustidian::commands::CLOSE_OTHER_TABS
                         });
                     }
+                    if !tab.is_some_and(crate::canvas_ui::is_canvas_tab) {
+                        matches.retain(|command| {
+                            command.name != rustidian::commands::TOGGLE_CANVAS_LIBRARY
+                        });
+                    }
                     if !self.panes.is_split() {
                         matches.retain(|command| {
                             !matches!(
@@ -5850,7 +6025,7 @@ impl NotesApp {
         for closed in &mut self.closed_tabs {
             closed.rename_path(source, destination);
         }
-        for tab in &mut self.tabs {
+        for tab in self.tabs.iter_mut().chain(self.card_tabs.iter_mut()) {
             tab.history.rename_path(source, destination);
             tab.document.path =
                 rustidian::paths::moved_path(&tab.document.path, source, destination, true);
@@ -6029,6 +6204,11 @@ impl NotesApp {
             }
         }
         self.tabs.retain(|tab| {
+            !removed
+                .iter()
+                .any(|path| tab.document.path.starts_with(path))
+        });
+        self.card_tabs.retain(|tab| {
             !removed
                 .iter()
                 .any(|path| tab.document.path.starts_with(path))
@@ -6548,6 +6728,13 @@ impl NotesApp {
                 self.split_active(rustidian::panes::Orientation::Stacked)
             }
             rustidian::commands::CLOSE_PANE => self.close_pane(self.panes.focus()),
+            rustidian::commands::TOGGLE_CANVAS_LIBRARY => {
+                if let Some(tab) = self.tabs.get(self.active)
+                    && crate::canvas_ui::is_canvas_tab(tab)
+                {
+                    self.canvases.toggle_library(tab.id());
+                }
+            }
             rustidian::commands::FOCUS_OTHER_PANE => {
                 if let Some(other) = self.panes.other() {
                     self.focus_pane(other);
@@ -6683,6 +6870,7 @@ impl NotesApp {
             }
             "Save note" => {
                 self.save(self.active);
+                self.save_cards();
             }
             "Save a copy" => self.ask(Dialog::SaveCopy),
             "Live preview" => self.set_view(View::Live),
@@ -7340,6 +7528,7 @@ impl eframe::App for NotesApp {
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::S))
         {
             self.save(self.active);
+            self.save_cards();
         }
         crate::ui_probe::frame_time(&ctx, frame_started);
         if rustidian::perf::enabled() {
