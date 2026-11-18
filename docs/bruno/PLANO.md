@@ -104,6 +104,7 @@ Este repositório é **público**. Aqui entra só código e documentação. Nunc
 | R6 | Implantar no re-servidor (systemd, só Tailscale) e backup rustic → Google Drive | serviço volta sozinho após reinício; backup e restauração testados |
 | R8 | (R8a feita, R8b abaixo) Tudo em Rust: os scripts Python de empacotamento, benchmark e release viram um `xtask` (`cargo xtask ...`). O smoke de GUI (`tests/gui_smoke.py`, ~12 mil linhas, dirigido por X11) vira testes Rust com `egui_kittest`, que funcionam no Windows e no CI sem X11. O Python sai em fatias, só quando a cobertura equivalente existir | `git ls-files '*.py'` vazio; os mesmos fluxos cobertos por `cargo test` |
 | R7 | Android: protótipo comparando egui (android-activity) e Dioxus para digitar acentos pelo Gboard, selecionar e rolar; depois o app com o mesmo miolo | APK instalado no celular do dono, sincronizando |
+| R16 | Conferir a assinatura das atualizações antes de instalar (só local, sem rede): `cargo xtask release` gera `SHA256SUMS` + assinatura ed25519; `rustidian --install` e `rustidian --verificar` só aceitam o que bate com a chave pública embutida | `cargo test` com assinatura válida, artefato trocado, lista editada, outra chave e arquivo faltando |
 
 R2 e R3 tocam arquivos diferentes e podem correr em paralelo.
 
@@ -185,10 +186,31 @@ Acentos funcionaram (a tradução do IME serve). Falhas: (1) Enter não pulava l
 - A sondagem a cada 30 ms do egui gasta bateria com o teclado aberto; a solução de verdade é um evento (winit#4451) ou um loop de eventos próprio.
 - Outros teclados (Samsung, SwiftKey) estão fora desta fatia.
 
+## R16: assinatura das atualizações (feito, falta a chave do dono)
+
+Só a ideia veio do opensidian (SHA256SUMS assinado, chave pública no app); o código é nosso e do zero. **Não existe auto-update nem rede nova**: é só a conferência local do que o dono baixou.
+
+**Desenho.** O release tem `SHA256SUMS` (formato do `sha256sum`) e `SHA256SUMS.sig` (assinatura ed25519 da lista, texto fixo `rustidian-release-v1\n` + a lista, em hexadecimal). O app embute só a chave pública (`src/atualizacao/chave-publica.txt`, `include_str!`; hoje diz `NENHUMA`). O módulo `src/atualizacao.rs` serve ao app e ao `xtask` (incluído por `#[path]`), então quem assina e quem confere usam o mesmo formato.
+- **Crate:** `ed25519-dalek` 2.2 (BSD-3-Clause, compatível com MIT; Rust puro, assina e verifica, do RustCrypto/dalek, a mais usada), com `default-features = false`; `sha2` já estava no lock. Fica de fora a `minisign-verify` (só verifica, e não teríamos o `minisign` para assinar).
+- **`cargo xtask release --dir PASTA [--chave ARQUIVO]`:** gera `SHA256SUMS` de todos os arquivos da pasta e assina. A chave vem de `--chave` ou do CAMINHO em `RUSTIDIAN_CHAVE_PRIVADA` (nunca a chave em argumento ou variável). Sem chave: o release sai, avisa em voz alta e apaga qualquer `.sig` velho. Recusa uma chave que não seja a par da pública embutida, e confere o resultado do mesmo jeito que o app.
+- **`cargo xtask package-linux ... [--chave ARQUIVO]`:** põe `SHA256SUMS` (+ `.sig`) dentro do tar.gz, cobrindo todos os arquivos do pacote.
+- **`rustidian --install`:** antes de copiar qualquer coisa confere a assinatura e o hash de todos os arquivos da pasta do pacote, e recusa arquivo que esteja na pasta mas não na lista (ninguém planta um arquivo que o instalador copiaria), link simbólico, caminho com `..`. Falhou: mensagem em pt-BR, exit 2, nada instalado. `--sem-assinatura` (só desenvolvedor) pula a conferência e avisa.
+- **`rustidian --verificar PASTA_OU_ARQUIVO`:** confere um download (a lista assinada fica na mesma pasta) sem instalar nada; funciona no Windows também. Não criei `--atualizar`: o app não extrai tar.gz nem baixa nada, então "atualizar" seria só instalar; o caminho é verificar → extrair → `./rustidian --install` (que confere de novo).
+- **Limites conhecidos:** a assinatura não carrega número de versão, então um pacote antigo (assinado) ainda passa (sem proteção contra voltar de versão); trocar a chave invalida tudo que já saiu (`chave-nova` exige `--trocar` quando já há chave embutida). Os pacotes feitos pelo CI não têm a chave privada e saem sem assinatura: até existir um segredo no Actions (decisão do dono), o tar.gz do CI só instala com `--sem-assinatura`, ou o dono assina o pacote no PC.
+
+**Passo a passo do dono (ele roda; nenhuma chave real foi gerada):**
+1. Escolher uma pasta FORA do repositório para a chave, por exemplo `C:\Users\<voce>\.rustidian\assinatura.chave` (a pasta precisa existir).
+2. No repositório: `cargo xtask chave-nova C:\Users\<voce>\.rustidian\assinatura.chave`. Ele escreve a privada nesse arquivo (e não imprime) e troca a linha de `src/atualizacao/chave-publica.txt`.
+3. Guardar uma cópia da privada num lugar seguro (gerenciador de senhas ou pen drive). Se perder, é preciso gerar outra chave e publicar um app novo; se vazar, qualquer um assina por ele.
+4. Fazer commit só de `src/atualizacao/chave-publica.txt` e recompilar o app (a chave é embutida na compilação).
+5. A cada release: `cargo xtask release --dir <pasta dos arquivos do release> --chave C:\Users\<voce>\.rustidian\assinatura.chave`, e publicar `SHA256SUMS` e `SHA256SUMS.sig` junto. Para o pacote portátil assinado: `cargo xtask package-linux --binary ... --output ... --chave <arquivo>`.
+6. Quem baixa: `rustidian --verificar <pasta dos downloads>` antes de instalar.
+
 ## O que depende do dono
 - **R6:** login no Google pelo `rclone config` (no re-servidor, com o navegador do PC), e criar e guardar as duas senhas.
 - **R7:** ok para instalar o Android SDK e o NDK (~5–8 GB) no PC; instalar o APK no celular.
 - Escolher a frase-senha do cofre (só ele digita).
+- **R16:** gerar a chave de assinatura dele (passo a passo na seção R16) e decidir se o Actions ganha um segredo para assinar o pacote do CI.
 
 ## Contribuir com o original (MasihMoafi/rustidian)
 
