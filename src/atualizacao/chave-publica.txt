@@ -1,0 +1,4 @@
+# Chave pública de assinatura das atualizações do Rustidian (R16), embutida no app.
+# "NENHUMA" = este código ainda não tem a chave do dono: o instalador recusa tudo, a não ser
+# com --sem-assinatura (só desenvolvedor). `cargo xtask chave-nova <arquivo>` troca a linha abaixo.
+rustidian-chave-publica-v1 NENHUMA
