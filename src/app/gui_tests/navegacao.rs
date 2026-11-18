@@ -88,6 +88,18 @@ fn set_readonly(path: &Path, readonly: bool) {
     let mut permissions = std::fs::metadata(path).expect("metadados").permissions();
     permissions.set_readonly(readonly);
     std::fs::set_permissions(path, permissions).expect("permissão do arquivo");
+    // No Linux a gravação atômica (temporário + rename) troca até um arquivo somente-leitura,
+    // porque quem decide o rename é a pasta. Para o salvamento falhar de verdade, trava a pasta.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = path.parent().expect("pasta da nota");
+        let mut dir_permissions = std::fs::metadata(dir)
+            .expect("metadados da pasta")
+            .permissions();
+        dir_permissions.set_mode(if readonly { 0o555 } else { 0o755 });
+        std::fs::set_permissions(dir, dir_permissions).expect("permissão da pasta");
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
