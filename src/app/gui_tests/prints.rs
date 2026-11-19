@@ -284,3 +284,81 @@ fn print_da_lista_do_quadro() {
     assert!(session.app().tabs[index].board_list);
     save(&mut session, &dir, "quadro-lista.png");
 }
+
+fn ux_wait(session: &mut Session, name: &'static str) {
+    session.wait_for(move |app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|t| t.document.path == Path::new(name))
+    });
+    session.settle();
+}
+
+#[test]
+#[ignore = "UX temporario"]
+fn ux_fluxo() {
+    use super::canvas::{move_to, rect_of};
+    let dir = PathBuf::from(std::env::var_os("RUSTIDIAN_PRINTS_DIR").unwrap());
+    std::fs::create_dir_all(&dir).unwrap();
+    let tg = |s: &mut Session| s.key(CTRL | egui::Modifiers::SHIFT, egui::Key::B);
+    let mut s = cofre_do_projeto();
+    std::fs::write(s.path("Solta.md"), "# Solta\n\nUma nota sem nenhum link.\n").unwrap();
+    std::fs::write(s.path("Ideias.canvas"), r#"{"nodes":[{"id":"t","type":"text","x":100,"y":50,"width":260,"height":120,"text":"Ideia solta\nsegunda linha"}],"edges":[]}"#).unwrap();
+    s.settle();
+    s.open_note("Projeto Aurora");
+    save(&mut s, &dir, "01-nota-aberta.png");
+    tg(&mut s);
+    ux_wait(&mut s, "Projeto Aurora.canvas");
+    save(&mut s, &dir, "02-quadro-gerado.png");
+    tg(&mut s);
+    s.settle();
+    save(&mut s, &dir, "03-lista.png");
+    // clicar num item
+    s.harness.get_all_by_label("Diário").last().unwrap().click();
+    s.settle();
+    s.settle();
+    save(&mut s, &dir, "04-volta-ao-quadro-foco.png");
+    // Ctrl+Alt+B
+    s.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+    ux_wait(&mut s, "Projeto Aurora.md");
+    save(&mut s, &dir, "05-volta-a-nota.png");
+    // nota de novo -> quadro existente
+    tg(&mut s);
+    ux_wait(&mut s, "Projeto Aurora.canvas");
+    save(&mut s, &dir, "06-quadro-ja-existia.png");
+    // nota sem links
+    s.open_note("Solta");
+    save(&mut s, &dir, "07-nota-sem-links.png");
+    tg(&mut s);
+    ux_wait(&mut s, "Solta.canvas");
+    save(&mut s, &dir, "08-quadro-de-nota-sem-links.png");
+    // quadro sem nota par
+    s.app_mut().open_note(Path::new("Ideias.canvas"));
+    s.settle();
+    save(&mut s, &dir, "09-quadro-sem-nota-par.png");
+    s.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+    s.settle();
+    save(&mut s, &dir, "10-ctrl-alt-b-sem-nota-par.png");
+    // menu do cartao (botao direito)
+    let c = rect_of(&s, "t").center();
+    move_to(&mut s, c);
+    for pressed in [true, false] {
+        s.harness.event(egui::Event::PointerButton {
+            pos: c,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        s.harness.step();
+    }
+    s.settle();
+    save(&mut s, &dir, "11-menu-do-cartao-texto.png");
+    s.harness.get_by_label("Transformar em nota").click();
+    s.settle();
+    s.settle();
+    save(&mut s, &dir, "12-transformado-em-nota.png");
+    // lista do quadro ideias + exportar
+    tg(&mut s);
+    s.settle();
+    save(&mut s, &dir, "13-lista-ideias.png");
+}
