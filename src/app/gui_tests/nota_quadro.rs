@@ -5,6 +5,7 @@
 
 use super::canvas::{move_to, parsed, rect_of, state, tab_id};
 use super::*;
+use egui_kittest::kittest::NodeT;
 use rustidian::canvas::{Canvas, NodeKind};
 
 const NONE: egui::Modifiers = egui::Modifiers::NONE;
@@ -513,4 +514,101 @@ fn a_paleta_nao_oferece_ir_para_o_modo_em_que_ja_esta() {
     toggle(&mut session);
     wait_active(&mut session, "Alpha.canvas");
     assert_eq!(names(&mut session), ["Ir para a nota", "Ir para a lista"]);
+}
+
+/// O segmento "Nota", "Quadro" ou "Lista" do seletor do cabeçalho (a barra de ferramentas do
+/// quadro e o rodapé também têm textos iguais, por isso se filtra pela faixa do cabeçalho).
+fn segment<'a>(session: &'a Session, label: &'a str) -> egui_kittest::Node<'a> {
+    session
+        .harness
+        .query_all_by_label(label)
+        .find(|node| {
+            let rect = node.rect();
+            rect.min.y > 60.0 && rect.max.y < 130.0
+        })
+        .unwrap_or_else(|| panic!("o seletor não tem o segmento {label}"))
+}
+
+fn click_segment(session: &mut Session, label: &str) {
+    segment(session, label).click();
+    session.settle();
+    session.settle();
+}
+
+#[test]
+fn o_seletor_do_cabecalho_marca_o_modo_e_tem_tamanho_de_toque() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.settle();
+    for label in ["Nota", "Quadro", "Lista"] {
+        let rect = segment(&session, label).rect();
+        assert!(
+            rect.height() >= 32.0 && rect.width() >= 48.0,
+            "{label}: {rect:?} é pequeno para o toque"
+        );
+    }
+    let selected = |session: &Session| -> Vec<&'static str> {
+        ["Nota", "Quadro", "Lista"]
+            .into_iter()
+            .filter(|label| {
+                segment(session, label).accesskit_node().toggled()
+                    == Some(egui::accesskit::Toggled::True)
+            })
+            .collect()
+    };
+    assert_eq!(selected(&session), ["Nota"]);
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(selected(&session), ["Quadro"]);
+    click_segment(&mut session, "Lista");
+    assert_eq!(selected(&session), ["Lista"]);
+    // O ícone de leitura/edição da nota continua lá, separado do seletor.
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Home.md");
+    assert_eq!(selected(&session), ["Nota"]);
+}
+
+#[test]
+fn o_seletor_leva_da_nota_ao_quadro_a_lista_e_de_volta_criando_o_quadro_se_faltar() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Alpha");
+    assert!(!session.path("Alpha.canvas").exists());
+
+    // "Lista" direto da nota cria o quadro e abre a Lista.
+    click_segment(&mut session, "Lista");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    assert!(session.path("Alpha.canvas").exists());
+    assert_eq!(session.app().tabs.len(), 1);
+
+    click_segment(&mut session, "Quadro");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Alpha.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.active_text(), ALPHA);
+
+    // Clicar no segmento do modo atual não faz nada.
+    click_segment(&mut session, "Nota");
+    assert_eq!(active_path(&session), Path::new("Alpha.md"));
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+}
+
+#[test]
+fn o_seletor_num_quadro_sem_nota_par_avisa_em_vez_de_criar() {
+    let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().open_note(Path::new("Ideias.canvas"));
+    session.settle();
+    click_segment(&mut session, "Nota");
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    assert!(!session.path("Ideias.md").exists());
+    assert!(
+        session.has_label("ainda não tem uma nota com o mesmo nome"),
+        "{}",
+        session.app().status
+    );
 }

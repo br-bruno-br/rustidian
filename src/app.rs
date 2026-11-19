@@ -48,6 +48,10 @@ enum BoardMode {
     List,
 }
 
+/// A largura de cada segmento do seletor Nota | Quadro | Lista do cabeçalho.
+const SEGMENT_WIDTH: f32 = 64.0;
+const MODE_SELECTOR_WIDTH: f32 = 3.0 * SEGMENT_WIDTH;
+
 impl BoardMode {
     /// O nome que aparece no rodapé e no seletor do cabeçalho.
     fn label(self) -> &'static str {
@@ -4248,7 +4252,12 @@ impl NotesApp {
                                 };
                                 let actions_width = icons * theme::space::CONTROL
                                     + (icons - 1.0) * theme::space::S
-                                    + theme::space::S;
+                                    + theme::space::S
+                                    + if self.board_mode().is_some() {
+                                        MODE_SELECTOR_WIDTH + theme::space::M
+                                    } else {
+                                        0.0
+                                    };
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(
                                         (available - actions_width).max(20.0),
@@ -4281,6 +4290,10 @@ impl NotesApp {
                                         );
                                     },
                                 );
+                                // Nota | Quadro | Lista: o mesmo assunto em três jeitos de ver.
+                                if let Some(target) = self.mode_selector(ui) {
+                                    self.go_to_mode(target);
+                                }
                                 if self.tabs[self.active].document.is_image() {
                                     use rustidian::tab::ImageScale;
                                     for (label, scale) in
@@ -7145,6 +7158,52 @@ impl NotesApp {
         } else {
             None
         }
+    }
+
+    /// O seletor segmentado "Nota | Quadro | Lista" do cabeçalho: marca o modo atual e devolve o
+    /// modo em que o usuário tocou (outro que o atual). Cada segmento tem a altura de um controle
+    /// (32 px), para o toque.
+    fn mode_selector(&self, ui: &mut egui::Ui) -> Option<BoardMode> {
+        let current = self.board_mode()?;
+        let mut picked = None;
+        let modes = [BoardMode::Note, BoardMode::Board, BoardMode::List];
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (index, mode) in modes.into_iter().enumerate() {
+            let radius = 6;
+            let corners = egui::CornerRadius {
+                nw: if index == 0 { radius } else { 0 },
+                sw: if index == 0 { radius } else { 0 },
+                ne: if index == modes.len() - 1 { radius } else { 0 },
+                se: if index == modes.len() - 1 { radius } else { 0 },
+            };
+            let selected = mode == current;
+            let mut text = RichText::new(mode.label()).size(13.0);
+            if selected {
+                text = text.strong().color(theme::accent(ui));
+            }
+            let response = ui
+                .add(
+                    egui::Button::new(text)
+                        .selected(selected)
+                        .corner_radius(corners)
+                        .min_size(egui::vec2(SEGMENT_WIDTH, theme::space::CONTROL)),
+                )
+                .on_hover_text(match mode {
+                    BoardMode::Note => "Ver como nota",
+                    BoardMode::Board => "Ver como quadro",
+                    BoardMode::List => "Ver o quadro como lista",
+                });
+            crate::ui_probe::record(
+                ui.ctx(),
+                format!("board-mode-select:{}", mode.label()),
+                response.rect,
+            );
+            if response.clicked() && !selected {
+                picked = Some(mode);
+            }
+        }
+        ui.spacing_mut().item_spacing.x = theme::space::S;
+        picked
     }
 
     /// Uma mensagem de status vale para a aba e o modo em que nasceu: ao trocar de aba ou de
