@@ -180,7 +180,10 @@ mod testes {
         assert_eq!(a, antes);
         assert_eq!(b, depois);
         for w in d.windows(2) {
-            assert_ne!(w[0].tipo, w[1].tipo, "trechos vizinhos iguais não foram fundidos");
+            assert_ne!(
+                w[0].tipo, w[1].tipo,
+                "trechos vizinhos iguais não foram fundidos"
+            );
         }
         d
     }
@@ -189,9 +192,14 @@ mod testes {
     fn tokeniza_palavras_espacos_e_sinais() {
         assert_eq!(
             tokenizar("Olá, mundo!  Tudo bem?\n"),
-            vec!["Olá", ",", " ", "mundo", "!", "  ", "Tudo", " ", "bem", "?", "\n"]
+            vec![
+                "Olá", ",", " ", "mundo", "!", "  ", "Tudo", " ", "bem", "?", "\n"
+            ]
         );
-        assert_eq!(tokenizar("guarda-chuva d'água"), vec!["guarda", "-", "chuva", " ", "d'água"]);
+        assert_eq!(
+            tokenizar("guarda-chuva d'água"),
+            vec!["guarda", "-", "chuva", " ", "d'água"]
+        );
         assert_eq!(tokenizar(""), Vec::<&str>::new());
     }
 
@@ -243,8 +251,14 @@ mod testes {
     #[test]
     fn acentos_pt_br_nao_viram_palavras_diferentes_por_engano() {
         let d = conferir("ação e reação", "ação e coração");
-        assert!(d.iter().any(|x| x.tipo == Tipo::Saiu && x.texto == "reação"));
-        assert!(d.iter().any(|x| x.tipo == Tipo::Entrou && x.texto == "coração"));
+        assert!(
+            d.iter()
+                .any(|x| x.tipo == Tipo::Saiu && x.texto == "reação")
+        );
+        assert!(
+            d.iter()
+                .any(|x| x.tipo == Tipo::Entrou && x.texto == "coração")
+        );
         // Normalização diferente (NFC x NFD) aparece como mudança, sem partir a palavra.
         let d = conferir("café", "cafe\u{301}");
         assert_eq!(d.len(), 2);
@@ -253,7 +267,10 @@ mod testes {
     #[test]
     fn emoji_entra_e_sai_inteiro() {
         let d = conferir("bom dia 😀", "bom dia 👍🏽 😀");
-        assert!(d.iter().any(|x| x.tipo == Tipo::Entrou && x.texto.contains("👍🏽")));
+        assert!(
+            d.iter()
+                .any(|x| x.tipo == Tipo::Entrou && x.texto.contains("👍🏽"))
+        );
         let d = conferir("família 👨\u{200D}👩\u{200D}👧 feliz", "família feliz");
         let saiu: String = d
             .iter()

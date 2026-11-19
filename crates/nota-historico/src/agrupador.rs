@@ -353,7 +353,10 @@ mod testes {
         m.esperar(ms(700));
         assert!(m.gravacoes.is_empty(), "ainda não passou 0,8 s");
         m.esperar(ms(200));
-        assert_eq!(m.gravacoes, vec![(Motivo::FimDeFrase, "Olá, mundo. ".to_string())]);
+        assert_eq!(
+            m.gravacoes,
+            vec![(Motivo::FimDeFrase, "Olá, mundo. ".to_string())]
+        );
         // Parar mais não grava de novo: o texto é o mesmo.
         m.esperar(Duration::from_secs(10));
         assert_eq!(m.gravacoes.len(), 1);
@@ -362,7 +365,11 @@ mod testes {
     #[test]
     fn paragrafo_com_respiro_entre_frases_da_uma_versao_por_frase() {
         let mut m = Mesa::nova();
-        for frase in ["Primeira frase aqui. ", "A segunda vem logo depois! ", "E a terceira? "] {
+        for frase in [
+            "Primeira frase aqui. ",
+            "A segunda vem logo depois! ",
+            "E a terceira? ",
+        ] {
             m.digitar(frase, ms(110));
             m.esperar(ms(900));
         }
@@ -380,7 +387,10 @@ mod testes {
         let mut m = Mesa::nova();
         m.digitar("Fim.", ms(100));
         m.esperar(ms(1500));
-        assert!(m.gravacoes.is_empty(), "sem espaço depois do ponto, não é fim de frase");
+        assert!(
+            m.gravacoes.is_empty(),
+            "sem espaço depois do ponto, não é fim de frase"
+        );
         m.esperar(ms(600));
         assert_eq!(m.gravacoes, vec![(Motivo::Pausa, "Fim.".to_string())]);
     }
@@ -414,7 +424,11 @@ mod testes {
         let palavra = "palavra ";
         let texto: String = palavra.repeat(88); // 704 caracteres
         m.digitar(&texto, ms(100));
-        let volume = m.gravacoes.iter().filter(|(mo, _)| *mo == Motivo::Volume).count();
+        let volume = m
+            .gravacoes
+            .iter()
+            .filter(|(mo, _)| *mo == Motivo::Volume)
+            .count();
         assert_eq!(volume, 2, "a cada ~300 caracteres: {:?}", m.gravacoes.len());
         assert_eq!(m.gravacoes[0].1.len(), 300);
         assert_eq!(m.gravacoes[1].1.len(), 600);
@@ -441,8 +455,15 @@ mod testes {
     fn salvar_trocar_e_fechar_sempre_gravam_se_mudou() {
         let mut m = Mesa::nova();
         m.digitar("abc", ms(100));
-        assert_eq!(m.evento(Evento::Salvou { quando: m.t }), Some(Motivo::Salvou));
-        assert_eq!(m.evento(Evento::Salvou { quando: m.t }), None, "mesmo texto");
+        assert_eq!(
+            m.evento(Evento::Salvou { quando: m.t }),
+            Some(Motivo::Salvou)
+        );
+        assert_eq!(
+            m.evento(Evento::Salvou { quando: m.t }),
+            None,
+            "mesmo texto"
+        );
         m.digitar("d", ms(100));
         assert_eq!(m.evento(Evento::TrocouDeNota), Some(Motivo::TrocouDeNota));
         m.ag.iniciar("outra nota");
@@ -522,7 +543,13 @@ mod testes {
 
     #[test]
     fn aspas_e_parenteses_depois_do_ponto_ainda_fecham_a_frase() {
-        for t in ["Ele disse \"vamos.\" ", "(isso é um aparte.) ", "Será? ", "Que bom! ", "Pois é… "] {
+        for t in [
+            "Ele disse \"vamos.\" ",
+            "(isso é um aparte.) ",
+            "Será? ",
+            "Que bom! ",
+            "Pois é… ",
+        ] {
             assert!(termina_frase(t), "{t:?}");
         }
         for t in ["sem ponto ", "v1.2 ", "3.", "", " ", "Olá"] {
