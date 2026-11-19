@@ -166,7 +166,7 @@ pub(crate) fn milhar(numero: usize) -> String {
     let digitos = numero.to_string();
     let mut saida = String::new();
     for (i, c) in digitos.chars().enumerate() {
-        if i > 0 && (digitos.len() - i) % 3 == 0 {
+        if i > 0 && (digitos.len() - i).is_multiple_of(3) {
             saida.push('.');
         }
         saida.push(c);
