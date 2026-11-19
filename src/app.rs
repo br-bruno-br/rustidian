@@ -7398,7 +7398,7 @@ impl NotesApp {
                 ui.set_width(440.0);
                 ui.heading(format!("Criar a nota {title}?"));
                 ui.label(
-                    "Este quadro ainda não tem uma nota com o mesmo nome. A nota nasce com o                      título e o quadro continua como está.",
+                    "Este quadro ainda não tem uma nota com o mesmo nome. A nota nasce com o título e o quadro continua como está.",
                 );
                 ui.add_space(theme::space::L);
                 ui.horizontal(|ui| {

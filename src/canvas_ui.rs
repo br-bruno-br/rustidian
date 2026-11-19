@@ -968,7 +968,7 @@ fn paint_empty_board_hint(ui: &egui::Ui, rect: egui::Rect) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(
-                                "Esta nota ainda não tem links. Escreva [[outra nota]] na nota                                  para ela aparecer aqui.",
+                                "Esta nota ainda não tem links. Escreva [[outra nota]] na nota para ela aparecer aqui.",
                             )
                             .size(13.0)
                             .color(ui.visuals().weak_text_color()),
