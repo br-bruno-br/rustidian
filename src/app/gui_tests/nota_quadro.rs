@@ -689,6 +689,42 @@ fn o_atalho_e_a_paleta_tambem_perguntam_antes_de_criar_a_nota_par() {
 }
 
 #[test]
+fn o_cartao_de_texto_selecionado_tem_o_botao_transformar_em_nota_a_vista() {
+    let mut session = open_ideias();
+    // Sem seleção, sem botão.
+    assert!(!session.has_label("Transformar em nota"));
+    let card = rect_of(&session, "t");
+    super::canvas::click(&mut session, card.center());
+    assert_eq!(state(&session).selected(), ["t"]);
+    let button = session.harness.get_by_label("Transformar em nota").rect();
+    assert!(button.height() >= 28.0, "{button:?}");
+    // Perto do cartão: logo abaixo (ou acima, se não coubesse).
+    assert!(
+        (button.min.y - card.max.y).abs() < 60.0 || (card.min.y - button.max.y).abs() < 60.0,
+        "{button:?} longe do cartão {card:?}"
+    );
+
+    // Selecionar o outro cartão de texto leva o botão para ele.
+    let other = rect_of(&session, "o").center();
+    super::canvas::click(&mut session, other);
+    assert_eq!(state(&session).selected(), ["o"]);
+    let moved = session.harness.get_by_label("Transformar em nota").rect();
+    assert!(moved.min.x > button.min.x, "{moved:?} não seguiu o cartão");
+
+    // O botão faz o mesmo que o item do menu.
+    session.harness.get_by_label("Transformar em nota").click();
+    session.settle();
+    session.settle();
+    assert_eq!(read(&session, "outro.md"), "outro");
+    let node = parsed(&session);
+    let node = node.node("o").unwrap();
+    assert_eq!(node.node_kind(), NodeKind::File);
+    assert_eq!(node.file.as_deref(), Some("outro.md"));
+    // Virou cartão de nota: o botão some.
+    assert!(!session.has_label("Transformar em nota"));
+}
+
+#[test]
 fn a_barra_de_ferramentas_do_quadro_nao_tem_mais_o_botao_lista() {
     let mut session = Session::open();
     session.app_mut().show_left = false;

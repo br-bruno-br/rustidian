@@ -904,6 +904,9 @@ fn show_canvas(
         changed_text |= apply_action(state, action, tab, outcome);
     }
 
+    // --- Botão do cartão de texto selecionado -------------------------------------------------
+    show_text_card_button(ui, state, outcome, response.context_menu_opened());
+
     // --- Barra de ferramentas e janelas -----------------------------------------------------
     changed_text |= show_toolbar(ui, state, tab, rect);
     changed_text |= show_dialogs(ui, state, tab, notes.vault);
@@ -922,6 +925,72 @@ fn show_canvas(
     if changed_text || state.drag.is_some() {
         ui.ctx().request_repaint();
     }
+}
+
+/// "Transformar em nota" à vista: um botão logo abaixo do cartão de texto selecionado (ou acima,
+/// se não couber), com o mesmo efeito do item do menu do cartão.
+fn show_text_card_button(
+    ui: &egui::Ui,
+    state: &CanvasState,
+    outcome: &mut Outcome,
+    menu_open: bool,
+) {
+    // Com o menu do cartão aberto, o mesmo comando já está nele.
+    if menu_open || state.selected.len() != 1 || state.selected_edge.is_some() || state.is_editing()
+    {
+        return;
+    }
+    if state.drag.is_some() {
+        return;
+    }
+    let id = &state.selected[0];
+    let Some(node) = state.canvas.node(id) else {
+        return;
+    };
+    if node.node_kind() != NodeKind::Text {
+        return;
+    }
+    let Some(card) = state.node_screen_rect(id) else {
+        return;
+    };
+    // Num quadro desenhado fora de tela (primeiro quadro, aba escondida) a área não é finita.
+    if !card.is_finite() || !state.area.is_finite() || state.area.width() < 1.0 {
+        return;
+    }
+    const HEIGHT: f32 = 32.0;
+    // Abaixo dos pontos de ligação (16 px do cartão) e das alças.
+    const GAP: f32 = LINK_DOT_OFFSET + 10.0;
+    let below = card.bottom() + GAP;
+    let top = if below + HEIGHT <= state.area.bottom() - 4.0 {
+        below
+    } else {
+        (card.top() - GAP - HEIGHT).max(state.area.top() + 4.0)
+    };
+    let left = card.left().clamp(
+        state.area.left() + 4.0,
+        (state.area.right() - 190.0).max(state.area.left()),
+    );
+    let node_id = id.clone();
+    let text = node.text.clone().unwrap_or_default();
+    egui::Area::new(egui::Id::new(("canvas-text-card-button", node_id.as_str())))
+        .order(egui::Order::Foreground)
+        .fixed_pos(Pos2::new(left, top))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .inner_margin(egui::Margin::same(2))
+                .show(ui, |ui| {
+                    let button = ui
+                        .add(
+                            egui::Button::new("Transformar em nota")
+                                .min_size(Vec2::new(0.0, HEIGHT - 4.0)),
+                        )
+                        .on_hover_text("Cria uma nota com este texto e troca o cartão por ela");
+                    crate::ui_probe::record(ui.ctx(), "canvas-to-note", button.rect);
+                    if button.clicked() {
+                        outcome.to_note = Some(ToNote { node_id, text });
+                    }
+                });
+        });
 }
 
 fn zoom_at(state: &mut CanvasState, factor: f32, pointer: Pos2) {
