@@ -857,3 +857,86 @@ fn fechar_a_tela_com_o_dialogo_filho_aberto_nao_deixa_estado_preso() {
         "fechou e nada ficou preso"
     );
 }
+
+/// Como `prints.rs::save`: renderiza duas vezes, porque a primeira põe no atlas as letras que
+/// acabaram de aparecer.
+fn gravar_print_h2(session: &mut Session, pasta: &Path, nome: &str) {
+    for _ in 0..20 {
+        session.settle();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = session.harness.render();
+    session.settle();
+    let imagem = session.harness.render().expect("renderização com wgpu");
+    assert!(imagem.width() > 0 && imagem.height() > 0);
+    imagem.save(pasta.join(nome)).expect("gravar o PNG");
+    eprintln!("gravado: {}", pasta.join(nome).display());
+}
+
+const SENHA_DA_CASA: &str = "casa-4821-wifi";
+
+/// Grava `1-linha-do-tempo.png` a `4-apagar-do-historico.png` em `RUSTIDIAN_PRINTS_DIR`
+/// (ex.: `C:\dev\_wt\prints-rustidian\h2`).
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn prints_do_historico_h2() {
+    let pasta = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&pasta).expect("pasta dos prints");
+    let atual = format!("{DIA_E}\nSenha do wifi da casa: {SENHA_DA_CASA}\n");
+    let mut session = Session::open_with(&[("Diário de bordo.md", atual.as_bytes())]);
+    session.wait_for(|app| app.historico.is_some());
+    let agora = SystemTime::now();
+    {
+        let historico = session.app().historico.as_ref().unwrap();
+        let nota = Path::new("Diário de bordo.md");
+        for (texto, origem, segundos) in [
+            (DIA_A, Origem::Editor, 2 * 86_400 + 3600),
+            (DIA_B, Origem::Editor, 86_400 + 7200),
+            (DIA_C, Origem::Externa, 3 * 3600),
+            (DIA_D, Origem::Sync, 40 * 60),
+            (atual.as_str(), Origem::Editor, 3 * 60),
+        ] {
+            historico.gravar_em(nota, texto, origem, agora - Duration::from_secs(segundos));
+        }
+    }
+    session.open_note("Diário de bordo");
+    esperar_versoes(&mut session, "Diário de bordo.md", 5);
+    session.command("File recovery: Open local history");
+    session.wait_for(|app| app.recovery_manager.active());
+    esperar_a_tela(&mut session);
+    let ctx = session.app().ctx.clone();
+
+    // 1. A barra no meio, com o que mudou nessa versão em verde e vermelho.
+    session.app_mut().recovery_manager.ir_para(2, &ctx);
+    esperar_a_tela(&mut session);
+    assert_eq!(session.app().recovery_manager.texto_mostrado(), Some(DIA_C));
+    gravar_print_h2(&mut session, &pasta, "1-linha-do-tempo.png");
+
+    // 2. Duas versões com nome: aparecem na lista e como marcas na barra.
+    for (posicao, nome) in [(1, "Antes da feira"), (3, "Versão que mandei")] {
+        session.app_mut().recovery_manager.ir_para(posicao, &ctx);
+        esperar_a_tela(&mut session);
+        click_label(&mut session, "Dar nome");
+        session.type_text(nome);
+        click_label(&mut session, "Salvar");
+        esperar_a_tela(&mut session);
+    }
+    session.app_mut().recovery_manager.ir_para(2, &ctx);
+    esperar_a_tela(&mut session);
+    gravar_print_h2(&mut session, &pasta, "2-versoes-com-nome.png");
+
+    // 3. O diálogo para dar (ou mudar) o nome, com um nome já escrito.
+    session.app_mut().recovery_manager.ir_para(1, &ctx);
+    esperar_a_tela(&mut session);
+    click_label(&mut session, "Mudar nome");
+    gravar_print_h2(&mut session, &pasta, "3-dar-nome.png");
+    click_label(&mut session, "Cancelar");
+
+    // 4. Apagar um trecho: a nota ainda tem a senha, e o aviso aparece.
+    click_label(&mut session, "Apagar do histórico…");
+    session.type_text(SENHA_DA_CASA);
+    gravar_print_h2(&mut session, &pasta, "4-apagar-do-historico.png");
+    assert!(session.has_label("A nota ainda tem este trecho."));
+}
