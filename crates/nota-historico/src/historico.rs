@@ -209,11 +209,14 @@ fn numero_da_nota<T: ReadableTable<&'static str, u32>>(
     Ok(n.get(nota.como_str())?.map(|g| g.value()))
 }
 
+/// Reescreve o texto de uma versão: `None` = não muda.
+type Troca<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 /// Como a poda e a compactação mexem na cadeia de uma nota.
 struct Mudancas<'a> {
     remover: &'a HashSet<u64>,
     /// Reescreve o texto de uma versão (devolve `None` se não muda).
-    trocar: Option<&'a dyn Fn(&str) -> Option<String>>,
+    trocar: Option<Troca<'a>>,
     /// Ignora os quadros-chave que existem e refaz a distribuição (compactação).
     refazer: bool,
 }
@@ -434,10 +437,10 @@ impl Historico {
                 }
             };
             let anterior = ultima(&versoes, num)?;
-            if let Some((_, r)) = &anterior {
-                if r.hash == h {
-                    return Ok(None);
-                }
+            if let Some((_, r)) = &anterior
+                && r.hash == h
+            {
+                return Ok(None);
             }
             id_novo = anterior.as_ref().map_or(1, |(id, _)| id + 1);
 
