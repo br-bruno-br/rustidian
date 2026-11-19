@@ -318,6 +318,13 @@ impl Document {
     pub fn title(&self) -> String {
         if self.is_blank() {
             "New tab".into()
+        } else if crate::canvas::is_canvas(&self.path) {
+            // O quadro aparece pelo nome, sem `.canvas`: o modo já está no seletor do cabeçalho.
+            self.path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
         } else {
             file_title(&self.path)
         }

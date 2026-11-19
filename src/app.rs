@@ -4243,7 +4243,7 @@ impl NotesApp {
                                 {
                                     self.navigate(false);
                                 }
-                                let path = rustidian::paths::display_path(
+                                let path = rustidian::paths::header_path(
                                     &self.tabs[self.active].document.path,
                                 )
                                 .replace('/', " / ");

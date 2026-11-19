@@ -672,3 +672,53 @@ fn na_lista_o_titulo_abre_a_nota_e_o_exportar_e_um_botao_no_topo() {
     wait_active(&mut session, "Second.md");
     assert_eq!(session.active_text(), SECOND);
 }
+
+/// Rótulos que mostram o texto dado (dentro da faixa vertical `y_range`).
+fn labels_in<'a>(
+    session: &'a Session,
+    text: &'a str,
+    y_range: std::ops::Range<f32>,
+) -> Vec<egui::Rect> {
+    session
+        .harness
+        .query_all_by_label_contains(text)
+        .map(|node| node.rect())
+        .filter(|rect| y_range.contains(&rect.min.y))
+        .collect()
+}
+
+#[test]
+fn o_quadro_aparece_sem_ponto_canvas_na_aba_e_no_cabecalho() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    session.settle();
+    session.settle();
+    // O nome na aba, no título da janela e no cabeçalho é "Home"; o arquivo segue Home.canvas.
+    assert_eq!(session.app().tabs[0].title(), "Home");
+    assert_eq!(
+        session.app().window_title,
+        format!("Home — {} — Rustidian", vault_name(&session))
+    );
+    assert!(session.path("Home.canvas").exists());
+    // Faixa das abas e do cabeçalho (acima de 130 px): nenhum texto com `.canvas`.
+    assert!(
+        labels_in(&session, ".canvas", 0.0..130.0).is_empty(),
+        "a aba ou o cabeçalho ainda mostram .canvas"
+    );
+    // O rótulo acessível da aba é o nome sem a extensão.
+    assert!(
+        !labels_in(&session, "Home", 30.0..130.0).is_empty(),
+        "a aba não aparece com o nome Home"
+    );
+}
+
+fn vault_name(session: &Session) -> String {
+    session
+        .app()
+        .vault
+        .as_ref()
+        .map(rustidian::vault::Vault::name)
+        .unwrap_or_default()
+}

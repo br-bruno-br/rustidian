@@ -144,6 +144,16 @@ pub fn display_path(path: &Path) -> String {
     }
 }
 
+/// O caminho como o cabeçalho de uma aba o mostra: como `display_path`, e um quadro também sem
+/// `.canvas` (o modo já está no seletor Nota | Quadro | Lista).
+pub fn header_path(path: &Path) -> String {
+    if crate::canvas::is_canvas(path) {
+        slashed(&path.with_extension(""))
+    } else {
+        display_path(path)
+    }
+}
+
 pub fn wiki_path_supported(path: &Path) -> bool {
     if path.to_str().is_none() {
         return false;
@@ -273,7 +283,15 @@ pub fn markdown_destination(from: &Path, to: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::windows_file_uri;
+    use super::{header_path, windows_file_uri};
+    use std::path::Path;
+
+    #[test]
+    fn o_cabecalho_mostra_nota_e_quadro_sem_extensao() {
+        assert_eq!(header_path(Path::new("Pasta/Plano.canvas")), "Pasta/Plano");
+        assert_eq!(header_path(Path::new("Plano.md")), "Plano");
+        assert_eq!(header_path(Path::new("img/foto.png")), "img/foto.png");
+    }
 
     #[test]
     fn windows_paths_become_file_uris_without_the_verbatim_prefix() {
