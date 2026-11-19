@@ -522,7 +522,7 @@ fn a_paleta_nao_oferece_ir_para_o_modo_em_que_ja_esta() {
 
 /// O segmento "Nota", "Quadro" ou "Lista" do seletor do cabeçalho (a barra de ferramentas do
 /// quadro e o rodapé também têm textos iguais, por isso se filtra pela faixa do cabeçalho).
-fn segment<'a>(session: &'a Session, label: &'a str) -> egui_kittest::Node<'a> {
+pub(super) fn segment<'a>(session: &'a Session, label: &'a str) -> egui_kittest::Node<'a> {
     session
         .harness
         .query_all_by_label(label)
@@ -533,7 +533,7 @@ fn segment<'a>(session: &'a Session, label: &'a str) -> egui_kittest::Node<'a> {
         .unwrap_or_else(|| panic!("o seletor não tem o segmento {label}"))
 }
 
-fn click_segment(session: &mut Session, label: &str) {
+pub(super) fn click_segment(session: &mut Session, label: &str) {
     segment(session, label).click();
     session.settle();
     session.settle();

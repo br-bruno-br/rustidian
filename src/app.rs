@@ -7184,6 +7184,8 @@ impl NotesApp {
             let response = ui
                 .add(
                     egui::Button::new(text)
+                        .frame(true)
+                        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                         .selected(selected)
                         .corner_radius(corners)
                         .min_size(egui::vec2(SEGMENT_WIDTH, theme::space::CONTROL)),

@@ -591,6 +591,8 @@ fn show_list(
                             if ui
                                 .add(
                                     egui::Button::new("Exportar como nota (cópia)")
+                                        .frame(true)
+                                        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
                                         .min_size(egui::vec2(0.0, theme::space::CONTROL)),
                                 )
                                 .on_hover_text(
