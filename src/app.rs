@@ -978,7 +978,11 @@ impl NotesApp {
                         }
                     }
                     if let Some(vault) = &self.vault {
-                        self.status = format!("{} notes", vault.notes.len());
+                        // Só na abertura: uma releitura de fundo (watcher, sync) não pode apagar
+                        // o aviso que o usuário acabou de receber no rodapé.
+                        if opening {
+                            self.status = format!("{} notes", vault.notes.len());
+                        }
                         if !vault.warnings.is_empty() {
                             self.error = Some(format!(
                                 "Alguns arquivos não puderam ser indexados: {}",
