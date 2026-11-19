@@ -1,0 +1,20 @@
+[package]
+name = "nota-historico"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Histórico completo das notas: versões comprimidas (zstd com a versão vizinha como prefixo), quadros-chave em pedaços blake3 e retenção"
+license = "MIT"
+publish = false
+
+[dependencies]
+blake3 = "1"
+# Só o necessário: sem os formatos legados nem o treino de dicionário (menos C para compilar).
+zstd = { version = "=0.13.3", default-features = false }
+redb = "=4.4.0"
+# O mesmo imara-diff do app (src/recovery.rs): diferença por palavra sem crate nova.
+imara-diff = { version = "=0.2.0", default-features = false }
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3.27"
