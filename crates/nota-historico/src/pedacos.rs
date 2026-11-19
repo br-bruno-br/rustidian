@@ -127,8 +127,14 @@ mod testes {
         let a = ruido(60_000, 2);
         let mut b = b"texto novo no comeco".to_vec();
         b.extend_from_slice(&a);
-        let ka: Vec<Chave> = cortar(&a, &p).iter().map(|r| chave(&a[r.clone()])).collect();
-        let kb: Vec<Chave> = cortar(&b, &p).iter().map(|r| chave(&b[r.clone()])).collect();
+        let ka: Vec<Chave> = cortar(&a, &p)
+            .iter()
+            .map(|r| chave(&a[r.clone()]))
+            .collect();
+        let kb: Vec<Chave> = cortar(&b, &p)
+            .iter()
+            .map(|r| chave(&b[r.clone()]))
+            .collect();
         let iguais = ka.iter().filter(|k| kb.contains(k)).count();
         assert!(
             iguais + 3 >= ka.len(),

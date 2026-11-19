@@ -173,7 +173,9 @@ impl Registro {
     pub fn codificar(&self, id: u64) -> Vec<u8> {
         let mut o = Vec::with_capacity(64 + 40);
         let delta = matches!(self.corpo, Corpo::Delta { .. });
-        o.push(u8::from(delta) | (self.origem.codigo() << 1) | (u8::from(self.nome.is_some()) << 3));
+        o.push(
+            u8::from(delta) | (self.origem.codigo() << 1) | (u8::from(self.nome.is_some()) << 3),
+        );
         varint(&mut o, self.quando_ms);
         varint(&mut o, u64::from(self.tamanho));
         o.extend_from_slice(&self.hash);
@@ -242,7 +244,9 @@ impl Registro {
         } else {
             let n = l.varint()? as usize;
             if n > b.len() / 32 + 1 {
-                return Err(Erro::Corrompido("lista de pedaços maior que o registro".into()));
+                return Err(Erro::Corrompido(
+                    "lista de pedaços maior que o registro".into(),
+                ));
             }
             let mut v = Vec::with_capacity(n);
             for _ in 0..n {

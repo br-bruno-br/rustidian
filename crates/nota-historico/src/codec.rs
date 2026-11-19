@@ -61,7 +61,9 @@ pub struct ZstdCodec {
 
 impl std::fmt::Debug for ZstdCodec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ZstdCodec").field("nivel", &self.nivel).finish()
+        f.debug_struct("ZstdCodec")
+            .field("nivel", &self.nivel)
+            .finish()
     }
 }
 
@@ -169,7 +171,10 @@ mod testes {
         novo.extend_from_slice("e mais uma frase no fim.".as_bytes());
         let z = c.comprimir_com_base(&novo, &base).unwrap();
         assert!(z.len() < 150, "diferença com {} bytes", z.len());
-        assert_eq!(c.descomprimir_com_base(&z, &base, novo.len()).unwrap(), novo);
+        assert_eq!(
+            c.descomprimir_com_base(&z, &base, novo.len()).unwrap(),
+            novo
+        );
     }
 
     #[test]
@@ -185,6 +190,9 @@ mod testes {
     fn base_vazia_funciona() {
         let c = ZstdCodec::default();
         let z = c.comprimir_com_base(b"texto qualquer", b"").unwrap();
-        assert_eq!(c.descomprimir_com_base(&z, b"", 14).unwrap(), b"texto qualquer");
+        assert_eq!(
+            c.descomprimir_com_base(&z, b"", 14).unwrap(),
+            b"texto qualquer"
+        );
     }
 }

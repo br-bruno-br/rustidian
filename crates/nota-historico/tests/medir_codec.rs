@@ -79,12 +79,20 @@ fn medir_reuso() {
         let t0 = Instant::now();
         let mut tam = 0;
         for w in versoes.windows(2) {
-            tam += c.comprimir_com_base(w[0].as_bytes(), w[1].as_bytes()).unwrap().len();
+            tam += c
+                .comprimir_com_base(w[0].as_bytes(), w[1].as_bytes())
+                .unwrap()
+                .len();
         }
-        println!("nivel {nivel} A novo: {:?}/un ({} B)", t0.elapsed() / n, tam / n as usize);
+        println!(
+            "nivel {nivel} A novo: {:?}/un ({} B)",
+            t0.elapsed() / n,
+            tam / n as usize
+        );
         // B: CCtx reaproveitado, ref_prefix
         let mut cctx = CCtx::create();
-        cctx.set_parameter(CParameter::CompressionLevel(nivel)).unwrap();
+        cctx.set_parameter(CParameter::CompressionLevel(nivel))
+            .unwrap();
         let t0 = Instant::now();
         let mut tam = 0;
         for w in versoes.windows(2) {
@@ -94,7 +102,11 @@ fn medir_reuso() {
             cctx.compress2(&mut out, w[0].as_bytes()).unwrap();
             tam += out.len();
         }
-        println!("nivel {nivel} B reuso+prefix: {:?}/un ({} B)", t0.elapsed() / n, tam / n as usize);
+        println!(
+            "nivel {nivel} B reuso+prefix: {:?}/un ({} B)",
+            t0.elapsed() / n,
+            tam / n as usize
+        );
         // B2: Compressor reaproveitado com set_dictionary
         let mut comp = zstd::bulk::Compressor::new(nivel).unwrap();
         let t0 = Instant::now();
@@ -103,6 +115,10 @@ fn medir_reuso() {
             comp.set_dictionary(nivel, w[1].as_bytes()).unwrap();
             tam += comp.compress(w[0].as_bytes()).unwrap().len();
         }
-        println!("nivel {nivel} B2 reuso+set_dictionary: {:?}/un ({} B)", t0.elapsed() / n, tam / n as usize);
+        println!(
+            "nivel {nivel} B2 reuso+set_dictionary: {:?}/un ({} B)",
+            t0.elapsed() / n,
+            tam / n as usize
+        );
     }
 }
