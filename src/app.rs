@@ -1,3 +1,5 @@
+#[path = "historico_ui.rs"]
+pub(crate) mod historico_ui;
 #[path = "settings_ui.rs"]
 pub(crate) mod settings_ui;
 #[path = "sync_ui.rs"]
@@ -236,9 +238,9 @@ pub struct NotesApp {
     pub(crate) sidebar_widths: [f32; 2],
     pub(crate) restore_sidebars: [bool; 2],
     pub(crate) recovery_config: rustidian::recovery::Config,
-    recovery_history: Option<rustidian::recovery::History>,
-    recovery_recorder: Option<rustidian::recovery_capture::Recorder>,
-    recovery_revisions: std::collections::HashMap<PathBuf, u64>,
+    /// O histórico completo das notas (H1): uma linha de fundo dona de `.rustidian/historico.redb`.
+    pub(crate) historico: Option<rustidian::historico_fundo::Historico>,
+    historico_ui: historico_ui::Ligacao,
     recovery_changed_paths: std::collections::HashSet<PathBuf>,
     recovery_index_paths: std::collections::HashSet<PathBuf>,
     recovery_saved: std::collections::HashMap<PathBuf, String>,
@@ -359,9 +361,8 @@ impl NotesApp {
             sidebar_widths: [300.0, 234.0],
             restore_sidebars: [false; 2],
             recovery_config: Default::default(),
-            recovery_history: None,
-            recovery_recorder: None,
-            recovery_revisions: Default::default(),
+            historico: None,
+            historico_ui: Default::default(),
             recovery_changed_paths: Default::default(),
             recovery_index_paths: Default::default(),
             recovery_saved: Default::default(),
@@ -840,9 +841,8 @@ impl NotesApp {
                         .unwrap_or(false);
                         self.workspace_manager.open = false;
                         self.recovery_manager = Default::default();
-                        self.recovery_recorder = None;
-                        self.recovery_history = None;
-                        self.recovery_revisions.clear();
+                        self.historico = None;
+                        self.historico_ui = Default::default();
                         self.recovery_changed_paths.clear();
                         self.recovery_index_paths.clear();
                         self.recovery_saved.clear();
@@ -932,7 +932,14 @@ impl NotesApp {
                         // Indexing already read these saved bytes off the UI thread.
                         // Capture changed files even when they have no editor tab.
                         for note in &vault.notes {
-                            if self.recovery_index_paths.remove(&note.path) {
+                            if self.recovery_index_paths.remove(&note.path)
+                                && !historico_ui::aba_ja_tem_o_texto(
+                                    &self.tabs,
+                                    &self.card_tabs,
+                                    &note.path,
+                                    &note.text,
+                                )
+                            {
                                 self.recovery_saved
                                     .insert(note.path.clone(), note.text.clone());
                             }
@@ -1061,7 +1068,7 @@ impl NotesApp {
             ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
         self.sync_tick(ctx);
-        self.capture_recovery(ctx);
+        self.historico_tick(ctx);
     }
 
     /// Notes edited outside Rustidian, and nothing else, are re-read in place: only their entries
@@ -1091,7 +1098,9 @@ impl NotesApp {
         self.recovery_index_paths
             .extend(self.recovery_changed_paths.drain());
         for path in std::mem::take(&mut self.recovery_index_paths) {
-            if let Some(note) = vault.note(&path) {
+            if let Some(note) = vault.note(&path)
+                && !historico_ui::aba_ja_tem_o_texto(&self.tabs, &self.card_tabs, &path, &note.text)
+            {
                 self.recovery_saved.insert(path, note.text.clone());
             }
         }
@@ -1132,81 +1141,8 @@ impl NotesApp {
         vault.holds_known_text(relative, saved)
     }
 
-    fn capture_recovery(&mut self, ctx: &egui::Context) {
-        let Some(vault) = &self.vault else { return };
-        if self.recovery_recorder.is_none() {
-            match rustidian::recovery::History::open(&vault.root) {
-                Ok(history) => {
-                    let wake = ctx.clone();
-                    self.recovery_recorder = Some(rustidian::recovery_capture::Recorder::start(
-                        history.clone(),
-                        self.recovery_config.clone(),
-                        move || wake.request_repaint(),
-                    ));
-                    self.recovery_history = Some(history);
-                }
-                Err(error) => {
-                    self.error = Some(error);
-                    return;
-                }
-            }
-        }
-        let Some(recorder) = &mut self.recovery_recorder else {
-            return;
-        };
-        if !recorder.configure(&self.recovery_config) {
-            ctx.request_repaint_after(Duration::from_millis(20));
-        }
-        while let Ok(error) = recorder.errors.try_recv() {
-            self.error = Some(error);
-        }
-        if recorder.events.try_iter().count() > 0 {
-            self.recovery_manager.changed(ctx);
-        }
-        self.recovery_manager.poll(ctx);
-        if !self.recovery_manager.open {
-            if let Some(error) = self.recovery_manager.take_error() {
-                self.error = Some(error);
-            }
-            if let Some(notice) = self.recovery_manager.take_notice() {
-                self.status = notice;
-            }
-        }
-        for tab in &self.tabs {
-            let document = &tab.document;
-            // A guest file lives outside the vault, so local history cannot store it.
-            if document.path.is_absolute()
-                || !rustidian::vault::is_markdown(&document.path)
-                || self.recovery_revisions.get(&document.path) == Some(&document.saved_revision())
-            {
-                continue;
-            }
-            if let Some(text) = document.saved_text() {
-                if recorder.capture(&document.path, text, &self.recovery_config) {
-                    self.recovery_saved.remove(&document.path);
-                    self.recovery_revisions
-                        .insert(document.path.clone(), document.saved_revision());
-                } else {
-                    ctx.request_repaint_after(Duration::from_millis(20));
-                }
-            }
-        }
-        let pending: Vec<_> = self.recovery_saved.keys().take(16).cloned().collect();
-        for path in pending {
-            let text = &self.recovery_saved[&path];
-            if recorder.capture(&path, text, &self.recovery_config) {
-                self.recovery_saved.remove(&path);
-            } else {
-                break;
-            }
-        }
-        if !self.recovery_saved.is_empty() {
-            ctx.request_repaint_after(Duration::from_millis(20));
-        }
-    }
-
     fn open_recovery(&mut self, current_file: bool) {
-        if let (Some(history), Some(vault)) = (&self.recovery_history, &self.vault) {
+        if let (Some(historico), Some(vault)) = (&self.historico, &self.vault) {
             let path = current_file
                 .then(|| {
                     self.tabs
@@ -1222,19 +1158,18 @@ impl NotesApp {
             self.dialog = None;
             self.editor.focus = false;
             self.recovery_manager
-                .open(history.clone(), vault, path, &self.ctx);
+                .open(historico.leitor(), vault, path, &self.ctx);
         }
     }
 
     fn restore_snapshot(&mut self, request: crate::recovery_ui::Restore) {
         self.settle_saves();
-        let result = match (&self.recovery_history, &mut self.vault) {
-            (Some(history), Some(vault)) => history.restore(
+        let result = match (&self.historico, &mut self.vault) {
+            (Some(historico), Some(vault)) => rustidian::historico_fundo::restaurar(
+                historico,
                 vault,
                 &request.expected,
-                request.version,
-                chrono::Local::now().timestamp_millis(),
-                &self.recovery_config,
+                &request.text,
             ),
             _ => Err("Abra um cofre primeiro.".into()),
         };
@@ -5570,8 +5505,8 @@ impl NotesApp {
             return;
         }
         if self.recovery_manager.open {
-            if let (Some(vault), Some(recorder)) = (&self.vault, &self.recovery_recorder) {
-                if let Some(request) = self.recovery_manager.show(ctx, vault, recorder) {
+            if let (Some(vault), Some(historico)) = (&self.vault, &self.historico) {
+                if let Some(request) = self.recovery_manager.show(ctx, vault, historico) {
                     if self.tabs.iter().any(|tab| {
                         tab.document.path == request.expected.path && tab.document.dirty()
                     }) {
@@ -6070,9 +6005,9 @@ impl NotesApp {
         }
         if self.recovery_manager.active()
             && !self.recovery_manager.open
-            && let (Some(vault), Some(recorder)) = (&self.vault, &self.recovery_recorder)
+            && let (Some(vault), Some(historico)) = (&self.vault, &self.historico)
         {
-            let _ = self.recovery_manager.show(ctx, vault, recorder);
+            let _ = self.recovery_manager.show(ctx, vault, historico);
             if let Some(error) = self.recovery_manager.take_error() {
                 self.error = Some(error);
             }
@@ -6117,6 +6052,13 @@ impl NotesApp {
     }
 
     fn relocate_tabs(&mut self, source: &Path, destination: &Path) {
+        // O histórico segue a nota (ou a pasta) para o nome novo.
+        if let Some(historico) = &self.historico
+            && source.is_relative()
+            && destination.is_relative()
+        {
+            historico.renomear(source, destination);
+        }
         self.retarget_boards(source, destination);
         crate::explorer_selection::moved(&self.ctx, source, destination);
         self.page_preview.close();

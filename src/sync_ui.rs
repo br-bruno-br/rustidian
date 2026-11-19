@@ -136,6 +136,10 @@ impl NotesApp {
         }
         if let Some(runner) = &self.sync.runner {
             let status = runner.status();
+            // O histórico das notas marca como "sync" o que muda no disco durante um ciclo.
+            if status.phase == Phase::Syncing || status.vault_changed != self.sync.reloaded {
+                self.historico_ui.sync_ate = Some(Instant::now() + Duration::from_secs(20));
+            }
             if status.vault_changed != self.sync.reloaded {
                 // A cycle wrote to the vault: reload through the same path an outside edit
                 // takes. Tabs with unsaved text keep their buffer.
