@@ -937,3 +937,56 @@ fn o_menu_do_quadro_recuado_renomeia_o_arquivo_do_quadro() {
         Some(Path::new("Home.canvas"))
     );
 }
+
+const HINT: &str = "Esta nota ainda não tem links.";
+
+#[test]
+fn o_quadro_de_uma_nota_sem_links_mostra_a_dica_e_ela_some_com_mais_cartoes() {
+    let mut session = Session::open_with(&[(
+        "Solta.md",
+        b"# Solta
+
+Uma nota sem nenhum link.
+",
+    )]);
+    session.app_mut().show_left = false;
+    session.open_note("Solta");
+    toggle(&mut session);
+    wait_active(&mut session, "Solta.canvas");
+    session.settle();
+    session.settle();
+    assert_eq!(parsed(&session).nodes.len(), 1, "só o cartão da nota");
+    assert!(session.has_label(HINT));
+    assert!(session.has_label("Escreva [[outra nota]] na nota"));
+    // A dica é só desenho: não suja o quadro.
+    assert!(!session.app().tabs[0].document.dirty());
+
+    // Um segundo cartão (aqui, um de texto) e a dica some.
+    let area = state(&session).area_for_tests();
+    super::canvas::double_click(&mut session, area.center() + egui::vec2(400.0, 150.0));
+    session.type_text("outra ideia");
+    session.key(NONE, egui::Key::Escape);
+    session.settle();
+    assert!(
+        parsed(&session).nodes.len() >= 2,
+        "{}",
+        session.active_text()
+    );
+    assert!(!session.has_label(HINT));
+}
+
+#[test]
+fn quadro_de_nota_com_links_ou_sem_nota_par_nao_mostra_a_dica() {
+    // Home liga Second e Alpha: três cartões.
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    session.settle();
+    assert!(!session.has_label(HINT));
+    // Quadro com um cartão que não é a nota do próprio quadro.
+    let mut other = Session::open_with(&[("Um.canvas", br#"{"nodes":[{"id":"x","type":"text","x":0,"y":0,"width":200,"height":80,"text":"oi"}],"edges":[]}"#)]);
+    other.app_mut().open_note(Path::new("Um.canvas"));
+    other.settle();
+    assert!(!other.has_label(HINT));
+}

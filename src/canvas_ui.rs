@@ -922,9 +922,61 @@ fn show_canvas(
             ui.visuals().weak_text_color(),
         );
     }
+    if only_its_own_note(state, tab) && state.drag.is_none() && !state.is_editing() {
+        paint_empty_board_hint(ui, rect);
+    }
     if changed_text || state.drag.is_some() {
         ui.ctx().request_repaint();
     }
+}
+
+/// O quadro gerado de uma nota sem links: o único cartão é o da própria nota (`X.md` no quadro
+/// `X.canvas`). Com qualquer outro cartão, a dica some.
+fn only_its_own_note(state: &CanvasState, tab: &Tab) -> bool {
+    let [node] = state.canvas.nodes.as_slice() else {
+        return false;
+    };
+    node.node_kind() == NodeKind::File
+        && node.file.as_deref().is_some_and(|file| {
+            rustidian::canvas_index::key_of(Path::new(file))
+                == rustidian::canvas_index::key_of(&rustidian::board_note::note_of(
+                    &tab.document.path,
+                ))
+        })
+}
+
+/// A dica discreta do quadro que só tem a nota: embaixo, numa faixa de fundo suave, que não
+/// pega cliques (o quadro continua mexível por baixo).
+fn paint_empty_board_hint(ui: &egui::Ui, rect: egui::Rect) {
+    if !rect.is_finite() || rect.width() < 1.0 {
+        return;
+    }
+    let width = (rect.width() - 48.0).clamp(80.0, 560.0);
+    let fill = ui.visuals().extreme_bg_color.gamma_multiply(0.92);
+    egui::Area::new(egui::Id::new("canvas-empty-hint"))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .pivot(Align2::CENTER_BOTTOM)
+        .fixed_pos(Pos2::new(rect.center().x, rect.bottom() - 16.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(fill)
+                .corner_radius(8)
+                .inner_margin(egui::Margin::symmetric(12, 7))
+                .show(ui, |ui| {
+                    ui.set_max_width(width);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(
+                                "Esta nota ainda não tem links. Escreva [[outra nota]] na nota                                  para ela aparecer aqui.",
+                            )
+                            .size(13.0)
+                            .color(ui.visuals().weak_text_color()),
+                        )
+                        .wrap(),
+                    );
+                });
+        });
 }
 
 /// "Transformar em nota" à vista: um botão logo abaixo do cartão de texto selecionado (ou acima,
