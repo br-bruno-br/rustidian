@@ -1,5 +1,8 @@
 use crate::{theme, ui_probe};
-use eframe::egui::{self, Align, FontId, Layout, RichText, ScrollArea, TextEdit};
+use eframe::egui::{
+    self, Align, FontId, Layout, RichText, ScrollArea, TextEdit,
+    text::{LayoutJob, TextFormat},
+};
 use rustidian::{
     historico_fundo::{
         Historico, Leitor, Origem, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
@@ -33,6 +36,19 @@ struct Loaded {
     selected: Option<u64>,
     text: Option<String>,
     changes: Vec<Trecho>,
+}
+
+/// Altura de cada linha da lista de versões. `show_rows` precisa dela igual à altura real do
+/// botão, senão o deslocamento calculado por índice não bate com o que está na tela.
+const LINHA: f32 = theme::space::XXL + theme::space::M;
+
+/// Posição da versão escolhida na linha do tempo: 0 é a mais antiga (esquerda). A lista vem da
+/// mais nova para a mais antiga; sem escolha (ainda carregando) vale a mais nova.
+fn indice_na_barra(versoes: &[Linha], escolhida: Option<u64>) -> usize {
+    let ultima = versoes.len().saturating_sub(1);
+    escolhida
+        .and_then(|id| versoes.iter().position(|linha| linha.info.id.0 == id))
+        .map_or(ultima, |lugar| ultima - lugar)
 }
 
 /// Da mais nova para a mais antiga, com a mudança de tamanho de cada uma.
@@ -143,6 +159,8 @@ pub struct Manager {
     focus: bool,
     selected_file: usize,
     pick_when_ready: bool,
+    /// A barra mexeu na escolha: a lista da esquerda rola até a linha escolhida.
+    rolar_lista: bool,
 }
 
 impl Manager {
@@ -194,6 +212,25 @@ impl Manager {
         // A versão nova (origem "restaurada") entra no topo da lista e fica escolhida.
         self.selected = None;
         self.reload(ctx, true);
+    }
+
+    /// Escolhe a versão da posição `indice` da linha do tempo (0 = a mais antiga) e mostra o texto
+    /// dela. A barra e os botões ◀ ▶ chamam isto a cada passo do arrasto.
+    pub(crate) fn ir_para(&mut self, indice: usize, ctx: &egui::Context) {
+        let Some(ultimo) = self.versions.len().checked_sub(1) else {
+            return;
+        };
+        let id = self.versions[ultimo - indice.min(ultimo)].info.id.0;
+        if self.selected != Some(id) {
+            self.rolar_lista = true;
+            self.escolher(id, ctx);
+        }
+    }
+
+    fn escolher(&mut self, id: u64, ctx: &egui::Context) {
+        self.selected = Some(id);
+        self.error = None;
+        self.reload(ctx, false);
     }
 
     fn select_file(&mut self, path: Option<PathBuf>, vault: &Vault, ctx: &egui::Context) {
@@ -369,6 +406,7 @@ impl Manager {
         let mut select_file = None;
         let mut select_version = None;
         let mut compare_changed = false;
+        let mut timeline_to = None;
         let mut close = false;
         if self.open {
             let dialog =
@@ -418,7 +456,25 @@ impl Manager {
                                 .min_scrolled_height(height - 50.0);
                             if !self.choosing_file && !self.versions.is_empty() {
                                 let now = chrono::Local::now();
-                                scroll.show_rows(ui, 56.0, self.versions.len(), |ui, rows| {
+                                scroll.show_rows(ui, LINHA, self.versions.len(), |ui, rows| {
+                                    if std::mem::take(&mut self.rolar_lista)
+                                        && let Some(row) = self.versions.iter().position(|linha| {
+                                            Some(linha.info.id.0) == self.selected
+                                        })
+                                    {
+                                        // As linhas fora de `rows` não existem na tela: o retângulo
+                                        // é calculado pelo índice, e a lista rola até ele.
+                                        let passo = LINHA + ui.spacing().item_spacing.y;
+                                        let topo = ui.max_rect().top()
+                                            + (row as f32 - rows.start as f32) * passo;
+                                        let alvo = egui::Rect::from_min_size(
+                                            egui::pos2(ui.max_rect().left(), topo),
+                                            egui::vec2(ui.max_rect().width(), LINHA),
+                                        );
+                                        let alinhar =
+                                            (!rows.contains(&row)).then_some(Align::Center);
+                                        ui.scroll_to_rect(alvo, alinhar);
+                                    }
                                     for linha in &self.versions[rows] {
                                         let version = &linha.info;
                                         let button = ui.add_enabled(
@@ -434,10 +490,7 @@ impl Manager {
                                                 ))
                                                 .size(13.0),
                                             )
-                                            .min_size(egui::vec2(
-                                                ui.available_width(),
-                                                theme::space::XXL + theme::space::M,
-                                            ))
+                                            .min_size(egui::vec2(ui.available_width(), LINHA))
                                             .wrap(),
                                         );
                                         ui_probe::record(
@@ -611,6 +664,104 @@ impl Manager {
                                 compare_changed = true;
                             }
                         });
+                        let total = self.versions.len();
+                        if !self.choosing_file && total >= 2 {
+                            // A barra e os botões nunca ficam desabilitados com a leitura em
+                            // andamento: desabilitar no meio mataria o arrasto.
+                            let atual = indice_na_barra(&self.versions, self.selected);
+                            let mut novo = atual;
+                            ui.horizontal(|ui| {
+                                let sp = ui.spacing().item_spacing.x;
+                                let anterior = ui
+                                    .add_enabled_ui(atual > 0, |ui| {
+                                        theme::icon_button(ui, theme::Icon::Back, "Versão anterior")
+                                    })
+                                    .inner;
+                                ui_probe::record(ctx, "recovery-timeline-prev", anterior.rect);
+                                if anterior.clicked() {
+                                    novo = atual.saturating_sub(1);
+                                }
+                                ui.spacing_mut().slider_width =
+                                    (ui.available_width() - theme::space::CONTROL - sp).max(60.0);
+                                ui.spacing_mut().slider_rail_height = 4.0;
+                                let mut valor = atual;
+                                let barra = ui.add(
+                                    egui::Slider::new(&mut valor, 0..=total - 1)
+                                        .show_value(false)
+                                        .handle_shape(egui::style::HandleShape::Circle),
+                                );
+                                barra.widget_info(|| {
+                                    egui::WidgetInfo::slider(true, valor as f64, "Linha do tempo")
+                                });
+                                ui_probe::record(ctx, "recovery-timeline", barra.rect);
+                                if valor != atual {
+                                    novo = valor;
+                                }
+                                // Um tracinho sob o trilho marca cada versão com nome.
+                                let raio = barra.rect.height() / 2.5;
+                                let (de, ate) =
+                                    (barra.rect.left() + raio, barra.rect.right() - raio);
+                                let marca = theme::accent(ui);
+                                for (lugar, linha) in self.versions.iter().enumerate() {
+                                    if linha.info.nome.is_some() {
+                                        let x = de
+                                            + (ate - de) * (total - 1 - lugar) as f32
+                                                / (total - 1) as f32;
+                                        ui.painter().line_segment(
+                                            [
+                                                egui::pos2(x, barra.rect.bottom() - 8.0),
+                                                egui::pos2(x, barra.rect.bottom() - 1.0),
+                                            ],
+                                            egui::Stroke::new(2.0, marca),
+                                        );
+                                    }
+                                }
+                                let proxima = ui
+                                    .add_enabled_ui(atual + 1 < total, |ui| {
+                                        theme::icon_button(
+                                            ui,
+                                            theme::Icon::Forward,
+                                            "Próxima versão",
+                                        )
+                                    })
+                                    .inner;
+                                ui_probe::record(ctx, "recovery-timeline-next", proxima.rect);
+                                if proxima.clicked() {
+                                    novo = (atual + 1).min(total - 1);
+                                }
+                            });
+                            if let Some(linha) = self.versions.get(total - 1 - atual) {
+                                let mut texto = LayoutJob::default();
+                                let fraco = TextFormat {
+                                    font_id: FontId::proportional(13.0),
+                                    color: ui.visuals().weak_text_color(),
+                                    ..Default::default()
+                                };
+                                if let Some(nome) = &linha.info.nome {
+                                    texto.append(
+                                        &format!("{nome} · "),
+                                        0.0,
+                                        TextFormat {
+                                            color: theme::accent(ui),
+                                            ..fraco.clone()
+                                        },
+                                    );
+                                }
+                                texto.append(
+                                    &format!(
+                                        "{} · {}",
+                                        rotulo_relativo(chrono::Local::now(), linha.info.quando),
+                                        rotulo_origem(linha.info.origem)
+                                    ),
+                                    0.0,
+                                    fraco,
+                                );
+                                ui.add(egui::Label::new(texto).truncate());
+                            }
+                            if novo != atual {
+                                timeline_to = Some(novo);
+                            }
+                        }
                         if self.show_changes && self.text.is_some() {
                             let caption = if self.compare_current {
                                 "Desta versão até agora. "
@@ -626,11 +777,14 @@ impl Manager {
                             });
                         }
                         ui.separator();
+                        // O que sobra da coluna: a barra do tempo e a segunda fileira de
+                        // botões (quando quebra) tiram altura do texto, e não da janela.
+                        let resto = ui.available_height().max(60.0);
                         ScrollArea::both()
                             .id_salt(("recovery-text", self.selected, self.compare_current))
                             .auto_shrink([false, false])
-                            .max_height(height - 112.0)
-                            .min_scrolled_height(height - 112.0)
+                            .max_height(resto)
+                            .min_scrolled_height(resto)
                             .show(ui, |ui| {
                                 let response = if self.show_changes {
                                     let (green, red) = diff_colors(ui.visuals().dark_mode);
@@ -732,10 +886,10 @@ impl Manager {
         if let Some(path) = select_file {
             self.select_file(Some(path), vault, ctx);
         }
-        if let Some(id) = select_version {
-            self.selected = Some(id);
-            self.error = None;
-            self.reload(ctx, false);
+        if let Some(indice) = timeline_to {
+            self.ir_para(indice, ctx);
+        } else if let Some(id) = select_version {
+            self.escolher(id, ctx);
         } else if compare_changed {
             self.reload(ctx, false);
         }
