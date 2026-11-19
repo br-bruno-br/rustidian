@@ -30,10 +30,11 @@ use crate::{
     recovery::History as Legado,
     vault::{Document, Vault},
 };
-use nota_historico::{
-    Agrupador, Evento, Historico as Banco, NotaId, PoliticaRetencao, impressao_do_texto,
+use nota_historico::{Agrupador, Evento, Historico as Banco, NotaId, impressao_do_texto};
+pub use nota_historico::{
+    ApagadoEmTodas, Estatisticas, Origem, PoliticaRetencao, RelatorioCompactacao, RelatorioPoda,
+    Ritmo, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
 };
-pub use nota_historico::{Origem, Ritmo, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras};
 use std::{
     collections::HashMap,
     fs,
@@ -52,6 +53,8 @@ const NOTA_GRANDE: usize = 1024 * 1024;
 /// Quanto esperar o disco depois de uma gravação com `persistir` (a régua do briefing: no máximo 1 s).
 const PERSISTIR_APOS: Duration = Duration::from_secs(1);
 const PODAR_A_CADA: Duration = Duration::from_secs(3600);
+/// Tamanho máximo do nome de uma versão, em caracteres.
+const NOME_MAXIMO: usize = 80;
 
 /// O id estável de uma nota no histórico: o caminho relativo, com `/`.
 pub fn id_da_nota(relativo: &Path) -> NotaId {
@@ -91,6 +94,10 @@ enum Pedido {
     Configurar(bool),
     Limpar(Sender<Resultado<()>>),
     ApagarTexto(PathBuf, String, Sender<Resultado<usize>>),
+    ApagarTextoEmTodas(String, Sender<Resultado<ApagadoEmTodas>>),
+    Nomear(PathBuf, VersaoId, Option<String>, Sender<Resultado<()>>),
+    Estatisticas(Sender<Resultado<Estatisticas>>),
+    Compactar(Sender<Resultado<RelatorioCompactacao>>),
     Versoes(PathBuf, Sender<Resultado<Vec<VersaoInfo>>>),
     Ler(PathBuf, VersaoId, Sender<Resultado<String>>),
     Notas(Sender<Resultado<Vec<PathBuf>>>),
@@ -290,6 +297,57 @@ impl Historico {
             .map_err(|_| "O histórico local está fechado.".to_string())?;
         Ok(rx)
     }
+
+    /// Tira `trecho` de todas as versões de **todas** as notas (uma senha colada em mais de uma).
+    /// Tire também dos `.md`. Devolve em quantas notas e versões aparecia.
+    pub fn apagar_texto_em_todas(
+        &self,
+        trecho: &str,
+    ) -> Resultado<Receiver<Resultado<ApagadoEmTodas>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::ApagarTextoEmTodas(trecho.to_owned(), resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Dá nome a uma versão (que então nunca é podada) ou tira o nome (`None`). O nome perde os
+    /// espaços das pontas; vazio tira o nome; passando de 80 caracteres, é cortado em 80.
+    pub fn nomear(
+        &self,
+        nota: &Path,
+        versao: VersaoId,
+        nome: Option<String>,
+    ) -> Resultado<Receiver<Resultado<()>>> {
+        let nome = nome
+            .map(|n| n.trim().chars().take(NOME_MAXIMO).collect::<String>())
+            .map(|n| n.trim_end().to_owned())
+            .filter(|n| !n.is_empty());
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Nomear(nota.to_owned(), versao, nome, resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Os números do banco (notas, versões, bytes). A resposta chega quando o fundo puder.
+    pub fn estatisticas(&self) -> Resultado<Receiver<Resultado<Estatisticas>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Estatisticas(resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Refaz os quadros-chave e devolve o espaço livre do arquivo ao sistema. Pode demorar: a
+    /// resposta chega quando acabar.
+    pub fn compactar(&self) -> Resultado<Receiver<Resultado<RelatorioCompactacao>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Compactar(resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
 }
 
 impl Drop for Historico {
@@ -477,6 +535,7 @@ impl Fundo {
             Pedido::Gravar(n, t, o, r) => Pedido::Gravar(self.resolver(n), t, o, r),
             Pedido::GravarEm(n, t, o, q) => Pedido::GravarEm(self.resolver(n), t, o, q),
             Pedido::ApagarTexto(n, t, r) => Pedido::ApagarTexto(self.resolver(n), t, r),
+            Pedido::Nomear(n, v, nome, r) => Pedido::Nomear(self.resolver(n), v, nome, r),
             outro => outro,
         };
         match pedido {
@@ -571,6 +630,38 @@ impl Fundo {
                 let r = self.banco().and_then(|b| {
                     b.apagar_texto_do_historico(&id_da_nota(&nota), &trecho)
                         .map_err(|e| e.to_string())
+                });
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::ApagarTextoEmTodas(trecho, resp) => {
+                let r = self
+                    .banco()
+                    .and_then(|b| b.apagar_texto_de_todas(&trecho).map_err(|e| e.to_string()));
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::Nomear(nota, versao, nome, resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.nomear(&id_da_nota(&nota), versao, nome)
+                        .map_err(|e| format!("Não foi possível dar nome à versão: {e}"))
+                });
+                if r.is_ok() {
+                    self.gravacao_pendente.get_or_insert_with(Instant::now);
+                }
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::Estatisticas(resp) => {
+                let r = self
+                    .banco()
+                    .and_then(|b| b.estatisticas().map_err(|e| e.to_string()));
+                let _ = resp.send(r);
+            }
+            Pedido::Compactar(resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.compactar()
+                        .map_err(|e| format!("Não foi possível compactar o histórico: {e}"))
                 });
                 let _ = resp.send(r);
                 (self.acordar)();
@@ -1303,6 +1394,124 @@ mod testes {
         for v in versoes(&h, "h.md") {
             assert!(!h.leitor().ler(nota, v.id).unwrap().contains("HUNTER2"));
         }
+    }
+
+    #[test]
+    fn apagar_texto_em_todas_some_de_varias_notas_e_conta() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        for nome in ["a.md", "b.md", "c.md"] {
+            h.abriu(Path::new(nome), &format!("{nome} com HUNTER2 dentro"));
+            h.gravar(
+                Path::new(nome),
+                &format!("{nome} com HUNTER2 dentro, e mais"),
+                Origem::Externa,
+            );
+        }
+        h.abriu(Path::new("d.md"), "sem nada");
+        esperar(|| versoes(&h, "c.md").len() == 2 && versoes(&h, "d.md").len() == 1);
+        let r = h
+            .apagar_texto_em_todas("HUNTER2")
+            .unwrap()
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            r,
+            ApagadoEmTodas {
+                notas: 3,
+                versoes: 6
+            }
+        );
+        for nome in ["a.md", "b.md", "c.md", "d.md"] {
+            for v in versoes(&h, nome) {
+                let t = h.leitor().ler(Path::new(nome), v.id).unwrap();
+                assert!(!t.contains("HUNTER2"), "{nome}: {t}");
+            }
+        }
+        assert!(
+            h.apagar_texto_em_todas("")
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn nomear_corta_o_nome_e_tira_com_vazio() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        let nota = Path::new("n.md");
+        h.abriu(nota, "um");
+        h.gravar(nota, "dois", Origem::Externa);
+        esperar(|| versoes(&h, "n.md").len() == 2);
+        let v1 = versoes(&h, "n.md")[0].id;
+        let nome = |h: &Historico| versoes(h, "n.md")[0].nome.clone();
+        let nomear = |h: &Historico, n: Option<&str>| {
+            h.nomear(nota, v1, n.map(str::to_owned))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .unwrap();
+        };
+        nomear(&h, Some("  enviado ao editor  "));
+        assert_eq!(nome(&h).as_deref(), Some("enviado ao editor"));
+        nomear(&h, Some(&"ã".repeat(120)));
+        assert_eq!(nome(&h).unwrap().chars().count(), 80);
+        nomear(&h, Some("   "));
+        assert_eq!(nome(&h), None);
+        nomear(&h, Some("de novo"));
+        nomear(&h, None);
+        assert_eq!(nome(&h), None);
+        // Versão que não existe: erro, sem travar.
+        assert!(
+            h.nomear(nota, VersaoId(99), Some("x".into()))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn estatisticas_e_compactar_respondem() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        h.abriu(Path::new("e.md"), "um texto");
+        h.gravar(Path::new("e.md"), "um texto maior", Origem::Externa);
+        esperar(|| versoes(&h, "e.md").len() == 2);
+        let e = h.estatisticas().unwrap().recv().unwrap().unwrap();
+        assert_eq!((e.notas, e.versoes), (1, 2));
+        assert!(e.tamanho_em_disco > 0);
+        let c = h.compactar().unwrap().recv().unwrap().unwrap();
+        assert!(c.bytes_antes > 0 && c.bytes_depois > 0);
+        assert_eq!(versoes(&h, "e.md").len(), 2);
+    }
+
+    #[test]
+    fn pedidos_novos_com_o_historico_desligado_respondem_erro_e_nao_gravam() {
+        let d = tempfile::tempdir().unwrap();
+        let h = Historico::iniciar(d.path(), false, ritmo_rapido(), || {});
+        let nota = Path::new("x.md");
+        assert!(
+            h.apagar_texto_em_todas("a")
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+        assert!(
+            h.nomear(nota, VersaoId(1), Some("a".into()))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+        let erro = h.estatisticas().unwrap().recv().unwrap().unwrap_err();
+        assert!(erro.contains("desligado"), "{erro}");
+        assert!(h.compactar().unwrap().recv().unwrap().is_err());
+        assert!(!arquivo_do_cofre(d.path()).exists());
     }
 
     #[test]
