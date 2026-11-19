@@ -619,7 +619,7 @@ impl Manager {
                             };
                             let (green, red) = diff_colors(ui.visuals().dark_mode);
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.spacing_mut().item_spacing.x = theme::space::XS;
                                 ui.label(RichText::new(caption).small().weak());
                                 ui.label(RichText::new(" entrou ").small().background_color(green));
                                 ui.label(RichText::new(" saiu ").small().background_color(red));
