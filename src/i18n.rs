@@ -57,7 +57,8 @@ pub fn t(english: &str) -> &str {
         "Rename…" => "Renomear…",
         // Seletores de modo
         "Reading" => "Leitura",
-        "Canvas" => "Quadro",
+        "Canvas" => "Desenho",
+        "Board list" => "Lista",
         "Live preview" => "Pré-visualização ao vivo",
         "Live Preview" => "Pré-visualização ao vivo",
         "Source mode" => "Modo código-fonte",

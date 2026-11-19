@@ -40,6 +40,25 @@ enum Dialog {
     InsertTemplate,
     Settings,
 }
+/// H2b: os três jeitos de ver o mesmo assunto: a nota, o quadro desenhado e a Lista do quadro.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BoardMode {
+    Note,
+    Board,
+    List,
+}
+
+impl BoardMode {
+    /// O nome que aparece no rodapé e no seletor do cabeçalho.
+    fn label(self) -> &'static str {
+        match self {
+            BoardMode::Note => "Nota",
+            BoardMode::Board => "Quadro",
+            BoardMode::List => "Lista",
+        }
+    }
+}
+
 #[derive(Clone)]
 enum Pending {
     CloseTab(usize),
@@ -131,6 +150,8 @@ pub struct NotesApp {
     pending: Option<Pending>,
     error: Option<String>,
     status: String,
+    /// A aba, o arquivo e o modo em que `status` foi escrito: ao mudar qualquer um, a mensagem velha sai.
+    status_scope: (Option<u64>, PathBuf, Option<BoardMode>),
     allow_close: bool,
     started: Instant,
     first_frame: bool,
@@ -276,6 +297,7 @@ impl NotesApp {
             pending: None,
             error: None,
             status: "Pronto".into(),
+            status_scope: (None, PathBuf::new(), None),
             allow_close: false,
             started,
             first_frame: true,
@@ -399,6 +421,11 @@ impl NotesApp {
             rustidian::canvas::is_canvas(&tab.document.path) && !tab.document.is_blank()
         });
         let label = match current {
+            View::Read
+                if canvas && self.tabs.get(self.active).is_some_and(|tab| tab.board_list) =>
+            {
+                "Board list"
+            }
             View::Read if canvas => "Canvas",
             View::Read => "Reading",
             View::Live => "Live preview",
@@ -7096,6 +7123,46 @@ impl NotesApp {
         }
     }
 
+    /// O modo da aba ativa: nota, quadro desenhado ou Lista do quadro. `None` para o que não é
+    /// nota nem quadro (imagem, texto puro, aba em branco, grafo).
+    fn board_mode(&self) -> Option<BoardMode> {
+        let tab = self.tabs.get(self.active)?;
+        if tab.document.is_blank() || tab.document.is_image() || tab.view == View::Graph {
+            return None;
+        }
+        if rustidian::canvas::is_canvas(&tab.document.path) {
+            Some(if tab.board_list && tab.view != View::Source {
+                BoardMode::List
+            } else {
+                BoardMode::Board
+            })
+        } else if rustidian::vault::is_markdown(&tab.document.path) {
+            Some(BoardMode::Note)
+        } else {
+            None
+        }
+    }
+
+    /// Uma mensagem de status vale para a aba e o modo em que nasceu: ao trocar de aba ou de
+    /// modo (nota, quadro, Lista) ela sai, para o rodapé não contar o que já não é verdade.
+    /// Uma mensagem escrita neste mesmo quadro (`before` é o texto do começo dele) fica.
+    fn status_follows_scope(&mut self, before: &str) {
+        let scope = (
+            self.tabs.get(self.active).map(Tab::id),
+            self.tabs
+                .get(self.active)
+                .map(|tab| tab.document.path.clone())
+                .unwrap_or_default(),
+            self.board_mode(),
+        );
+        if scope != self.status_scope {
+            if self.status == before {
+                self.status.clear();
+            }
+            self.status_scope = scope;
+        }
+    }
+
     /// H2b: alterna nota e quadro. Numa nota `X.md`, abre o quadro par `X.canvas` (cria a
     /// partir da nota se não existe, sem tocar no `.md`). Num quadro, alterna a mesma aba entre
     /// o quadro e a Lista; do código-fonte volta ao quadro desenhado.
@@ -7113,11 +7180,8 @@ impl NotesApp {
             } else {
                 tab.board_list = !tab.board_list;
             }
-            self.status = if tab.board_list {
-                "Lista do quadro (Ctrl+Shift+B volta ao quadro)".into()
-            } else {
-                "Quadro".into()
-            };
+            // O modo atual aparece no rodapé (`BoardMode`); nada de mensagem que ficaria velha.
+            self.status.clear();
             return;
         }
         if !rustidian::vault::is_markdown(&tab.document.path) {
@@ -7533,7 +7597,15 @@ impl eframe::App for NotesApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let status_before = self.status.clone();
+        self.draw(ui, frame);
+        self.status_follows_scope(&status_before);
+    }
+}
+
+impl NotesApp {
+    fn draw(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_started = Instant::now();
         // A frame that starts on another tab than the last one is a tab switch.
         let switched_tab =
@@ -7658,6 +7730,16 @@ impl eframe::App for NotesApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(theme::space::S);
+                    if let Some(mode) = self.board_mode() {
+                        let chip = ui.label(
+                            RichText::new(mode.label())
+                                .size(11.0)
+                                .strong()
+                                .color(theme::accent(ui)),
+                        );
+                        crate::ui_probe::record(ui.ctx(), "board-mode", chip.rect);
+                        ui.add_space(theme::space::S);
+                    }
                     ui.label(RichText::new(&self.status).size(11.0).weak());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(theme::space::M);

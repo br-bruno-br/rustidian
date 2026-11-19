@@ -313,3 +313,89 @@ fn exportar_a_lista_gera_uma_nota_nova_que_nunca_sobrescreve() {
     assert_eq!(read(&session, "Home (lista).md"), copy);
     assert!(session.path("Home (lista) 1.md").exists());
 }
+
+/// O rótulo do modo no rodapé (a etiqueta "board-mode" do `ui_probe` não é lida aqui: o texto na
+/// tela é que importa).
+fn footer_mode(session: &Session) -> Option<BoardMode> {
+    let found: Vec<BoardMode> = [BoardMode::Note, BoardMode::Board, BoardMode::List]
+        .into_iter()
+        .filter(|mode| {
+            session
+                .harness
+                .query_all_by_label(mode.label())
+                .any(|node| node.rect().min.y > 800.0 - 28.0)
+        })
+        .collect();
+    assert!(
+        found.len() <= 1,
+        "o rodapé mostra mais de um modo: {found:?}"
+    );
+    found.first().copied()
+}
+
+#[test]
+fn o_rodape_mostra_o_modo_atual_e_a_ajuda_da_lista_some_ao_sair_dela() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    session.settle();
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(footer_mode(&session), Some(BoardMode::Board));
+
+    toggle(&mut session);
+    assert!(session.app().tabs[0].board_list);
+    assert_eq!(footer_mode(&session), Some(BoardMode::List));
+    assert!(!session.has_label("Ctrl+Shift+B volta ao quadro"));
+
+    // De volta ao quadro e depois a uma nota comum: nenhuma mensagem da Lista sobrevive.
+    toggle(&mut session);
+    assert_eq!(footer_mode(&session), Some(BoardMode::Board));
+    to_note(&mut session);
+    wait_active(&mut session, "Home.md");
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+    assert!(
+        !session.has_label("Lista do quadro"),
+        "o rodapé não pode falar da Lista numa nota"
+    );
+    session.open_note("Second");
+    session.settle();
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+    assert!(!session.has_label("Lista do quadro"));
+}
+
+#[test]
+fn a_mensagem_de_status_sai_quando_a_aba_ou_o_modo_muda() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    // Uma mensagem velha, escrita em outro momento (num quadro de antes, digamos).
+    session.app_mut().status = "Mensagem velha".into();
+    session.settle();
+    assert!(
+        session.has_label("Mensagem velha"),
+        "enquanto nada muda, ela fica"
+    );
+
+    // Trocar de nota limpa.
+    session.open_note("Second");
+    session.settle();
+    assert!(!session.has_label("Mensagem velha"));
+
+    // A mensagem do próprio gesto (quadro criado a partir da nota) fica...
+    toggle(&mut session);
+    wait_active(&mut session, "Second.canvas");
+    assert!(
+        session.app().status.contains("criado a partir da nota"),
+        "{}",
+        session.app().status
+    );
+    session.settle();
+    assert!(session.has_label("criado a partir da nota"));
+    // ...até o modo mudar de novo.
+    toggle(&mut session);
+    assert!(session.app().tabs[0].board_list);
+    assert!(session.app().status.is_empty(), "{}", session.app().status);
+}
