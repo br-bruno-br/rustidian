@@ -8,7 +8,7 @@
 //!   reconstrução.
 //! - Cada versão anterior vira uma **diferença para trás**: o zstd comprime o texto dela sabendo
 //!   da vizinha mais nova (ver [`crate::codec`]). Uma edição de ~50 caracteres vira ~45 bytes.
-//! - A cada N versões (padrão 64, [`Opcoes::quadro_chave_a_cada`]) uma versão fica como
+//! - A cada N versões (padrão 128, [`Opcoes::quadro_chave_a_cada`]) uma versão fica como
 //!   quadro-chave em vez de virar diferença, para limitar quantas diferenças é preciso aplicar
 //!   ao abrir uma versão antiga (no máximo N).
 //! - Os quadros-chave não são um bloco só: o texto é cortado em **pedaços** de ~2 KB pelo próprio
@@ -16,7 +16,7 @@
 //!   blake3. Quadros-chave parecidos (da mesma nota ou de notas diferentes, como um parágrafo
 //!   copiado) repartem os pedaços. Uma contagem de referências apaga o pedaço quando ninguém
 //!   mais o usa.
-//! - Cada versão guarda o blake3 do texto inteiro; [`Historico::ler`] confere e devolve
+//! - Cada versão guarda o blake3 do texto inteiro (128 bits, [`crate::registro::Impressao`]); [`Historico::ler`] confere e devolve
 //!   [`Erro::Integridade`] se não bater.
 //!
 //! # Tabelas do `redb`
@@ -40,7 +40,9 @@
 use crate::codec::{Codec, ZstdCodec};
 use crate::erro::{Erro, Result};
 use crate::pedacos::{Chave, ParametrosPedacos, chave, cortar};
-use crate::registro::{Corpo, NotaId, Origem, Registro, VersaoId, VersaoInfo, ms_de};
+use crate::registro::{
+    Corpo, Impressao, NotaId, Origem, Registro, VersaoId, VersaoInfo, impressao_de_bytes, ms_de,
+};
 use crate::retencao::{Candidata, PoliticaRetencao, escolher_remocoes};
 use redb::{
     Database, Durability, ReadableDatabase, ReadableTable, ReadableTableMetadata, Table,
@@ -76,6 +78,12 @@ pub enum Durabilidade {
 #[derive(Debug, Clone, Copy)]
 pub struct Opcoes {
     /// De quantas em quantas versões há um quadro-chave (limita as diferenças a aplicar ao abrir).
+    ///
+    /// Padrão 128: medido com a nota de 5 KB e 1.000 versões, 64 dá 204,8 KB de arquivo e 128 dá
+    /// 172 KB, com a pior abertura abaixo de 1 ms nos dois (ver `README.md`). Cada quadro-chave
+    /// guarda a nota inteira comprimida, então o espaço cai quase pela metade; em compensação, abrir
+    /// aplica até N-1 diferenças, e cada uma carrega a versão vizinha inteira como base. Para notas
+    /// muito maiores (dezenas de KB) vale um N menor, como 32 ou 64.
     pub quadro_chave_a_cada: u64,
     pub durabilidade: Durabilidade,
     pub pedacos: ParametrosPedacos,
@@ -84,7 +92,7 @@ pub struct Opcoes {
 impl Default for Opcoes {
     fn default() -> Self {
         Self {
-            quadro_chave_a_cada: 64,
+            quadro_chave_a_cada: 128,
             durabilidade: Durabilidade::Adiada,
             pedacos: ParametrosPedacos::default(),
         }
@@ -147,8 +155,8 @@ fn u32_le(b: &[u8]) -> Result<u32> {
         .ok_or_else(|| Erro::Corrompido("pedaço sem cabeçalho".into()))
 }
 
-fn hash(b: &[u8]) -> [u8; 32] {
-    *blake3::hash(b).as_bytes()
+fn hash(b: &[u8]) -> Impressao {
+    impressao_de_bytes(b)
 }
 
 fn texto_de(b: Vec<u8>) -> Result<String> {

@@ -50,6 +50,9 @@ pub trait Codec: Send + Sync {
     ) -> Result<Vec<u8>>;
 }
 
+/// Assinatura ("magic number") que abre todo quadro zstd.
+const ASSINATURA: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+
 /// Codec padrão: zstd (crate `zstd`, compila C). Reaproveita os contextos entre chamadas.
 pub struct ZstdCodec {
     nivel: i32,
@@ -127,7 +130,14 @@ impl Codec for ZstdCodec {
     fn comprimir_com_base(&self, dados: &[u8], base: &[u8]) -> Result<Vec<u8>> {
         let mut c = trava(&self.com_base);
         c.set_dictionary(self.nivel, base).map_err(erro_io)?;
-        c.compress(dados).map_err(erro_io)
+        let mut z = c.compress(dados).map_err(erro_io)?;
+        // As diferenças são milhares de quadros pequenos: tirar os 4 bytes da assinatura de cada um
+        // (sempre os mesmos) poupa ~4 KB por 1.000 versões. `descomprimir_com_base` recoloca.
+        if z.len() < 4 || z[..4] != ASSINATURA {
+            return Err(Erro::Codec("quadro zstd sem a assinatura esperada".into()));
+        }
+        z.drain(..4);
+        Ok(z)
     }
 
     fn descomprimir_com_base(
@@ -138,7 +148,10 @@ impl Codec for ZstdCodec {
     ) -> Result<Vec<u8>> {
         let mut d = trava(&self.desc_com_base);
         d.set_dictionary(base).map_err(erro_io)?;
-        let saida = d.decompress(comprimido, tamanho).map_err(erro_io)?;
+        let mut quadro = Vec::with_capacity(4 + comprimido.len());
+        quadro.extend_from_slice(&ASSINATURA);
+        quadro.extend_from_slice(comprimido);
+        let saida = d.decompress(&quadro, tamanho).map_err(erro_io)?;
         conferir(saida, tamanho)
     }
 }

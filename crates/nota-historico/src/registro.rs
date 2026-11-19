@@ -8,7 +8,7 @@
 //!            bits 1-2: origem   bit 3: tem nome
 //! varint     quando (ms desde 1970, UTC)
 //! varint     tamanho do texto em bytes
-//! 32 bytes   blake3 do texto inteiro
+//! 16 bytes   blake3 do texto inteiro, truncado (os 16 primeiros bytes dos 32 do blake3 padrão)
 //! varint     distância até o quadro-chave mais antigo anterior (0 = não há)
 //! [varint n + n bytes de nome]            se tem nome
 //! quadro-chave: varint n + n chaves de 32 bytes (pedaços)
@@ -85,15 +85,32 @@ pub struct VersaoInfo {
     pub tamanho: usize,
     /// Nome dado pelo usuário; versões com nome nunca são podadas.
     pub nome: Option<String>,
-    /// blake3 do texto inteiro.
-    pub impressao: [u8; 32],
+    /// blake3 do texto inteiro, truncado em 128 bits: os 16 primeiros bytes de
+    /// `blake3::hash(texto)` (veja [`impressao_do_texto`]).
+    pub impressao: Impressao,
 }
 
 impl VersaoInfo {
-    /// A impressão em hexadecimal (64 caracteres).
+    /// A impressão em hexadecimal (32 caracteres).
     pub fn impressao_hex(&self) -> String {
         self.impressao.iter().map(|b| format!("{b:02x}")).collect()
     }
+}
+
+/// Impressão de um texto: os 16 primeiros bytes do blake3 padrão (128 bits). Basta para achar
+/// corrupção e para saber se um texto é o de uma versão; metade do espaço de guardar os 32 bytes
+/// em cada uma das milhares de versões. Quem tem o `blake3::hash` completo compara com `[..16]`.
+pub type Impressao = [u8; 16];
+
+/// Calcula a [`Impressao`] de um texto.
+pub fn impressao_do_texto(texto: &str) -> Impressao {
+    impressao_de_bytes(texto.as_bytes())
+}
+
+pub(crate) fn impressao_de_bytes(b: &[u8]) -> Impressao {
+    blake3::hash(b).as_bytes()[..16]
+        .try_into()
+        .expect("16 bytes")
 }
 
 pub(crate) fn ms_de(t: SystemTime) -> u64 {
@@ -120,7 +137,7 @@ pub(crate) struct Registro {
     pub origem: Origem,
     pub quando_ms: u64,
     pub tamanho: u32,
-    pub hash: [u8; 32],
+    pub hash: Impressao,
     /// Id do quadro-chave mais antigo anterior a esta versão (0 = nenhum).
     pub chave_anterior: u64,
     pub nome: Option<String>,
@@ -215,7 +232,7 @@ impl Registro {
         let quando_ms = l.varint()?;
         let tamanho = u32::try_from(l.varint()?)
             .map_err(|_| Erro::Corrompido("tamanho de versão grande demais".into()))?;
-        let hash: [u8; 32] = l.bytes(32)?.try_into().expect("32 bytes");
+        let hash: Impressao = l.bytes(16)?.try_into().expect("16 bytes");
         let dist = l.varint()?;
         let chave_anterior = if dist == 0 {
             0
@@ -290,7 +307,7 @@ mod testes {
             origem: Origem::Sync,
             quando_ms: 1_763_000_000_123,
             tamanho: 5034,
-            hash: [7; 32],
+            hash: [7; 16],
             chave_anterior: 60,
             nome: nome.map(str::to_owned),
             corpo,

@@ -20,5 +20,5 @@ pub use historico::{
     RelatorioPoda,
 };
 pub use pedacos::ParametrosPedacos;
-pub use registro::{NotaId, Origem, VersaoId, VersaoInfo};
+pub use registro::{Impressao, NotaId, Origem, VersaoId, VersaoInfo, impressao_do_texto};
 pub use retencao::PoliticaRetencao;

@@ -6,8 +6,8 @@ mod gerador;
 
 use gerador::{Sorteio, editar, texto};
 use nota_historico::{
-    Durabilidade, Historico, NotaId, Opcoes, Origem, ParametrosPedacos, PoliticaRetencao,
-    VersaoId, ZstdCodec,
+    Durabilidade, Historico, NotaId, Opcoes, Origem, ParametrosPedacos, PoliticaRetencao, VersaoId,
+    ZstdCodec,
 };
 use proptest::prelude::*;
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ fn verificar(h: &Historico, notas: &[NotaId], modelos: &[Modelo]) {
         for v in &infos {
             let t = h.ler(id, v.id).unwrap();
             assert_eq!(&t, &m.versoes[&v.id.0], "texto de {id:?} v{}", v.id.0);
-            assert_eq!(v.impressao, *blake3::hash(t.as_bytes()).as_bytes());
+            assert_eq!(v.impressao[..], blake3::hash(t.as_bytes()).as_bytes()[..16]);
             assert_eq!(v.tamanho, t.len());
         }
         for n in &m.nomeadas {
@@ -52,7 +52,7 @@ proptest! {
     #[test]
     fn toda_versao_que_fica_reconstroi_igual(
         semente in any::<u64>(),
-        kf in 2u64..9,
+        kf in 1u64..9,
         ops in proptest::collection::vec((0u8..11, any::<u64>(), any::<u64>()), 1..70),
     ) {
         let d = tempfile::tempdir().unwrap();

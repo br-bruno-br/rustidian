@@ -62,7 +62,10 @@ fn grava_e_le_todas_as_versoes() {
             i + 1
         );
         assert_eq!(infos[i].tamanho, t.len());
-        assert_eq!(infos[i].impressao, *blake3::hash(t.as_bytes()).as_bytes());
+        assert_eq!(
+            infos[i].impressao[..],
+            blake3::hash(t.as_bytes()).as_bytes()[..16]
+        );
         assert_eq!(infos[i].origem, Origem::Editor);
         assert_eq!(infos[i].quando, em(1_000_000 + i as u64 * 60));
     }
