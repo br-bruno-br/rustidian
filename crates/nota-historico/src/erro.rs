@@ -39,7 +39,28 @@ impl fmt::Display for Erro {
 
 impl std::error::Error for Erro {}
 
-/// Converte qualquer erro do redb em [`Erro::Banco`].
-pub(crate) fn banco<E: fmt::Display>(e: E) -> Erro {
-    Erro::Banco(e.to_string())
+macro_rules! de_redb {
+    ($($t:ty),* $(,)?) => {$(
+        impl From<$t> for Erro {
+            fn from(e: $t) -> Erro {
+                Erro::Banco(e.to_string())
+            }
+        }
+    )*};
+}
+
+de_redb!(
+    redb::DatabaseError,
+    redb::TransactionError,
+    redb::TableError,
+    redb::StorageError,
+    redb::CommitError,
+    redb::CompactionError,
+    redb::SetDurabilityError,
+);
+
+impl From<std::io::Error> for Erro {
+    fn from(e: std::io::Error) -> Erro {
+        Erro::Banco(e.to_string())
+    }
 }

@@ -4,9 +4,17 @@
 
 pub mod codec;
 pub mod erro;
+pub mod historico;
 pub mod pedacos;
 pub mod registro;
 pub mod retencao;
 
 pub use codec::{Codec, ZstdCodec};
 pub use erro::{Erro, Result};
+pub use historico::{
+    Durabilidade, Estatisticas, EstatisticasNota, Historico, Opcoes, RelatorioCompactacao,
+    RelatorioPoda,
+};
+pub use pedacos::ParametrosPedacos;
+pub use registro::{NotaId, Origem, VersaoId, VersaoInfo};
+pub use retencao::PoliticaRetencao;
