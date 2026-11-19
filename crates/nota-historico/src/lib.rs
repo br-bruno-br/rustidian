@@ -4,6 +4,7 @@
 
 pub mod codec;
 pub mod erro;
+pub mod pedacos;
 
 pub use codec::{Codec, ZstdCodec};
 pub use erro::{Erro, Result};
