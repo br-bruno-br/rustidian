@@ -601,20 +601,91 @@ fn o_seletor_leva_da_nota_ao_quadro_a_lista_e_de_volta_criando_o_quadro_se_falta
     assert_eq!(mode(&session), Some(BoardMode::Board));
 }
 
-#[test]
-fn o_seletor_num_quadro_sem_nota_par_avisa_em_vez_de_criar() {
+fn open_ideias() -> Session {
     let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().show_left = false;
     session.app_mut().open_note(Path::new("Ideias.canvas"));
     session.settle();
+    session
+}
+
+#[test]
+fn nota_num_quadro_sem_nota_par_pergunta_dentro_do_app_e_cancelar_nao_cria_nada() {
+    let mut session = open_ideias();
     click_segment(&mut session, "Nota");
+    // Nada mudou até responder; a pergunta é do app (Modal), com Criar e Cancelar de toque.
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert!(!session.path("Ideias.md").exists());
+    assert!(session.has_label("Criar a nota Ideias?"));
+    for label in ["Criar", "Cancelar"] {
+        let rect = session.harness.get_by_label(label).rect();
+        assert!(rect.height() >= 32.0, "{label}: {rect:?}");
+    }
+
+    session.harness.get_by_label("Cancelar").click();
+    session.settle();
+    session.settle();
+    assert!(!session.has_label("Criar a nota Ideias?"));
+    assert!(!session.path("Ideias.md").exists());
     assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
     assert_eq!(mode(&session), Some(BoardMode::Board));
+
+    // Esc também cancela.
+    click_segment(&mut session, "Nota");
+    assert!(session.has_label("Criar a nota Ideias?"));
+    session.key(NONE, egui::Key::Escape);
+    assert!(!session.has_label("Criar a nota Ideias?"));
     assert!(!session.path("Ideias.md").exists());
+}
+
+#[test]
+fn criar_a_nota_par_gera_x_md_com_titulo_abre_no_modo_nota_e_o_seletor_passa_a_funcionar() {
+    let mut session = open_ideias();
+    let board_before = read(&session, "Ideias.canvas");
+    click_segment(&mut session, "Nota");
+    session.harness.get_by_label("Criar").click();
+    session.settle();
+    session.settle();
+    wait_active(&mut session, "Ideias.md");
+
+    assert_eq!(
+        read(&session, "Ideias.md"),
+        "# Ideias
+
+"
+    );
+    assert_eq!(
+        read(&session, "Ideias.canvas"),
+        board_before,
+        "o quadro não muda"
+    );
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.app().tabs.len(), 1);
+    // A mensagem nasceu neste modo e fica.
     assert!(
-        session.has_label("ainda não tem uma nota com o mesmo nome"),
+        session.has_label("Nota Ideias.md criada."),
         "{}",
         session.app().status
     );
+
+    // Agora o par existe: Quadro e Nota vão e voltam sem pergunta.
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Ideias.canvas");
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Ideias.md");
+    assert!(!session.has_label("Criar a nota"));
+}
+
+#[test]
+fn o_atalho_e_a_paleta_tambem_perguntam_antes_de_criar_a_nota_par() {
+    let mut session = open_ideias();
+    to_note(&mut session);
+    assert!(session.has_label("Criar a nota Ideias?"));
+    assert!(!session.path("Ideias.md").exists());
+    // Enter confirma.
+    session.key(NONE, egui::Key::Enter);
+    wait_active(&mut session, "Ideias.md");
+    assert!(session.path("Ideias.md").exists());
 }
 
 #[test]

@@ -152,6 +152,9 @@ pub struct NotesApp {
     settings_page: settings_ui::Page,
     files: rustidian::search::FileMatcher,
     pending: Option<Pending>,
+    /// H2b: a nota `X.md` que o app oferece criar, perguntando antes ("Criar a nota X?"), quando
+    /// o usuário pede "Nota" num quadro `X.canvas` sem nota par.
+    pair_note_ask: Option<PathBuf>,
     error: Option<String>,
     status: String,
     /// A aba, o arquivo e o modo em que `status` foi escrito: ao mudar qualquer um, a mensagem velha sai.
@@ -299,6 +302,7 @@ impl NotesApp {
             settings_page: Default::default(),
             files: rustidian::search::FileMatcher::new(Vec::new()),
             pending: None,
+            pair_note_ask: None,
             error: None,
             status: "Pronto".into(),
             status_scope: (None, PathBuf::new(), None),
@@ -7374,16 +7378,83 @@ impl NotesApp {
         }
         match self.pair_note() {
             Some(note) => self.open_note(&note),
-            None => {
-                // TODO(H2b, mudança 7): aqui nasce a nota par ("Criar a nota deste quadro"); por
-                // enquanto só um aviso claro.
-                let note = rustidian::board_note::note_of(&tab.document.path);
-                self.status = format!(
-                    "Este quadro ainda não tem uma nota com o mesmo nome ({}).",
-                    note.display()
-                );
-            }
+            // Sem nota par: pergunta, dentro do app, se é para criar (ver `pair_note_dialog`).
+            None => self.pair_note_ask = Some(rustidian::board_note::note_of(&tab.document.path)),
         }
+    }
+
+    /// "Criar a nota X?": a pergunta de quando se pede "Nota" num quadro sem nota par. Criar gera
+    /// `X.md` com `# X` e abre no modo Nota; Cancelar (ou Esc) deixa tudo como estava.
+    fn pair_note_dialog(&mut self, ctx: &egui::Context) {
+        let Some(note) = self.pair_note_ask.clone() else {
+            return;
+        };
+        let title = rustidian::vault::file_title(&note);
+        let mut answer = None;
+        let response = egui::Modal::new(egui::Id::new("pair-note-ask"))
+            .frame(theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                theme::dialog_style(ui);
+                ui.set_width(440.0);
+                ui.heading(format!("Criar a nota {title}?"));
+                ui.label(
+                    "Este quadro ainda não tem uma nota com o mesmo nome. A nota nasce com o                      título e o quadro continua como está.",
+                );
+                ui.add_space(theme::space::L);
+                ui.horizontal(|ui| {
+                    let size = egui::vec2(96.0, theme::space::CONTROL);
+                    let create = ui.add(egui::Button::new("Criar").min_size(size));
+                    crate::ui_probe::record(ctx, "pair-note-create", create.rect);
+                    let cancel = ui.add(egui::Button::new("Cancelar").min_size(size));
+                    crate::ui_probe::record(ctx, "pair-note-cancel", cancel.rect);
+                    if cancel.clicked() {
+                        answer = Some(false);
+                    } else if create.clicked()
+                        || ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        })
+                    {
+                        answer = Some(true);
+                    }
+                });
+            });
+        crate::ui_probe::record(ctx, "dialog:pair-note", response.response.rect);
+        if answer.is_none() && response.should_close() {
+            answer = Some(false);
+        }
+        match answer {
+            Some(true) => {
+                self.pair_note_ask = None;
+                self.create_pair_note(&note);
+            }
+            Some(false) => {
+                self.pair_note_ask = None;
+                self.focus_editor();
+            }
+            None => {}
+        }
+    }
+
+    /// Cria a nota `note` (`X.md`, vazia com `# X`) ao lado do quadro e abre no modo Nota.
+    fn create_pair_note(&mut self, note: &Path) {
+        let Some(vault) = self.vault.as_mut() else {
+            self.error = Some("Abra um cofre antes de criar uma nota.".into());
+            return;
+        };
+        let mut document = Document::new(note.to_path_buf());
+        document.text = format!(
+            "# {}
+
+",
+            document.title()
+        );
+        if let Err(error) = vault.save(&mut document) {
+            self.error = Some(error);
+            return;
+        }
+        self.refresh_file_views();
+        self.open_note(note);
+        self.status = format!("Nota {} criada.", note.display());
     }
 
     /// H2b: grava a visão Lista do quadro ativo como uma nota NOVA (uma cópia: nunca sobrescreve
@@ -7987,6 +8058,7 @@ impl NotesApp {
         }
         self.show_page_preview(&ctx);
         self.dialogs(&ctx);
+        self.pair_note_dialog(&ctx);
         if let Some(error) = self.editor.error.take() {
             self.error = Some(error);
         }
