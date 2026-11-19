@@ -386,6 +386,11 @@ struct Fundo {
 
 impl Fundo {
     fn correr(&mut self) {
+        if !self.habilitado
+            && let Err(erro) = self.apagar_arquivos()
+        {
+            self.avisar(erro);
+        }
         loop {
             let espera = self.espera();
             match self.rx.recv_timeout(espera) {
@@ -1067,6 +1072,20 @@ mod testes {
         h.gravar(Path::new("f.md"), "mais", Origem::Externa);
         std::thread::sleep(ms(100));
         assert!(!arquivo_do_cofre(d.path()).exists());
+    }
+
+    #[test]
+    fn abrir_desligado_apaga_o_arquivo_que_ficou() {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let h = abrir(d.path());
+            h.abriu(Path::new("i.md"), "texto");
+            esperar(|| versoes(&h, "i.md").len() == 1);
+        }
+        assert!(arquivo_do_cofre(d.path()).exists());
+        let h = Historico::iniciar(d.path(), false, ritmo_rapido(), || {});
+        esperar(|| !arquivo_do_cofre(d.path()).exists());
+        drop(h);
     }
 
     #[test]
