@@ -2,6 +2,7 @@
 //! Ver `docs/bruno/HISTORICO-NOTAS.md` e o `README.md` deste crate.
 #![forbid(unsafe_code)]
 
+pub mod agrupador;
 pub mod codec;
 pub mod erro;
 pub mod historico;
@@ -9,6 +10,7 @@ pub mod pedacos;
 pub mod registro;
 pub mod retencao;
 
+pub use agrupador::{Agrupador, Evento, Motivo, Ritmo};
 pub use codec::{Codec, ZstdCodec};
 pub use erro::{Erro, Result};
 pub use historico::{
