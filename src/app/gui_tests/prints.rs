@@ -44,6 +44,9 @@ fn open_with(notes: &[(&str, &str)]) -> Session {
 
 fn save(session: &mut Session, dir: &Path, name: &str) {
     session.settle();
+    // Duas renderizações: a primeira põe no atlas as letras que acabaram de aparecer.
+    let _ = session.harness.render();
+    session.settle();
     let image = session.harness.render().expect("renderização com wgpu");
     assert!(image.width() > 0 && image.height() > 0);
     image.save(dir.join(name)).expect("gravar o PNG");
@@ -359,14 +362,35 @@ fn ux_fluxo() {
     click_segment(&mut s, "Quadro");
     ux_wait(&mut s, "Solta.canvas");
     save(&mut s, &dir, "12-quadro-de-nota-sem-links.png");
-    // Quadro sem nota par
+    // Quadro sem nota par: "Nota" pergunta antes de criar.
     s.app_mut().open_note(Path::new("Ideias.canvas"));
     s.settle();
     save(&mut s, &dir, "13-quadro-sem-nota-par.png");
     click_segment(&mut s, "Nota");
-    save(&mut s, &dir, "14-nota-sem-nota-par-aviso.png");
-    // Menu do cartão de texto
+    save(&mut s, &dir, "14-confirmacao-criar-a-nota.png");
+    s.harness.get_by_label("Criar").click();
+    s.settle();
+    s.settle();
+    ux_wait(&mut s, "Ideias.md");
+    save(&mut s, &dir, "15-nota-criada-no-modo-nota.png");
+    click_segment(&mut s, "Quadro");
+    ux_wait(&mut s, "Ideias.canvas");
+    save(&mut s, &dir, "16-quadro-agrupado-sob-a-nota.png");
+    // Cartão de texto selecionado: o botão Transformar em nota à vista.
     let c = rect_of(&s, "t").center();
+    move_to(&mut s, c);
+    for pressed in [true, false] {
+        s.harness.event(egui::Event::PointerButton {
+            pos: c,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        s.harness.step();
+    }
+    s.settle();
+    save(&mut s, &dir, "17-botao-transformar-em-nota.png");
+    // Menu do cartão de texto (o botão se esconde enquanto o menu está aberto).
     move_to(&mut s, c);
     for pressed in [true, false] {
         s.harness.event(egui::Event::PointerButton {
@@ -378,12 +402,12 @@ fn ux_fluxo() {
         s.harness.step();
     }
     s.settle();
-    save(&mut s, &dir, "15-menu-do-cartao-texto.png");
+    save(&mut s, &dir, "18-menu-do-cartao-texto.png");
     s.harness.get_by_label("Transformar em nota").click();
     s.settle();
     s.settle();
-    save(&mut s, &dir, "16-transformado-em-nota.png");
+    save(&mut s, &dir, "19-transformado-em-nota.png");
     // Lista do quadro Ideias, com o botão de exportar
     click_segment(&mut s, "Lista");
-    save(&mut s, &dir, "17-lista-ideias.png");
+    save(&mut s, &dir, "20-lista-ideias.png");
 }
