@@ -276,16 +276,48 @@ fn renomear_ou_mover_a_nota_pelo_app_leva_o_historico() {
     session.type_text("terceira linha\n");
     session.key(CTRL, egui::Key::S);
     esperar_versoes(&mut session, "Pasta/Nova.md", 3);
-    assert_eq!(textos(&session, "Pasta/Nova.md").len(), 3);
+    assert_eq!(
+        textos(&session, "Pasta/Nova.md").len(),
+        3,
+        "{:?} {:?}",
+        versoes(&session, "Pasta/Nova.md")
+            .iter()
+            .map(|v| v.origem)
+            .collect::<Vec<_>>(),
+        textos(&session, "Pasta/Nova.md")
+    );
     // Renomear a pasta leva as notas dela.
-    session
-        .app_mut()
-        .ask_file(Dialog::RenameNote, PathBuf::from("Pasta"));
+    // O watcher e o índice ainda leem a nota recém-renomeada; o Windows recusa renomear a pasta
+    // enquanto um deles a tem aberta ("Acesso negado"), sem mudar nada. Espera o cofre assentar
+    // e repete só essa recusa; qualquer outro erro derruba o teste.
+    session.wait_for(|app| {
+        app.vault.as_ref().is_some_and(|vault| {
+            vault
+                .folders
+                .iter()
+                .any(|pasta| pasta == Path::new("Pasta"))
+                && vault.note(Path::new("Pasta/Nova.md")).is_some()
+        })
+    });
+    // Confirma o diálogo direto: o que se testa é o histórico, não a tecla Enter.
+    for tentativa in 0.. {
+        let app = session.app_mut();
+        app.ask_file(Dialog::RenameNote, PathBuf::from("Pasta"));
+        app.dialog_input = "Arquivo".into();
+        if app.submit_dialog(Dialog::RenameNote) {
+            app.dialog = None;
+            break;
+        }
+        let erro = app.error.clone().unwrap_or_default();
+        assert!(
+            erro.contains("Acesso negado") && tentativa < 200,
+            "renomear a pasta falhou: {erro}"
+        );
+        app.dialog = None;
+        session.harness.step();
+        std::thread::sleep(Duration::from_millis(25));
+    }
     session.settle();
-    session.key(CTRL, egui::Key::A);
-    session.type_text("Arquivo");
-    session.key(egui::Modifiers::NONE, egui::Key::Enter);
-    session.wait_for(|app| app.dialog.is_none());
     esperar_versoes(&mut session, "Arquivo/Nova.md", 3);
     assert!(versoes(&session, "Pasta/Nova.md").is_empty());
 }
