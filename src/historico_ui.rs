@@ -229,9 +229,15 @@ impl EspacoDoHistorico {
         }
         match self.numeros {
             Some(n) => format!(
-                "{} versões de {} notas · {} em disco",
+                "{} {} de {} {} · {} em disco",
                 milhar(n.versoes),
+                if n.versoes == 1 {
+                    "versão"
+                } else {
+                    "versões"
+                },
                 milhar(n.notas),
+                if n.notas == 1 { "nota" } else { "notas" },
                 tamanho_legivel(n.tamanho_em_disco)
             ),
             None => "Calculando…".into(),
@@ -319,6 +325,17 @@ mod testes_do_espaco {
         assert_eq!(milhar(999), "999");
         assert_eq!(milhar(1234), "1.234");
         assert_eq!(milhar(1_234_567), "1.234.567");
+        let um = EspacoDoHistorico {
+            numeros: Some(rustidian::historico_fundo::Estatisticas {
+                notas: 1,
+                versoes: 1,
+                tamanho_em_disco: 2048,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(um.rotulo(true), "1 versão de 1 nota · 2 KB em disco");
+        assert_eq!(um.rotulo(false), "Histórico desligado");
         assert_eq!(tamanho_legivel(512), "512 B");
         assert_eq!(tamanho_legivel(380 * 1024), "380 KB");
         assert_eq!(tamanho_legivel(1_258_291), "1,2 MB");
