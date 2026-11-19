@@ -51,6 +51,75 @@ fn indice_na_barra(versoes: &[Linha], escolhida: Option<u64>) -> usize {
         .map_or(ultima, |lugar| ultima - lugar)
 }
 
+/// O texto de uma linha da lista, sempre em duas linhas (a altura é a mesma para `show_rows`).
+/// Sem nome: a hora, e embaixo "origem · mudança". Com nome: o nome em destaque, e embaixo
+/// "hora · origem · mudança".
+fn texto_da_linha(
+    ui: &egui::Ui,
+    agora: chrono::DateTime<chrono::Local>,
+    linha: &Linha,
+) -> egui::WidgetText {
+    let info = &linha.info;
+    let relativo = rotulo_relativo(agora, info.quando);
+    let detalhe = format!(
+        "{} · {}",
+        rotulo_origem(info.origem),
+        rotulo_mudanca(linha.delta)
+    );
+    let Some(nome) = &info.nome else {
+        return RichText::new(format!("{relativo}\n{detalhe}"))
+            .size(13.0)
+            .into();
+    };
+    let fonte = FontId::proportional(13.0);
+    let largura = (ui.available_width() - 2.0 * ui.spacing().button_padding.x - 2.0).max(40.0);
+    // O nome ocupa uma linha só: corta com reticências até caber, para a segunda não sumir.
+    let mut letras: Vec<char> = nome.chars().collect();
+    let mut cortado = false;
+    let nome = loop {
+        let candidato: String =
+            letras.iter().collect::<String>() + if cortado { "…" } else { "" };
+        let cabe = ui.ctx().fonts_mut(|fontes| {
+            fontes
+                .layout_no_wrap(candidato.clone(), fonte.clone(), egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+                <= largura
+        });
+        if cabe || letras.len() <= 1 {
+            break candidato;
+        }
+        letras.pop();
+        cortado = true;
+    };
+    let mut job = LayoutJob::default();
+    job.wrap = egui::text::TextWrapping {
+        max_width: largura,
+        max_rows: 2,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    job.append(
+        &format!("{nome}\n"),
+        0.0,
+        TextFormat {
+            font_id: fonte.clone(),
+            color: theme::accent(ui),
+            ..Default::default()
+        },
+    );
+    job.append(
+        &format!("{relativo} · {detalhe}"),
+        0.0,
+        TextFormat {
+            font_id: fonte,
+            color: egui::Color32::PLACEHOLDER,
+            ..Default::default()
+        },
+    );
+    ui.ctx().fonts_mut(|fontes| fontes.layout_job(job)).into()
+}
+
 /// Da mais nova para a mais antiga, com a mudança de tamanho de cada uma.
 fn linhas(ascendente: Vec<VersaoInfo>) -> Vec<Linha> {
     let mut anterior = 0i64;
@@ -161,6 +230,15 @@ pub struct Manager {
     pick_when_ready: bool,
     /// A barra andou enquanto uma leitura rodava: o que chegar é de uma posição velha.
     recarregar_depois: bool,
+    /// Só as versões com nome na lista da esquerda (a barra continua sobre todas).
+    only_named: bool,
+    naming_open: bool,
+    name_input: String,
+    name_focus: bool,
+    /// A nota e a versão que o diálogo está nomeando; o segundo valor diz se tinha nome.
+    name_target: Option<(PathBuf, u64, bool)>,
+    /// A resposta do pedido de nome; o booleano diz se era para tirar o nome.
+    naming: Option<(Receiver<Result<(), String>>, bool)>,
     /// A barra mexeu na escolha: a lista da esquerda rola até a linha escolhida.
     rolar_lista: bool,
 }
@@ -173,7 +251,11 @@ impl Manager {
         }
     }
     pub fn active(&self) -> bool {
-        self.open || self.confirm_clear || self.clearing.is_some()
+        self.open
+            || self.confirm_clear
+            || self.clearing.is_some()
+            || self.naming_open
+            || self.naming.is_some()
     }
     pub fn open(
         &mut self,
@@ -239,6 +321,21 @@ impl Manager {
             ctx.request_repaint();
         } else {
             self.reload_com(ctx, false, false);
+        }
+    }
+
+    fn pedir_nome(&mut self, historico: &Historico, nome: Option<String>) {
+        let Some((path, id, tinha_nome)) = self.name_target.take() else {
+            return;
+        };
+        self.naming_open = false;
+        let tirar = nome.as_ref().is_none_or(|nome| nome.trim().is_empty());
+        if tirar && !tinha_nome {
+            return;
+        }
+        match historico.nomear(&path, VersaoId(id), nome) {
+            Ok(receiver) => self.naming = Some((receiver, tirar)),
+            Err(error) => self.error = Some(error),
         }
     }
 
@@ -410,6 +507,33 @@ impl Manager {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+        if let Some((receiver, tirou)) = &self.naming {
+            let tirou = *tirou;
+            let resposta = match receiver.try_recv() {
+                Ok(resposta) => Some(resposta),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("Não foi possível nomear a versão.".to_string()))
+                }
+                Err(mpsc::TryRecvError::Empty) => None,
+            };
+            if let Some(resposta) = resposta {
+                self.naming = None;
+                match resposta {
+                    Ok(()) => {
+                        self.notice = Some(if tirou {
+                            "Nome tirado".into()
+                        } else {
+                            "Versão nomeada".into()
+                        });
+                        // A lista volta com o nome e a versão escolhida continua escolhida.
+                        if self.open {
+                            self.reload(ctx, true);
+                        }
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
+        }
         // Like the reference, keep displayed versions fixed while browsing.
         // File selection/reopening reads new metadata; version clicks read text.
         if self.refresh_due
@@ -421,7 +545,7 @@ impl Manager {
             self.refresh_due = false;
             self.reload(ctx, true);
         }
-        if self.loading.is_some() || self.clearing.is_some() {
+        if self.loading.is_some() || self.clearing.is_some() || self.naming.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
@@ -438,6 +562,8 @@ impl Manager {
         let mut select_version = None;
         let mut compare_changed = false;
         let mut timeline_to = None;
+        let mut open_naming = false;
+        let touch = egui::vec2(0.0, theme::space::CONTROL);
         let mut close = false;
         if self.open {
             let dialog =
@@ -449,8 +575,8 @@ impl Manager {
                 // Keep controls stationary while async content and clipboard
                 // notices arrive, including the first version's sizing pass.
                 ui.set_height(height + 56.0);
-                let busy = self.loading.is_some() || self.clearing.is_some();
-                let touch = egui::vec2(0.0, theme::space::CONTROL);
+                let busy =
+                    self.loading.is_some() || self.clearing.is_some() || self.naming.is_some();
                 let body_size = egui::vec2(ui.available_width(), height);
                 let body_layout = Layout::left_to_right(Align::Min);
                 ui.allocate_ui_with_layout(body_size, body_layout, |ui| {
@@ -480,17 +606,42 @@ impl Manager {
                                 self.selected_file = 0;
                             }
                             ui.add_space(crate::theme::space::S);
+                            let com_nome =
+                                self.versions.iter().any(|linha| linha.info.nome.is_some());
+                            if !com_nome {
+                                self.only_named = false;
+                            }
+                            let mostrando_versoes =
+                                !self.choosing_file && !self.versions.is_empty();
+                            // O filtro não mexe na barra: ela segue sobre todas as versões.
+                            let mut lista_h = height - 50.0;
+                            if mostrando_versoes && com_nome {
+                                let filtro = ui.add(
+                                    egui::Button::selectable(self.only_named, "Só com nome")
+                                        .min_size(egui::vec2(ui.available_width(), touch.y)),
+                                );
+                                ui_probe::record(ctx, "recovery-only-named", filtro.rect);
+                                if filtro.clicked() {
+                                    self.only_named = !self.only_named;
+                                }
+                                lista_h -= touch.y + ui.spacing().item_spacing.y;
+                            }
+                            let mostrar: Vec<usize> = (0..self.versions.len())
+                                .filter(|&i| {
+                                    !self.only_named || self.versions[i].info.nome.is_some()
+                                })
+                                .collect();
                             let scroll = ScrollArea::vertical()
                                 .id_salt(("recovery-versions", &self.path, self.choosing_file))
                                 .auto_shrink([false, false])
-                                .max_height(height - 50.0)
-                                .min_scrolled_height(height - 50.0);
-                            if !self.choosing_file && !self.versions.is_empty() {
+                                .max_height(lista_h)
+                                .min_scrolled_height(lista_h);
+                            if mostrando_versoes {
                                 let now = chrono::Local::now();
-                                scroll.show_rows(ui, LINHA, self.versions.len(), |ui, rows| {
+                                scroll.show_rows(ui, LINHA, mostrar.len(), |ui, rows| {
                                     if std::mem::take(&mut self.rolar_lista)
-                                        && let Some(row) = self.versions.iter().position(|linha| {
-                                            Some(linha.info.id.0) == self.selected
+                                        && let Some(row) = mostrar.iter().position(|&i| {
+                                            Some(self.versions[i].info.id.0) == self.selected
                                         })
                                     {
                                         // As linhas fora de `rows` não existem na tela: o retângulo
@@ -506,20 +657,14 @@ impl Manager {
                                             (!rows.contains(&row)).then_some(Align::Center);
                                         ui.scroll_to_rect(alvo, alinhar);
                                     }
-                                    for linha in &self.versions[rows] {
+                                    for &i in &mostrar[rows] {
+                                        let linha = &self.versions[i];
                                         let version = &linha.info;
                                         let button = ui.add_enabled(
                                             !busy,
                                             egui::Button::selectable(
                                                 self.selected == Some(version.id.0),
-                                                RichText::new(format!(
-                                                    "{}
-{} · {}",
-                                                    rotulo_relativo(now, version.quando),
-                                                    rotulo_origem(version.origem),
-                                                    rotulo_mudanca(linha.delta)
-                                                ))
-                                                .size(13.0),
+                                                texto_da_linha(ui, now, linha),
                                             )
                                             .min_size(egui::vec2(ui.available_width(), LINHA))
                                             .wrap(),
@@ -617,7 +762,7 @@ impl Manager {
                                 .map(|name| name.to_string_lossy())
                                 .unwrap_or_default();
                             ui.add_sized(
-                                egui::vec2((ui.available_width() - 250.0).max(20.0), 24.0),
+                                egui::vec2((ui.available_width() - 360.0).max(20.0), 24.0),
                                 egui::Label::new(RichText::new(name.as_ref()).strong()).truncate(),
                             )
                             .on_hover_text(name.as_ref());
@@ -667,6 +812,21 @@ impl Manager {
                                     self.notice =
                                         Some("Copiado para a área de transferência".into());
                                 }
+                                let nome_atual = self
+                                    .selected
+                                    .and_then(|id| self.versions.iter().find(|l| l.info.id.0 == id))
+                                    .map(|linha| linha.info.nome.is_some());
+                                let button = ui.add_enabled(
+                                    !busy && nome_atual.is_some(),
+                                    egui::Button::new(if nome_atual == Some(true) {
+                                        "Mudar nome"
+                                    } else {
+                                        "Dar nome"
+                                    })
+                                    .min_size(touch),
+                                );
+                                ui_probe::record(ctx, "recovery-name", button.rect);
+                                open_naming = button.clicked();
                             });
                         });
                         // Alvos de 32 px ou mais: o dedo no Android acerta.
@@ -879,7 +1039,7 @@ impl Manager {
                     });
             });
             ui_probe::record(ctx, "recovery-dialog", modal.response.rect);
-            if (close || modal.should_close()) && !self.confirm_clear {
+            if (close || modal.should_close()) && !self.confirm_clear && !self.naming_open {
                 self.open = false;
                 self.loading = None;
                 self.refresh_due = false;
@@ -912,6 +1072,72 @@ impl Manager {
                     Ok(receiver) => self.clearing = Some(receiver),
                     Err(error) => self.error = Some(error),
                 }
+            }
+        }
+        if open_naming && let (Some(path), Some(id)) = (self.path.clone(), self.selected) {
+            let atual = self
+                .versions
+                .iter()
+                .find(|linha| linha.info.id.0 == id)
+                .and_then(|linha| linha.info.nome.clone());
+            self.name_target = Some((path, id, atual.is_some()));
+            self.name_input = atual.unwrap_or_default();
+            self.name_focus = true;
+            self.naming_open = true;
+        }
+        if self.naming_open {
+            let tinha_nome = self
+                .name_target
+                .as_ref()
+                .is_some_and(|(_, _, tinha)| *tinha);
+            let (mut save, mut remove, mut cancel) = (false, false, false);
+            let dialog =
+                egui::Modal::new(egui::Id::unique("name-version")).frame(theme::dialog_frame(ctx));
+            let modal = dialog.show(ctx, |ui| {
+                theme::dialog_style(ui);
+                ui.set_width(390.0);
+                cancel |= theme::dialog_header(ui, "Nome da versão", "Fechar diálogo").clicked();
+                let field_id = ui.make_persistent_id("recovery-name-input");
+                let field = ui.add(
+                    TextEdit::singleline(&mut self.name_input)
+                        .id(field_id)
+                        .char_limit(80)
+                        .hint_text("Ex.: Antes de reescrever")
+                        .desired_width(ui.available_width()),
+                );
+                if self.name_focus {
+                    field.request_focus();
+                    self.name_focus = ui.is_sizing_pass();
+                }
+                ui_probe::record(ctx, "recovery-name-field", field.rect);
+                // Enter só vale quando o campo tinha o foco: nunca antes de ele existir.
+                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    save = true;
+                }
+                ui.label(
+                    RichText::new("Versões com nome nunca saem do histórico.")
+                        .small()
+                        .weak(),
+                );
+                if tinha_nome {
+                    let button = ui.add(egui::Button::new("Tirar o nome").min_size(touch));
+                    ui_probe::record(ctx, "recovery-name-remove", button.rect);
+                    remove = button.clicked();
+                }
+                let (confirm, dismiss) = theme::dialog_actions(ui, "Salvar", false);
+                ui_probe::record(ctx, "recovery-name-save", confirm.rect);
+                ui_probe::record(ctx, "recovery-name-cancel", dismiss.rect);
+                save |= confirm.clicked();
+                cancel |= dismiss.clicked();
+            });
+            if save {
+                let nome = self.name_input.clone();
+                self.pedir_nome(historico, Some(nome));
+            } else if remove {
+                self.pedir_nome(historico, None);
+            } else if cancel || modal.should_close() {
+                self.naming_open = false;
+                self.name_target = None;
             }
         }
         if let Some(path) = select_file {
