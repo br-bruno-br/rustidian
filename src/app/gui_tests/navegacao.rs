@@ -194,13 +194,13 @@ fn comandos_de_aba_ciclam_criam_e_fecham_sem_criar_arquivos() {
     assert_eq!(active_file(&session), "Home.md");
     session.command("Go to previous tab");
     assert_eq!(active_file(&session), "Alpha.md");
-    let before = std::fs::read_dir(session.path("")).unwrap().count();
+    let before = root_entries(&session);
     session.command("New tab");
     assert_eq!(session.app().tabs.len(), 4);
     assert!(session.app().tabs[session.app().active].document.is_blank());
     session.command("Close current tab");
     assert_eq!(active_file(&session), "Alpha.md");
-    assert_eq!(std::fs::read_dir(session.path("")).unwrap().count(), before);
+    assert_eq!(root_entries(&session), before);
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn uma_aba_em_branco_pode_ser_fixada_e_fechada_sem_criar_nota() {
     session.app_mut().tabs.clear();
     session.app_mut().active = 0;
     session.settle();
-    let before = std::fs::read_dir(session.path("")).unwrap().count();
+    let before = root_entries(&session);
     session.command("New tab");
     session.command("Toggle pin");
     assert_eq!(pins(&session), [true]);
@@ -237,7 +237,7 @@ fn uma_aba_em_branco_pode_ser_fixada_e_fechada_sem_criar_nota() {
     assert_eq!(pins(&session), [false]);
     session.key(CTRL, egui::Key::W);
     assert!(session.app().tabs.is_empty());
-    assert_eq!(std::fs::read_dir(session.path("")).unwrap().count(), before);
+    assert_eq!(root_entries(&session), before);
 }
 
 #[test]
@@ -736,10 +736,27 @@ fn quick_query(session: &mut Session, query: &str) {
     session.type_text(query);
 }
 
+/// Quantas entradas há na raiz do cofre, sem `.rustidian`: a thread do histórico cria essa pasta
+/// quando quiser (na primeira nota gravada), e isso não é nota nem pasta do usuário.
+fn root_entries(session: &Session) -> usize {
+    std::fs::read_dir(session.path(""))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name() != ".rustidian")
+        .count()
+}
+
 fn file_set(session: &Session) -> std::collections::BTreeSet<String> {
     fn walk(base: &Path, folder: &Path, out: &mut std::collections::BTreeSet<String>) {
         for entry in std::fs::read_dir(folder).unwrap().flatten() {
             let path = entry.path();
+            // Pasta de estado do histórico (criada a qualquer hora pela thread de fundo).
+            if path
+                .strip_prefix(base)
+                .is_ok_and(|p| p.starts_with(".rustidian"))
+            {
+                continue;
+            }
             out.insert(
                 path.strip_prefix(base)
                     .unwrap()
