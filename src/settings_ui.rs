@@ -626,7 +626,7 @@ impl NotesApp {
                                 changed |= toggle(
                                     ui,
                                     "Manter o histórico de recuperação de arquivos",
-                                    "Desligado: nada é gravado, e o histórico já salvo é apagado.",
+                                    "Desligado: nada é gravado, e o histórico já salvo é apagado. O histórico fica em .rustidian/ no cofre e não é sincronizado.",
                                     "settings-recovery-enabled",
                                     &mut self.recovery_config.enabled,
                                 );
@@ -634,7 +634,7 @@ impl NotesApp {
                                 changed |= row(
                                     ui,
                                     "Intervalo entre versões",
-                                    "Minutos entre as versões de recuperação.",
+                                    "Sem efeito: o histórico agrupa sozinho, no fim da frase, ao pular de parágrafo, depois de 2 s parado, a cada ~300 caracteres e ao salvar.",
                                     |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
@@ -653,7 +653,7 @@ impl NotesApp {
                                 );
                                 ui.separator();
                                 changed |=
-                                    row(ui, "Duração do histórico", "Dias para guardar as versões.", |ui| {
+                                    row(ui, "Duração do histórico", "Sem efeito: tudo das últimas 24 h, 1 versão por hora na semana, 1 por dia no mês e 1 por semana depois.", |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
                                                 &mut self.recovery_config.keep_days,
