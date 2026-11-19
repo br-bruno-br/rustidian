@@ -2,6 +2,8 @@
 //! Ver `docs/bruno/HISTORICO-NOTAS.md` e o `README.md` deste crate.
 #![forbid(unsafe_code)]
 
+pub mod codec;
 pub mod erro;
 
+pub use codec::{Codec, ZstdCodec};
 pub use erro::{Erro, Result};
