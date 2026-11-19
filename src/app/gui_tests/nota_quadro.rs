@@ -601,20 +601,127 @@ fn o_seletor_leva_da_nota_ao_quadro_a_lista_e_de_volta_criando_o_quadro_se_falta
     assert_eq!(mode(&session), Some(BoardMode::Board));
 }
 
-#[test]
-fn o_seletor_num_quadro_sem_nota_par_avisa_em_vez_de_criar() {
+fn open_ideias() -> Session {
     let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().show_left = false;
     session.app_mut().open_note(Path::new("Ideias.canvas"));
     session.settle();
+    session
+}
+
+#[test]
+fn nota_num_quadro_sem_nota_par_pergunta_dentro_do_app_e_cancelar_nao_cria_nada() {
+    let mut session = open_ideias();
     click_segment(&mut session, "Nota");
+    // Nada mudou até responder; a pergunta é do app (Modal), com Criar e Cancelar de toque.
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert!(!session.path("Ideias.md").exists());
+    assert!(session.has_label("Criar a nota Ideias?"));
+    for label in ["Criar", "Cancelar"] {
+        let rect = session.harness.get_by_label(label).rect();
+        assert!(rect.height() >= 32.0, "{label}: {rect:?}");
+    }
+
+    session.harness.get_by_label("Cancelar").click();
+    session.settle();
+    session.settle();
+    assert!(!session.has_label("Criar a nota Ideias?"));
+    assert!(!session.path("Ideias.md").exists());
     assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
     assert_eq!(mode(&session), Some(BoardMode::Board));
+
+    // Esc também cancela.
+    click_segment(&mut session, "Nota");
+    assert!(session.has_label("Criar a nota Ideias?"));
+    session.key(NONE, egui::Key::Escape);
+    assert!(!session.has_label("Criar a nota Ideias?"));
     assert!(!session.path("Ideias.md").exists());
+}
+
+#[test]
+fn criar_a_nota_par_gera_x_md_com_titulo_abre_no_modo_nota_e_o_seletor_passa_a_funcionar() {
+    let mut session = open_ideias();
+    let board_before = read(&session, "Ideias.canvas");
+    click_segment(&mut session, "Nota");
+    session.harness.get_by_label("Criar").click();
+    session.settle();
+    session.settle();
+    wait_active(&mut session, "Ideias.md");
+
+    assert_eq!(
+        read(&session, "Ideias.md"),
+        "# Ideias
+
+"
+    );
+    assert_eq!(
+        read(&session, "Ideias.canvas"),
+        board_before,
+        "o quadro não muda"
+    );
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.app().tabs.len(), 1);
+    // A mensagem nasceu neste modo e fica.
     assert!(
-        session.has_label("ainda não tem uma nota com o mesmo nome"),
+        session.has_label("Nota Ideias.md criada."),
         "{}",
         session.app().status
     );
+
+    // Agora o par existe: Quadro e Nota vão e voltam sem pergunta.
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Ideias.canvas");
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Ideias.md");
+    assert!(!session.has_label("Criar a nota"));
+}
+
+#[test]
+fn o_atalho_e_a_paleta_tambem_perguntam_antes_de_criar_a_nota_par() {
+    let mut session = open_ideias();
+    to_note(&mut session);
+    assert!(session.has_label("Criar a nota Ideias?"));
+    assert!(!session.path("Ideias.md").exists());
+    // Enter confirma.
+    session.key(NONE, egui::Key::Enter);
+    wait_active(&mut session, "Ideias.md");
+    assert!(session.path("Ideias.md").exists());
+}
+
+#[test]
+fn o_cartao_de_texto_selecionado_tem_o_botao_transformar_em_nota_a_vista() {
+    let mut session = open_ideias();
+    // Sem seleção, sem botão.
+    assert!(!session.has_label("Transformar em nota"));
+    let card = rect_of(&session, "t");
+    super::canvas::click(&mut session, card.center());
+    assert_eq!(state(&session).selected(), ["t"]);
+    let button = session.harness.get_by_label("Transformar em nota").rect();
+    assert!(button.height() >= 28.0, "{button:?}");
+    // Perto do cartão: logo abaixo (ou acima, se não coubesse).
+    assert!(
+        (button.min.y - card.max.y).abs() < 60.0 || (card.min.y - button.max.y).abs() < 60.0,
+        "{button:?} longe do cartão {card:?}"
+    );
+
+    // Selecionar o outro cartão de texto leva o botão para ele.
+    let other = rect_of(&session, "o").center();
+    super::canvas::click(&mut session, other);
+    assert_eq!(state(&session).selected(), ["o"]);
+    let moved = session.harness.get_by_label("Transformar em nota").rect();
+    assert!(moved.min.x > button.min.x, "{moved:?} não seguiu o cartão");
+
+    // O botão faz o mesmo que o item do menu.
+    session.harness.get_by_label("Transformar em nota").click();
+    session.settle();
+    session.settle();
+    assert_eq!(read(&session, "outro.md"), "outro");
+    let node = parsed(&session);
+    let node = node.node("o").unwrap();
+    assert_eq!(node.node_kind(), NodeKind::File);
+    assert_eq!(node.file.as_deref(), Some("outro.md"));
+    // Virou cartão de nota: o botão some.
+    assert!(!session.has_label("Transformar em nota"));
 }
 
 #[test]
@@ -671,4 +778,215 @@ fn na_lista_o_titulo_abre_a_nota_e_o_exportar_e_um_botao_no_topo() {
     session.settle();
     wait_active(&mut session, "Second.md");
     assert_eq!(session.active_text(), SECOND);
+}
+
+/// Rótulos que mostram o texto dado (dentro da faixa vertical `y_range`).
+fn labels_in<'a>(
+    session: &'a Session,
+    text: &'a str,
+    y_range: std::ops::Range<f32>,
+) -> Vec<egui::Rect> {
+    session
+        .harness
+        .query_all_by_label_contains(text)
+        .map(|node| node.rect())
+        .filter(|rect| y_range.contains(&rect.min.y))
+        .collect()
+}
+
+#[test]
+fn o_quadro_aparece_sem_ponto_canvas_na_aba_e_no_cabecalho() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    session.settle();
+    session.settle();
+    // O nome na aba, no título da janela e no cabeçalho é "Home"; o arquivo segue Home.canvas.
+    assert_eq!(session.app().tabs[0].title(), "Home");
+    assert_eq!(
+        session.app().window_title,
+        format!("Home — {} — Rustidian", vault_name(&session))
+    );
+    assert!(session.path("Home.canvas").exists());
+    // Faixa das abas e do cabeçalho (acima de 130 px): nenhum texto com `.canvas`.
+    assert!(
+        labels_in(&session, ".canvas", 0.0..130.0).is_empty(),
+        "a aba ou o cabeçalho ainda mostram .canvas"
+    );
+    // O rótulo acessível da aba é o nome sem a extensão.
+    assert!(
+        !labels_in(&session, "Home", 30.0..130.0).is_empty(),
+        "a aba não aparece com o nome Home"
+    );
+}
+
+fn vault_name(session: &Session) -> String {
+    session
+        .app()
+        .vault
+        .as_ref()
+        .map(rustidian::vault::Vault::name)
+        .unwrap_or_default()
+}
+
+/// As linhas do explorador (coluna da esquerda), de cima para baixo: texto e posição.
+fn explorer_rows(session: &Session) -> Vec<(String, egui::Rect)> {
+    let mut rows: Vec<(String, egui::Rect)> = session
+        .harness
+        .query_all_by_label_contains("")
+        .filter_map(|node| {
+            let rect = node.rect();
+            let label = node.accesskit_node().label()?;
+            (rect.min.x > 50.0
+                && rect.max.x < 340.0
+                && rect.width() > 150.0
+                && rect.min.y > 140.0
+                && (28.0..40.0).contains(&rect.height()))
+            .then(|| (label.to_string(), rect))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y));
+    rows.dedup_by(|a, b| a.1.min.y == b.1.min.y);
+    rows
+}
+
+#[test]
+fn na_lista_de_arquivos_o_quadro_par_vira_um_item_recuado_sob_a_nota() {
+    let mut session = Session::open_with(&[
+        ("Home.canvas", br#"{"nodes":[],"edges":[]}"#),
+        ("Ideias.canvas", IDEIAS.as_bytes()),
+    ]);
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let names: Vec<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
+    // Home.canvas some como linha solta e aparece como "Quadro" logo abaixo de "Home".
+    assert!(!names.contains(&"Home.canvas"), "{names:?}");
+    let home = names.iter().position(|name| *name == "Home").expect("Home");
+    assert_eq!(names[home + 1], "Quadro", "{names:?}");
+    assert!(
+        rows[home + 1].1.height() >= 28.0,
+        "alvo de toque pequeno: {:?}",
+        rows[home + 1].1
+    );
+    // Um quadro sem nota par continua como hoje: linha solta com o nome do arquivo.
+    assert!(names.contains(&"Ideias.canvas"), "{names:?}");
+    assert_eq!(names.iter().filter(|name| **name == "Quadro").count(), 1);
+}
+
+#[test]
+fn clicar_no_quadro_recuado_abre_o_quadro_e_o_arquivo_segue_no_disco() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let (_, rect) = rows
+        .iter()
+        .find(|(name, _)| name == "Quadro")
+        .expect("item do quadro");
+    move_to(&mut session, rect.center());
+    for pressed in [true, false] {
+        session.harness.event(egui::Event::PointerButton {
+            pos: rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: NONE,
+        });
+        session.harness.step();
+    }
+    session.settle();
+    wait_active(&mut session, "Home.canvas");
+    assert!(session.path("Home.canvas").exists());
+}
+
+#[test]
+fn o_quadro_recuado_acompanha_a_nota_na_ordem_inversa() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.app_mut().sort_descending = true;
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let names: Vec<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
+    let home = names.iter().position(|name| *name == "Home").expect("Home");
+    assert_eq!(names[home + 1], "Quadro", "{names:?}");
+    // Z a A: Second vem antes de Home.
+    assert!(
+        names.iter().position(|name| *name == "Second") < Some(home),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn o_menu_do_quadro_recuado_renomeia_o_arquivo_do_quadro() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.settle();
+    session.settle();
+    let rect = explorer_rows(&session)
+        .into_iter()
+        .find(|(name, _)| name == "Quadro")
+        .expect("item do quadro")
+        .1;
+    secondary_click(&mut session, rect.center());
+    session.harness.get_by_label("Renomear…").click();
+    session.settle();
+    session.settle();
+    assert!(session.app().dialog == Some(Dialog::RenameNote));
+    assert_eq!(
+        session.app().dialog_path.as_deref(),
+        Some(Path::new("Home.canvas"))
+    );
+}
+
+const HINT: &str = "Esta nota ainda não tem links.";
+
+#[test]
+fn o_quadro_de_uma_nota_sem_links_mostra_a_dica_e_ela_some_com_mais_cartoes() {
+    let mut session = Session::open_with(&[(
+        "Solta.md",
+        b"# Solta
+
+Uma nota sem nenhum link.
+",
+    )]);
+    session.app_mut().show_left = false;
+    session.open_note("Solta");
+    toggle(&mut session);
+    wait_active(&mut session, "Solta.canvas");
+    session.settle();
+    session.settle();
+    assert_eq!(parsed(&session).nodes.len(), 1, "só o cartão da nota");
+    assert!(session.has_label(HINT));
+    assert!(session.has_label("Escreva [[outra nota]] na nota"));
+    // A dica é só desenho: não suja o quadro.
+    assert!(!session.app().tabs[0].document.dirty());
+
+    // Um segundo cartão (aqui, um de texto) e a dica some.
+    let area = state(&session).area_for_tests();
+    super::canvas::double_click(&mut session, area.center() + egui::vec2(400.0, 150.0));
+    session.type_text("outra ideia");
+    session.key(NONE, egui::Key::Escape);
+    session.settle();
+    assert!(
+        parsed(&session).nodes.len() >= 2,
+        "{}",
+        session.active_text()
+    );
+    assert!(!session.has_label(HINT));
+}
+
+#[test]
+fn quadro_de_nota_com_links_ou_sem_nota_par_nao_mostra_a_dica() {
+    // Home liga Second e Alpha: três cartões.
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    session.settle();
+    assert!(!session.has_label(HINT));
+    // Quadro com um cartão que não é a nota do próprio quadro.
+    let mut other = Session::open_with(&[("Um.canvas", br#"{"nodes":[{"id":"x","type":"text","x":0,"y":0,"width":200,"height":80,"text":"oi"}],"edges":[]}"#)]);
+    other.app_mut().open_note(Path::new("Um.canvas"));
+    other.settle();
+    assert!(!other.has_label(HINT));
 }

@@ -281,7 +281,7 @@ fn paint_ghost(ui: &egui::Ui, dragged: &Dragged, pointer: egui::Pos2) {
     let visuals = ui.visuals();
     painter.add(visuals.popup_shadow.as_shape(rect, 7));
     painter.rect_filled(rect, 7, visuals.window_fill());
-    paint_row(ui, &painter, rect, &dragged.title, true, false);
+    paint_row(ui, &painter, rect, &dragged.title, true, false, 0.0);
     painter.rect_stroke(rect, 7, visuals.window_stroke(), egui::StrokeKind::Inside);
     crate::ui_probe::record(ui.ctx(), format!("drag:{}", dragged.path.display()), rect);
 }
@@ -404,11 +404,39 @@ pub struct Tree {
 }
 
 pub fn file_row(ui: &mut egui::Ui, path: &Path, title: &str, selected: bool) -> egui::Response {
+    indented_row(ui, path, title, selected, 0.0)
+}
+
+/// How far a board's row is pushed in under its note.
+const CHILD_INDENT: f32 = 18.0;
+
+/// True when `path` is the board `X.canvas` and `previous` is its note `X.md`: the explorer shows
+/// the board as an indented item right under the note instead of a loose row.
+fn is_paired_board(path: &Path, previous: Option<&Path>) -> bool {
+    rustidian::canvas::is_canvas(path)
+        && previous.is_some_and(|note| note == rustidian::board_note::note_of(path))
+}
+
+fn indented_row(
+    ui: &mut egui::Ui,
+    path: &Path,
+    title: &str,
+    selected: bool,
+    indent: f32,
+) -> egui::Response {
     let (_, outer) = ui.allocate_space(egui::vec2(ui.available_width(), 31.0));
     let mut rect = outer.shrink2(egui::vec2(0.0, 1.0));
     rect.max.x -= 6.0;
     let response = ui.interact(rect, ui.make_persistent_id(path), egui::Sense::click());
-    paint_row(ui, ui.painter(), rect, title, selected, response.hovered());
+    paint_row(
+        ui,
+        ui.painter(),
+        rect,
+        title,
+        selected,
+        response.hovered(),
+        indent,
+    );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), title));
     response
 }
@@ -421,6 +449,7 @@ fn paint_row(
     title: &str,
     selected: bool,
     hovered: bool,
+    indent: f32,
 ) {
     if selected || hovered {
         let fill = if hovered {
@@ -446,10 +475,13 @@ fn paint_row(
     let galley = text.into_galley(
         ui,
         Some(egui::TextWrapMode::Truncate),
-        (rect.width() - 18.0).max(1.0),
+        (rect.width() - 18.0 - indent).max(1.0),
         FontId::proportional(13.0),
     );
-    let position = egui::pos2(rect.left() + 9.0, rect.center().y - galley.size().y * 0.5);
+    let position = egui::pos2(
+        rect.left() + 9.0 + indent,
+        rect.center().y - galley.size().y * 0.5,
+    );
     painter.galley(position, galley, color);
     if selected {
         painter.line_segment(
@@ -491,7 +523,52 @@ impl Tree {
             }
             branch.files.push(path.clone());
         }
+        tree.pair_boards();
         tree
+    }
+
+    /// Puts each board `X.canvas` right after its note `X.md` (same folder), where the explorer
+    /// draws it indented under the note. A board without a note keeps its place.
+    fn pair_boards(&mut self) {
+        let files = std::mem::take(&mut self.files);
+        let (boards, mut rest): (Vec<PathBuf>, Vec<PathBuf>) =
+            files.iter().cloned().partition(|path| {
+                rustidian::canvas::is_canvas(path)
+                    && files.contains(&rustidian::board_note::note_of(path))
+            });
+        for board in boards {
+            let note = rustidian::board_note::note_of(&board);
+            if let Some(index) = rest.iter().position(|path| *path == note) {
+                rest.insert(index + 1, board);
+            }
+        }
+        self.files = rest;
+        for folder in self.folders.values_mut() {
+            folder.pair_boards();
+        }
+    }
+
+    /// The files in the order the explorer draws them. Reversed, a note still comes before its
+    /// board: the pairs flip, not the rows inside a pair.
+    fn ordered(&self, reverse: bool) -> Vec<&PathBuf> {
+        let mut groups: Vec<Vec<&PathBuf>> = Vec::new();
+        for path in &self.files {
+            let previous = groups
+                .last()
+                .and_then(|group| group.last())
+                .map(|p| p.as_path());
+            if is_paired_board(path, previous) {
+                if let Some(group) = groups.last_mut() {
+                    group.push(path);
+                }
+            } else {
+                groups.push(vec![path]);
+            }
+        }
+        if reverse {
+            groups.reverse();
+        }
+        groups.into_iter().flatten().collect()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -701,36 +778,24 @@ impl Tree {
                 header.header_response.rect,
             );
         }
-        if reverse {
-            selection::record(ui.ctx(), self.files.iter().rev().cloned());
-        } else {
-            selection::record(ui.ctx(), self.files.iter().cloned());
-        }
+        let files = self.ordered(reverse);
+        selection::record(ui.ctx(), files.iter().map(|path| (*path).clone()));
         let row_height = 31.0 + ui.spacing().item_spacing.y;
         let top = ui.cursor().top();
         let first = (((ui.clip_rect().top() - top) / row_height).floor().max(0.0) as usize)
-            .min(self.files.len())
+            .min(files.len())
             .saturating_sub(1);
         let last = ((((ui.clip_rect().bottom() - top) / row_height)
             .ceil()
             .max(0.0) as usize)
             .saturating_add(1))
-        .clamp(first, self.files.len());
+        .clamp(first, files.len());
         if let Some(paths) = visible_files.as_mut() {
-            if reverse {
-                paths.extend(self.files.iter().rev().cloned());
-            } else {
-                paths.extend(self.files.iter().cloned());
-            }
+            paths.extend(files.iter().map(|path| (*path).clone()));
         }
         if let Some(target) = pending_reveal(ui.ctx())
-            && let Some(index) = self.files.iter().position(|path| *path == target)
+            && let Some(slot) = files.iter().position(|path| **path == target)
         {
-            let slot = if reverse {
-                self.files.len() - 1 - index
-            } else {
-                index
-            };
             reveal_note_row(
                 ui,
                 &target,
@@ -742,17 +807,20 @@ impl Tree {
         }
         ui.add_space(first as f32 * row_height);
         for slot in first..last {
-            let index = if reverse {
-                self.files.len() - 1 - slot
+            let path = files[slot];
+            let paired = is_paired_board(path, slot.checked_sub(1).map(|i| files[i].as_path()));
+            // A board under its note is "Quadro", pushed in; the note above names it.
+            let title = if paired {
+                "Quadro".to_owned()
             } else {
-                slot
+                rustidian::vault::file_title(path)
             };
-            let path = &self.files[index];
-            let title = rustidian::vault::file_title(path);
             let selected = selection::contains(ui.ctx(), path);
-            let response = file_row(ui, path, &title, selected);
+            let indent = if paired { CHILD_INDENT } else { 0.0 };
+            let response = indented_row(ui, path, &title, selected, indent);
             let selection_click = selection::row(ui, &response, path);
-            start_drag(&response, path, &title);
+            let drag_title = rustidian::vault::file_title(path);
+            start_drag(&response, path, &drag_title);
             crate::ui_probe::record(ui.ctx(), format!("file:{}", path.display()), response.rect);
             let response = response.on_hover_text(path.display().to_string());
             response.context_menu(|ui| {
@@ -799,7 +867,7 @@ impl Tree {
                 open = Some(FileAction::Open(path.clone()));
             }
         }
-        ui.add_space((self.files.len() - last) as f32 * row_height);
+        ui.add_space((files.len() - last) as f32 * row_height);
         if root && let Some(action) = selection::finish(ui) {
             open = Some(action);
         }
