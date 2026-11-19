@@ -1378,3 +1378,35 @@ mod testes {
         assert_eq!(rotulo_origem(Origem::Sync), "sync");
     }
 }
+
+/// Acessores só para os testes de GUI (`src/app/gui_tests/historico.rs`): o estado da tela sem
+/// passar pelos campos privados.
+#[cfg(test)]
+impl Manager {
+    pub(crate) fn escolhida(&self) -> Option<u64> {
+        self.selected
+    }
+
+    pub(crate) fn texto_mostrado(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+
+    /// Há leitura, apagamento ou pedido de nome em andamento.
+    pub(crate) fn ocupado(&self) -> bool {
+        self.loading.is_some()
+            || self.clearing.is_some()
+            || self.naming.is_some()
+            || self.erasing.is_some()
+    }
+
+    pub(crate) fn releitura_pendente(&self) -> bool {
+        self.recarregar_depois
+    }
+
+    /// Finge uma leitura que não termina enquanto o valor devolvido estiver vivo.
+    pub(crate) fn simular_leitura(&mut self) -> Box<dyn std::any::Any> {
+        let (sender, receiver) = mpsc::channel::<Result<Loaded, String>>();
+        self.loading = Some(receiver);
+        Box::new(sender)
+    }
+}

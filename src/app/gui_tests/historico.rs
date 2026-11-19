@@ -2,6 +2,7 @@
 //! de versões. O armazenamento tem testes próprios em `src/historico_fundo.rs` e no crate
 //! `nota-historico`; aqui vale o que o usuário vê no app.
 use super::*;
+use egui_kittest::kittest::NodeT;
 use rustidian::historico_fundo::{Origem, VersaoInfo};
 use std::time::SystemTime;
 
@@ -411,6 +412,8 @@ fn a_tela_de_versoes_tem_alvos_de_32_px_e_mostra_origem_e_tamanho() {
         .harness
         .query_all_by_label_contains("você")
         .map(|nodo| nodo.rect())
+        // A coluna da esquerda é a lista; o rótulo da barra do tempo (à direita) também diz "você".
+        .filter(|retangulo| retangulo.min.x < 400.0)
         .collect();
     assert!(linhas.len() >= 2, "uma linha por versão");
     for retangulo in linhas {
@@ -508,5 +511,349 @@ fn prints_do_historico_h1() {
     assert_eq!(
         std::fs::read_to_string(session.path("Diário de bordo.md")).unwrap(),
         DIA_B
+    );
+}
+
+// ------------------------------------------------------------------ H2: máquina do tempo
+
+/// O meio de uma semana de uns 20 dias atrás: versões gravadas em segundos seguidos a partir
+/// daqui caem no mesmo balde semanal da poda, sem depender do dia em que o teste roda.
+fn meio_de_uma_semana_antiga() -> SystemTime {
+    const DIA: u64 = 86_400;
+    let agora = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let dias = agora / DIA - 20;
+    let segunda = ((dias + 3) / 7) * 7 - 3;
+    SystemTime::UNIX_EPOCH + Duration::from_secs((segunda + 2) * DIA + DIA / 2)
+}
+
+/// Cinco versões do diário (as quatro primeiras numa semana antiga) e a tela de versões aberta,
+/// com a mais nova escolhida e o texto dela carregado.
+fn tela_com_cinco_versoes() -> Session {
+    let mut session = Session::open_with(&[("Diário de bordo.md", DIA_E.as_bytes())]);
+    session.wait_for(|app| app.historico.is_some());
+    let antiga = meio_de_uma_semana_antiga();
+    {
+        let historico = session.app().historico.as_ref().unwrap();
+        let nota = Path::new("Diário de bordo.md");
+        for (indice, texto) in [DIA_A, DIA_B, DIA_C, DIA_D].into_iter().enumerate() {
+            let quando = antiga + Duration::from_secs(indice as u64);
+            historico.gravar_em(nota, texto, Origem::Editor, quando);
+        }
+        let ha_tres_minutos = SystemTime::now() - Duration::from_secs(180);
+        historico.gravar_em(nota, DIA_E, Origem::Editor, ha_tres_minutos);
+    }
+    session.open_note("Diário de bordo");
+    esperar_versoes(&mut session, "Diário de bordo.md", 5);
+    session.command("File recovery: Open local history");
+    session.wait_for(|app| app.recovery_manager.active());
+    esperar_a_tela(&mut session);
+    session
+}
+
+#[track_caller]
+fn esperar_a_tela(session: &mut Session) {
+    // Primeiro deixa os quadros chegarem (a leitura começa num deles), depois espera acabar.
+    session.settle();
+    session.wait_for(|app| !app.recovery_manager.ocupado());
+    session.settle();
+}
+
+fn ids_do_diario(session: &Session) -> Vec<u64> {
+    versoes(session, "Diário de bordo.md")
+        .iter()
+        .map(|versao| versao.id.0)
+        .collect()
+}
+
+#[test]
+fn a_barra_do_tempo_anda_de_versao_em_versao() {
+    let mut session = tela_com_cinco_versoes();
+    let ids = ids_do_diario(&session);
+    assert_eq!(session.app().recovery_manager.escolhida(), Some(ids[4]));
+    assert!(session.has_label("Linha do tempo"), "a barra aparece");
+    session.harness.get_by_label("Versão anterior").click();
+    esperar_a_tela(&mut session);
+    session.harness.get_by_label("Versão anterior").click();
+    esperar_a_tela(&mut session);
+    let manager = &session.app().recovery_manager;
+    assert_eq!(
+        manager.escolhida(),
+        Some(ids[2]),
+        "duas para trás: a 3ª mais nova"
+    );
+    assert_eq!(manager.texto_mostrado(), Some(DIA_C));
+    session.harness.get_by_label("Próxima versão").click();
+    esperar_a_tela(&mut session);
+    let manager = &session.app().recovery_manager;
+    assert_eq!(manager.escolhida(), Some(ids[3]));
+    assert_eq!(manager.texto_mostrado(), Some(DIA_D));
+}
+
+#[test]
+fn varias_posicoes_no_mesmo_quadro_ficam_com_a_ultima() {
+    let mut session = tela_com_cinco_versoes();
+    let ids = ids_do_diario(&session);
+    let ctx = session.app().ctx.clone();
+    {
+        let manager = &mut session.app_mut().recovery_manager;
+        // 0 = a mais antiga. A primeira começa a leitura; as outras só marcam que falta reler.
+        for posicao in [0, 1, 3, 2] {
+            manager.ir_para(posicao, &ctx);
+        }
+        assert!(manager.releitura_pendente(), "só uma leitura por vez");
+        assert_eq!(manager.escolhida(), Some(ids[2]), "a escolha já é a última");
+    }
+    esperar_a_tela(&mut session);
+    let manager = &session.app().recovery_manager;
+    assert_eq!(
+        manager.escolhida(),
+        Some(ids[2]),
+        "a barra não pulou de volta"
+    );
+    assert_eq!(
+        manager.texto_mostrado(),
+        Some(DIA_C),
+        "o texto é o da última posição"
+    );
+    assert!(!manager.releitura_pendente());
+}
+
+#[test]
+fn a_barra_e_os_botoes_seguem_habilitados_com_a_leitura_em_andamento() {
+    let mut session = tela_com_cinco_versoes();
+    let ids = ids_do_diario(&session);
+    let _leitura = session.app_mut().recovery_manager.simular_leitura();
+    session.settle();
+    assert!(session.app().recovery_manager.ocupado());
+    let desabilitado = |session: &Session, nome: &str| {
+        session
+            .harness
+            .get_by_label(nome)
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(
+        desabilitado(&session, "Restaurar"),
+        "Restaurar espera a leitura"
+    );
+    assert!(
+        !desabilitado(&session, "Linha do tempo"),
+        "a barra não desabilita"
+    );
+    assert!(!desabilitado(&session, "Versão anterior"));
+    // E o botão anda mesmo assim: a escolha muda na hora e a releitura fica marcada.
+    session.harness.get_by_label("Versão anterior").click();
+    session.settle();
+    let manager = &session.app().recovery_manager;
+    assert_eq!(manager.escolhida(), Some(ids[3]));
+    assert!(manager.releitura_pendente());
+}
+
+#[test]
+fn dar_nome_pela_tela_aparece_na_lista_e_a_poda_so_leva_as_sem_nome() {
+    let mut session = tela_com_cinco_versoes();
+    let ids = ids_do_diario(&session);
+    // E, D, C, B: a segunda versão é a que ganha o nome.
+    for _ in 0..3 {
+        session.harness.get_by_label("Versão anterior").click();
+        esperar_a_tela(&mut session);
+    }
+    assert_eq!(session.app().recovery_manager.escolhida(), Some(ids[1]));
+    assert!(session.has_label("Dar nome"));
+    click_label(&mut session, "Dar nome");
+    assert!(session.has_label("Nome da versão"));
+    assert!(session.has_label("Versões com nome nunca saem do histórico."));
+    session.type_text("Antes da feira");
+    // Os testes clicam no botão: o Enter antes de o campo ter foco é intermitente.
+    click_label(&mut session, "Salvar");
+    esperar_a_tela(&mut session);
+    let infos = versoes(&session, "Diário de bordo.md");
+    assert_eq!(infos[1].nome.as_deref(), Some("Antes da feira"));
+    assert_eq!(infos.iter().filter(|info| info.nome.is_some()).count(), 1);
+    assert!(session.has_label("Antes da feira"), "a linha mostra o nome");
+    assert!(session.has_label("Mudar nome"), "o botão agora muda o nome");
+    // O filtro só aparece com alguma nomeada e deixa só ela na lista.
+    let antes = session.harness.query_all_by_label_contains("você").count();
+    click_label(&mut session, "Só com nome");
+    let depois = session.harness.query_all_by_label_contains("você").count();
+    assert!(depois < antes, "o filtro tira linhas: {antes} -> {depois}");
+    assert!(
+        session.app().recovery_manager.escolhida().is_some(),
+        "a barra segue sobre todas as versões"
+    );
+    // Retenção zerada: as antigas sem nome saem (a mais nova da semana fica), a nomeada não.
+    let politica = nota_historico::PoliticaRetencao {
+        tudo_ate: Duration::ZERO,
+        intervalo: Duration::ZERO,
+        intervalo_ate: Duration::ZERO,
+        por_dia_ate: Duration::ZERO,
+    };
+    let historico = session.app_mut().historico.as_mut().unwrap();
+    historico.ajustar_politica(politica);
+    let relatorio = historico
+        .podar_agora()
+        .unwrap()
+        .recv_timeout(Duration::from_secs(20))
+        .expect("a poda respondeu")
+        .unwrap();
+    assert!(relatorio.versoes_removidas >= 2, "{relatorio:?}");
+    let depois = versoes(&session, "Diário de bordo.md");
+    assert!(
+        depois
+            .iter()
+            .any(|info| info.id.0 == ids[1] && info.nome.is_some())
+    );
+    assert!(
+        !depois.iter().any(|info| info.id.0 == ids[0]),
+        "a antiga sem nome saiu"
+    );
+    assert!(depois.len() < 5);
+}
+
+#[test]
+fn tirar_o_nome_devolve_a_versao_ao_normal() {
+    let mut session = tela_com_cinco_versoes();
+    let ids = ids_do_diario(&session);
+    let ctx = session.app().ctx.clone();
+    session.app_mut().recovery_manager.ir_para(1, &ctx);
+    esperar_a_tela(&mut session);
+    click_label(&mut session, "Dar nome");
+    session.type_text("Rascunho bom");
+    click_label(&mut session, "Salvar");
+    esperar_a_tela(&mut session);
+    assert!(versoes(&session, "Diário de bordo.md")[1].nome.is_some());
+    click_label(&mut session, "Mudar nome");
+    click_label(&mut session, "Tirar o nome");
+    esperar_a_tela(&mut session);
+    assert!(versoes(&session, "Diário de bordo.md")[1].nome.is_none());
+    assert_eq!(session.app().recovery_manager.escolhida(), Some(ids[1]));
+    assert!(session.has_label("Dar nome"));
+}
+
+const COM_SENHA: &str = "# Cofre\n\nA senha do wifi é senha-123-secreta e não pode vazar.\n";
+
+fn tela_com_senha_no_historico() -> Session {
+    let mut session = Session::open_with(&[("Cofre.md", COM_SENHA.as_bytes())]);
+    session.wait_for(|app| app.historico.is_some());
+    {
+        let historico = session.app().historico.as_ref().unwrap();
+        let nota = Path::new("Cofre.md");
+        let antes = SystemTime::now() - Duration::from_secs(3600);
+        for (texto, segundos) in [
+            ("# Cofre\n\nrascunho\n", 600),
+            ("# Cofre\n\nA senha do wifi é senha-123-secreta.\n", 1800),
+            (COM_SENHA, 3000),
+        ] {
+            historico.gravar_em(
+                nota,
+                texto,
+                Origem::Editor,
+                antes + Duration::from_secs(segundos),
+            );
+        }
+    }
+    session.open_note("Cofre");
+    esperar_versoes(&mut session, "Cofre.md", 3);
+    session.command("File recovery: Open local history");
+    session.wait_for(|app| app.recovery_manager.active());
+    esperar_a_tela(&mut session);
+    session
+}
+
+#[test]
+fn apagar_do_historico_tira_o_trecho_de_todas_as_versoes() {
+    let mut session = tela_com_senha_no_historico();
+    assert!(
+        textos(&session, "Cofre.md")
+            .iter()
+            .any(|t| t.contains("senha-123-secreta")),
+        "a senha está no histórico antes"
+    );
+    click_label(&mut session, "Apagar do histórico…");
+    assert!(session.has_label("Apagar um trecho do histórico"));
+    assert!(session.has_label("O trecho some de todas as versões desta nota."));
+    assert!(session.has_label("Em todas as notas do cofre"));
+    session.type_text("senha-123-secreta");
+    session.settle();
+    assert!(
+        session.has_label("A nota ainda tem este trecho."),
+        "o texto atual da nota ainda tem a senha"
+    );
+    click_label(&mut session, "Apagar");
+    esperar_a_tela(&mut session);
+    for texto in textos(&session, "Cofre.md") {
+        assert!(!texto.contains("senha-123-secreta"), "sobrou: {texto}");
+    }
+    assert!(
+        session.has_label("Apagado de 2 versões"),
+        "o aviso conta as versões"
+    );
+    assert!(
+        !session.has_label("Apagar um trecho do histórico"),
+        "o diálogo fechou"
+    );
+}
+
+#[test]
+fn apagar_pede_pelo_menos_tres_caracteres_e_cancelar_nao_apaga() {
+    let mut session = tela_com_senha_no_historico();
+    click_label(&mut session, "Apagar do histórico…");
+    session.type_text("se");
+    session.settle();
+    let desabilitado = |session: &Session| {
+        session
+            .harness
+            .get_by_label("Apagar")
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(desabilitado(&session), "2 caracteres não bastam");
+    assert!(!session.has_label("A nota ainda tem este trecho."));
+    session.type_text("nha");
+    session.settle();
+    assert!(!desabilitado(&session), "3 ou mais habilita");
+    session.type_text("-que-nao-esta-na-nota");
+    session.settle();
+    assert!(
+        !session.has_label("A nota ainda tem este trecho."),
+        "o trecho não está na nota"
+    );
+    click_label(&mut session, "Cancelar");
+    assert!(!session.has_label("Apagar um trecho do histórico"));
+    assert!(
+        textos(&session, "Cofre.md")
+            .iter()
+            .any(|t| t.contains("senha-123-secreta")),
+        "cancelar não apaga nada"
+    );
+    // O trecho que nunca esteve no histórico só avisa.
+    click_label(&mut session, "Apagar do histórico…");
+    session.type_text("trecho que nunca existiu");
+    click_label(&mut session, "Apagar");
+    esperar_a_tela(&mut session);
+    assert!(session.has_label("O trecho não estava no histórico"));
+}
+
+#[test]
+fn fechar_a_tela_com_o_dialogo_filho_aberto_nao_deixa_estado_preso() {
+    let mut session = tela_com_senha_no_historico();
+    click_label(&mut session, "Apagar do histórico…");
+    assert!(session.app().recovery_manager.active());
+    click_label(&mut session, "Cancelar");
+    click_label(&mut session, "Dar nome");
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    esperar_a_tela(&mut session);
+    assert!(
+        session.app().recovery_manager.active(),
+        "a tela principal segue aberta"
+    );
+    session.key(egui::Modifiers::NONE, egui::Key::Escape);
+    esperar_a_tela(&mut session);
+    assert!(
+        !session.app().recovery_manager.active(),
+        "fechou e nada ficou preso"
     );
 }
