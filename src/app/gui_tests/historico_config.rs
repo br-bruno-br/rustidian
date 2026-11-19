@@ -48,9 +48,9 @@ fn esperar_rotulo(session: &mut Session, texto: &str) {
 #[test]
 fn a_pagina_mostra_quantas_versoes_e_notas_o_historico_tem() {
     let mut session = abrir_recuperacao();
-    esperar_rotulo(&mut session, "notas · ");
-    assert!(session.has_label("versões de"), "rótulo do espaço");
-    assert!(session.has_label("em disco"));
+    esperar_rotulo(&mut session, "em disco");
+    // O cofre de teste tem 1 nota com 2 versões gravadas aqui (e a do carregamento).
+    assert!(session.has_label("versões de 1 nota"), "rótulo do espaço");
     assert!(session.has_label("Intervalo das versões antigas"));
     assert!(session.has_label("Guardar todas as versões por"));
     assert!(session.has_label("Compactar agora"));
