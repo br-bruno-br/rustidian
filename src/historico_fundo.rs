@@ -53,6 +53,10 @@ const NOTA_GRANDE: usize = 1024 * 1024;
 /// Quanto esperar o disco depois de uma gravação com `persistir` (a régua do briefing: no máximo 1 s).
 const PERSISTIR_APOS: Duration = Duration::from_secs(1);
 const PODAR_A_CADA: Duration = Duration::from_secs(3600);
+/// Depois de mudar a política, a próxima poda só vem daqui a este tempo: quem arrasta um número de
+/// 30 para 1 passa por valores intermediários, e podar a cada um apagaria versões que ele não quis
+/// apagar. Cada mudança nova recomeça a contagem.
+const ESPERA_DEPOIS_DE_MUDAR_POLITICA: Duration = Duration::from_secs(60);
 /// Tamanho máximo do nome de uma versão, em caracteres.
 const NOME_MAXIMO: usize = 80;
 
@@ -92,6 +96,7 @@ enum Pedido {
     GravarEm(PathBuf, String, Origem, SystemTime),
     Renomear(PathBuf, PathBuf),
     Configurar(bool),
+    Politica(PoliticaRetencao),
     Limpar(Sender<Resultado<()>>),
     ApagarTexto(PathBuf, String, Sender<Resultado<usize>>),
     ApagarTextoEmTodas(String, Sender<Resultado<ApagadoEmTodas>>),
@@ -110,6 +115,8 @@ pub struct Historico {
     pronto: Receiver<()>,
     juntar: Option<JoinHandle<()>>,
     habilitado: bool,
+    /// A última política mandada à linha de fundo.
+    politica: PoliticaRetencao,
     /// Avisos para mostrar ao usuário (o histórico indisponível, por exemplo).
     pub avisos: Receiver<String>,
     /// Um caminho a cada versão gravada: a tela de versões se atualiza.
@@ -128,6 +135,7 @@ impl Historico {
     pub fn iniciar(
         raiz: &Path,
         habilitado: bool,
+        politica: PoliticaRetencao,
         ritmo: Ritmo,
         acordar: impl Fn() + Send + 'static,
     ) -> Self {
@@ -140,6 +148,7 @@ impl Historico {
             raiz: raiz.to_owned(),
             ritmo,
             habilitado,
+            politica,
             banco: None,
             indisponivel: None,
             notas: HashMap::new(),
@@ -165,6 +174,7 @@ impl Historico {
             pronto,
             juntar,
             habilitado,
+            politica,
             avisos,
             gravou,
         }
@@ -272,6 +282,15 @@ impl Historico {
         if self.habilitado != habilitado {
             self.habilitado = habilitado;
             let _ = self.tx.send(Pedido::Configurar(habilitado));
+        }
+    }
+
+    /// Muda quanto o histórico guarda. Só manda se a política mudou. A poda não vem na hora: espera
+    /// 60 s sem outra mudança (quem arrasta um número passa por valores intermediários).
+    pub fn ajustar_politica(&mut self, politica: PoliticaRetencao) {
+        if self.politica != politica {
+            self.politica = politica;
+            let _ = self.tx.send(Pedido::Politica(politica));
         }
     }
 
@@ -441,6 +460,8 @@ struct Fundo {
     raiz: PathBuf,
     ritmo: Ritmo,
     habilitado: bool,
+    /// Quanto guardar de cada faixa de idade (a poda usa esta).
+    politica: PoliticaRetencao,
     banco: Option<Banco>,
     /// Por que o banco não abriu; o aviso sai uma vez.
     indisponivel: Option<String>,
@@ -617,6 +638,10 @@ impl Fundo {
                     }
                 }
             }
+            Pedido::Politica(politica) => {
+                self.politica = politica;
+                self.proxima_poda = Instant::now() + ESPERA_DEPOIS_DE_MUDAR_POLITICA;
+            }
             Pedido::Limpar(resp) => {
                 let r = self.apagar_arquivos();
                 if r.is_ok() {
@@ -778,10 +803,11 @@ impl Fundo {
         }
         if self.habilitado && self.indisponivel.is_none() && Instant::now() >= self.proxima_poda {
             self.proxima_poda = Instant::now() + PODAR_A_CADA;
+            let politica = self.politica;
             if self.banco().is_ok()
                 && let Some(banco) = &mut self.banco
             {
-                match banco.podar(SystemTime::now(), &PoliticaRetencao::default()) {
+                match banco.podar(SystemTime::now(), &politica) {
                     Ok(relatorio) if relatorio.versoes_removidas > 0 => {
                         if let Err(erro) = banco.compactar() {
                             self.avisar(format!("Não foi possível compactar o histórico: {erro}"));
@@ -1080,7 +1106,13 @@ mod testes {
     }
 
     fn abrir(raiz: &Path) -> Historico {
-        Historico::iniciar(raiz, true, ritmo_rapido(), || {})
+        Historico::iniciar(
+            raiz,
+            true,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        )
     }
 
     fn esperar(condicao: impl Fn() -> bool) {
@@ -1144,7 +1176,7 @@ mod testes {
         let mut ritmo = ritmo_rapido();
         ritmo.pausa_geral = Duration::from_secs(60);
         ritmo.pausa_frase = Duration::from_secs(60);
-        let h = Historico::iniciar(d.path(), true, ritmo, || {});
+        let h = Historico::iniciar(d.path(), true, PoliticaRetencao::default(), ritmo, || {});
         let nota = Path::new("c.md");
         h.abriu(nota, "base");
         h.editou(nota, "base 1");
@@ -1322,9 +1354,15 @@ mod testes {
         esperar(|| versoes(&primeira, "e.md").len() == 1);
         let avisos = Arc::new(AtomicUsize::new(0));
         let conta = avisos.clone();
-        let segunda = Historico::iniciar(d.path(), true, ritmo_rapido(), move || {
-            conta.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
+        let segunda = Historico::iniciar(
+            d.path(),
+            true,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            move || {
+                conta.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+        );
         segunda.abriu(Path::new("e.md"), "outro");
         assert!(segunda.leitor().versoes(Path::new("e.md")).is_err());
         segunda.editou(Path::new("e.md"), "outro mais");
@@ -1359,7 +1397,13 @@ mod testes {
             esperar(|| versoes(&h, "i.md").len() == 1);
         }
         assert!(arquivo_do_cofre(d.path()).exists());
-        let h = Historico::iniciar(d.path(), false, ritmo_rapido(), || {});
+        let h = Historico::iniciar(
+            d.path(),
+            false,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        );
         esperar(|| !arquivo_do_cofre(d.path()).exists());
         drop(h);
     }
@@ -1492,7 +1536,13 @@ mod testes {
     #[test]
     fn pedidos_novos_com_o_historico_desligado_respondem_erro_e_nao_gravam() {
         let d = tempfile::tempdir().unwrap();
-        let h = Historico::iniciar(d.path(), false, ritmo_rapido(), || {});
+        let h = Historico::iniciar(
+            d.path(),
+            false,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        );
         let nota = Path::new("x.md");
         assert!(
             h.apagar_texto_em_todas("a")

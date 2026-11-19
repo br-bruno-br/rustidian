@@ -38,6 +38,7 @@ impl NotesApp {
             self.historico = Some(Historico::iniciar(
                 &vault.root,
                 self.recovery_config.enabled,
+                self.recovery_config.politica(),
                 Ritmo::default(),
                 move || acordar.request_repaint(),
             ));
@@ -48,6 +49,7 @@ impl NotesApp {
             return;
         };
         historico.configurar(self.recovery_config.enabled);
+        historico.ajustar_politica(self.recovery_config.politica());
         while let Ok(aviso) = historico.avisos.try_recv() {
             self.error = Some(aviso);
         }
