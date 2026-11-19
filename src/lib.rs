@@ -13,6 +13,7 @@ pub mod folding;
 pub mod graph;
 pub mod graph_layout;
 pub mod highlight;
+pub mod historico_fundo;
 pub mod html_import;
 pub mod html_layout;
 pub mod i18n;

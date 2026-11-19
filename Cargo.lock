@@ -4615,6 +4615,7 @@ dependencies = [
  "keyring",
  "mermaid-rs-renderer",
  "nota-cripto",
+ "nota-historico",
  "nota-servidor",
  "nota-sync",
  "notify",
