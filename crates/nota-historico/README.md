@@ -29,8 +29,10 @@ liga o crate em `src/historico_fundo.rs` (linha de fundo dona do arquivo), `src/
 - **Integridade.** Cada versão guarda o blake3 do texto (128 bits, ver abaixo). `ler` confere e
   devolve `Erro::Integridade` se não bater.
 - **Quando gravar** (no lugar do tecla a tecla): `Agrupador`. Ver os exemplos no módulo.
-- **Retenção** (`podar`): 24 h tudo, 1 por hora em 7 dias, 1 por dia em 30, 1 por semana depois;
-  nomeadas e a mais nova ficam; a poda recodifica as vizinhas e nada quebra.
+- **Retenção** (`podar`): `PoliticaRetencao` com quatro campos. Padrão: 24 h tudo (`tudo_ate`), 1 por
+  `intervalo` (1 hora) até `intervalo_ate` (7 dias), 1 por dia até `por_dia_ate` (30 dias), 1 por
+  semana depois. `intervalo` zero guarda tudo na segunda faixa. Nomeadas e a mais nova ficam; a poda
+  recodifica as vizinhas e nada quebra.
 - **Android:** o crate `zstd` compila C. Ver "Android" abaixo.
 
 ### Qual API do zstd para "a versão vizinha como base"
@@ -61,6 +63,7 @@ h.nomear(&nota, infos[0].id, Some("rascunho 2".into()))?; // nomeada nunca é po
 h.podar(SystemTime::now(), &PoliticaRetencao::default())?;
 h.compactar()?;                                           // refaz quadros-chave e devolve espaço
 h.apagar_texto_do_historico(&nota, "senha colada")?;      // some de todas as versões
+h.apagar_texto_de_todas("senha colada")?;                 // idem, em todas as notas (ApagadoEmTodas)
 h.renomear_nota(&nota, &NotaId::novo("outro/id"))?;       // a nota foi renomeada: o histórico vai junto
 h.ajustar_quadro_chave(48);                               // N menor para notas grandes (próximas gravações)
 h.persistir()?;                                           // com Durabilidade::Adiada (padrão)
@@ -81,6 +84,9 @@ h.persistir()?;                                           // com Durabilidade::A
   reescreve o arquivo: rode em segundo plano. **Limites:** só some o trecho inteiro (versões
   gravadas enquanto a senha era digitada podem ter um pedaço: repita com os pedaços); tire também
   do `.md` real; trata uma nota por vez.
+- **`apagar_texto_de_todas`**: o mesmo em todas as notas, compactando o arquivo uma vez no fim, só se
+  algo foi apagado. Devolve `ApagadoEmTodas { notas, versoes }`. Mesmos limites e mesmo custo (por
+  nota que tem o trecho; as outras só são lidas).
 
 ## Medição (régua do briefing)
 
@@ -186,5 +192,18 @@ implementar `Codec`.
   200 KB e 1 MB são estimativa, não medição.
 - **Migração:** na primeira abertura, o `recovery.redb` antigo (estado do usuário) entra em ordem;
   a marca `.rustidian/historico-migrado.txt` evita repetir e o banco antigo fica onde está.
-- **Retenção:** `podar` com a política padrão na abertura e a cada hora (e `compactar` se removeu).
+- **Retenção configurável:** a política vem do `Config` do app (`Config::politica`): `keep_days` =
+  guardar todas por N dias; `interval_minutes` = 1 versão a cada N minutos até 7 dias (ou até
+  `keep_days`, se maior), 0 = todas; depois 1 por dia até 30 dias e 1 por semana. `podar` roda na
+  abertura e a cada hora. Mudar a política (`ajustar_politica`) não poda na hora: a próxima poda
+  espera 60 s sem outra mudança, porque quem arrasta um número de 30 para 1 passa por valores
+  intermediários e apagaria versões que não quis apagar.
+- **Compactação por tamanho:** depois da poda, `compactar` se ela removeu algo **ou** se o arquivo
+  passou de 1 MiB e do dobro do tamanho logo depois da última compactação (o arquivo também deixa de
+  crescer quando só se escreve).
+- **Pedidos da tela** (todos sem esperar, devolvem um `Receiver`): `nomear` (espaços das pontas
+  saem, vazio tira o nome, no máximo 80 caracteres), `estatisticas`, `compactar`, `podar_agora`
+  (poda já com a política guardada; serve aos testes da tela), `apagar_texto` e
+  `apagar_texto_em_todas`. Com o histórico desligado ou indisponível respondem erro e não criam o
+  arquivo.
 - O sync ignora `.rustidian/` (`nota-sync/src/caminhos.rs`); o histórico não é sincronizado nem cifrado.
