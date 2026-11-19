@@ -12,6 +12,7 @@ use std::time::Duration;
 mod canvas;
 mod dividir;
 mod edicao;
+mod historico;
 mod navegacao;
 mod nota_quadro;
 mod onde_aparece;

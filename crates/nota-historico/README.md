@@ -1,8 +1,9 @@
 # nota-historico
 
 Histórico completo das notas (fase H1 do `docs/bruno/HISTORICO-NOTAS.md`): centenas ou milhares de
-versões por nota, em pouco espaço, abrindo qualquer uma na hora. Crate de lógica, **sem UI e sem
-ligação com o app** (a ligação ao editor fica para as próximas rodadas).
+versões por nota, em pouco espaço, abrindo qualquer uma na hora. Crate de lógica, **sem UI**. O app
+liga o crate em `src/historico_fundo.rs` (linha de fundo dona do arquivo), `src/historico_ui.rs`
+(o que o editor entrega) e `src/recovery_ui.rs` (a tela); ver "Como o app usa" no fim.
 
 ## O que tem
 
@@ -60,6 +61,8 @@ h.nomear(&nota, infos[0].id, Some("rascunho 2".into()))?; // nomeada nunca é po
 h.podar(SystemTime::now(), &PoliticaRetencao::default())?;
 h.compactar()?;                                           // refaz quadros-chave e devolve espaço
 h.apagar_texto_do_historico(&nota, "senha colada")?;      // some de todas as versões
+h.renomear_nota(&nota, &NotaId::novo("outro/id"))?;       // a nota foi renomeada: o histórico vai junto
+h.ajustar_quadro_chave(48);                               // N menor para notas grandes (próximas gravações)
 h.persistir()?;                                           // com Durabilidade::Adiada (padrão)
 ```
 
@@ -168,3 +171,20 @@ implementar `Codec`.
 - `THIRD_PARTY_NOTICES.txt` não foi alterado: ele é gerado no release (`cargo xtask
   language-notices`) só para o que entra no app. Quando o crate for ligado ao app, entra o `zstd`
   (MIT/Apache-2.0, mais o zstd C em BSD/GPL escolha BSD).
+
+## Como o app usa (H1 ligada, 18/11/2026)
+
+- **Uma thread só** (`historico_fundo::Historico`) é dona de `<cofre>/.rustidian/historico.redb`:
+  gravar, podar, compactar, apagar trecho e ler rodam lá; o quadro do editor só manda mensagens.
+  O `Agrupador` também mora lá (o blake3 que ele calcula a cada edição não roda no quadro): a
+  interface manda `editou`/`salvou`/`carregou`/`saiu`/`fechou` e a thread conta a pausa sozinha.
+- **Um escritor por arquivo:** outra instância no mesmo cofre fica sem histórico e avisa uma vez.
+- **Id da nota = caminho relativo com `/`.** O app chama `renomear` em cada rename/move (nota ou
+  pasta); a thread usa `renomear_nota` para cada id sob o prefixo.
+- **Notas grandes:** `quadro_chave_a_cada` = 128 até 200 KB, 48 até 1 MB, 32 acima
+  (`ajustar_quadro_chave` antes de cada gravação). O crate foi medido só com 5 KB: as faixas de
+  200 KB e 1 MB são estimativa, não medição.
+- **Migração:** na primeira abertura, o `recovery.redb` antigo (estado do usuário) entra em ordem;
+  a marca `.rustidian/historico-migrado.txt` evita repetir e o banco antigo fica onde está.
+- **Retenção:** `podar` com a política padrão na abertura e a cada hora (e `compactar` se removeu).
+- O sync ignora `.rustidian/` (`nota-sync/src/caminhos.rs`); o histórico não é sincronizado nem cifrado.

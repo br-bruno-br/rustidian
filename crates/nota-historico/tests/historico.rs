@@ -516,3 +516,75 @@ fn banco_de_outro_codec_nao_abre() {
         Err(Erro::Argumento(_))
     ));
 }
+
+#[test]
+fn renomear_nota_leva_as_versoes_os_nomes_e_o_que_vem_depois() {
+    let d = tempfile::tempdir().unwrap();
+    let caminho = d.path().join("h.redb");
+    let antigo = nota("pasta/velha.md");
+    let novo = nota("outra/nova.md");
+    {
+        let mut h = Historico::abrir(&caminho).unwrap();
+        let textos = gravar_serie(&mut h, &antigo, 20, 7, 1_000_000);
+        h.nomear(&antigo, VersaoId(3), Some("rascunho".into()))
+            .unwrap();
+        assert!(h.renomear_nota(&antigo, &novo).unwrap());
+        assert!(h.versoes(&antigo).unwrap().is_empty());
+        let infos = h.versoes(&novo).unwrap();
+        assert_eq!(infos.len(), 20);
+        assert_eq!(infos[2].nome.as_deref(), Some("rascunho"));
+        for (i, t) in textos.iter().enumerate() {
+            assert_eq!(&h.ler(&novo, VersaoId(i as u64 + 1)).unwrap(), t);
+        }
+        // A próxima versão continua a cadeia: o número não volta ao 1.
+        let v = h
+            .gravar(&novo, "texto novo", em(2_000_000), Origem::Editor)
+            .unwrap();
+        assert_eq!(v, Some(VersaoId(21)));
+        // Nota sem histórico e id igual: nada a fazer.
+        assert!(!h.renomear_nota(&nota("nao-existe"), &nota("x")).unwrap());
+        assert!(!h.renomear_nota(&novo, &novo).unwrap());
+    }
+    // Depois de reabrir, o nome novo vale e o velho segue vazio.
+    let h = Historico::abrir(&caminho).unwrap();
+    assert_eq!(h.versoes(&novo).unwrap().len(), 21);
+    assert!(h.versoes(&antigo).unwrap().is_empty());
+    assert_eq!(h.notas().unwrap(), vec![novo]);
+}
+
+#[test]
+fn renomear_para_um_id_que_ja_tem_historico_recusa_e_nao_muda_nada() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = Historico::abrir(&d.path().join("h.redb")).unwrap();
+    let (a, b) = (nota("a.md"), nota("b.md"));
+    h.gravar(&a, "do a", em(1), Origem::Editor).unwrap();
+    h.gravar(&b, "do b", em(2), Origem::Editor).unwrap();
+    assert!(matches!(h.renomear_nota(&a, &b), Err(Erro::Argumento(_))));
+    assert_eq!(h.ler(&a, VersaoId(1)).unwrap(), "do a");
+    assert_eq!(h.ler(&b, VersaoId(1)).unwrap(), "do b");
+}
+
+#[test]
+fn mudar_o_quadro_chave_no_meio_do_uso_mantem_todas_as_versoes_abrindo() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = Historico::abrir(&d.path().join("h.redb")).unwrap();
+    let id = nota("grande.md");
+    let mut s = Sorteio::novo(3);
+    let mut t = texto(&mut s, 3000);
+    let mut textos = Vec::new();
+    for i in 0..300u64 {
+        if i % 50 == 0 {
+            h.ajustar_quadro_chave([128, 8, 40, 1, 64, 16][(i / 50) as usize]);
+        }
+        editar(&mut s, &mut t, 30);
+        h.gravar(&id, &t, em(1_000 + i), Origem::Editor).unwrap();
+        textos.push(t.clone());
+    }
+    for (i, t) in textos.iter().enumerate() {
+        assert_eq!(&h.ler(&id, VersaoId(i as u64 + 1)).unwrap(), t);
+    }
+    h.compactar().unwrap();
+    for (i, t) in textos.iter().enumerate() {
+        assert_eq!(&h.ler(&id, VersaoId(i as u64 + 1)).unwrap(), t);
+    }
+}

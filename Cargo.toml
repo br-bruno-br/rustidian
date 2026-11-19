@@ -73,6 +73,8 @@ ureq = "3"
 # Sync of the open vault (R5): the vault key, the engine and the system credential store.
 nota-cripto = { path = "crates/nota-cripto" }
 nota-sync = { path = "crates/nota-sync" }
+# Histórico completo das notas (H1): versões comprimidas num redb por cofre, gravadas numa linha de fundo.
+nota-historico = { path = "crates/nota-historico" }
 unicode-normalization = "0.1"
 keyring = { version = "4.2", default-features = false, features = ["v1"] }
 

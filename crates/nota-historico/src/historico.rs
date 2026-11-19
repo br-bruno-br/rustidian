@@ -569,6 +569,41 @@ impl Historico {
         Ok(())
     }
 
+    // ------------------------------------------------------------ renomear
+
+    /// Passa o histórico de `de` para o id `para` (a nota foi renomeada ou movida): as versões, os
+    /// nomes e os números continuam os mesmos. Devolve `false` (e não faz nada) se `de` não tem
+    /// histórico ou se `de == para`. Se `para` já tem histórico, devolve `Erro::Argumento` e nada
+    /// muda: juntar dois históricos é decisão de quem chama.
+    ///
+    /// Custo: duas linhas da tabela `notas`; as versões e os pedaços não são tocados.
+    pub fn renomear_nota(&mut self, de: &NotaId, para: &NotaId) -> Result<bool> {
+        if de == para {
+            return Ok(false);
+        }
+        let w = self.txn_gravacao(false)?;
+        {
+            let mut notas = w.open_table(NOTAS)?;
+            let Some(num) = numero_da_nota(&notas, de)? else {
+                return Ok(false);
+            };
+            if numero_da_nota(&notas, para)?.is_some() {
+                return Err(Erro::Argumento(format!("a nota {para:?} já tem histórico")));
+            }
+            notas.remove(de.como_str())?;
+            notas.insert(para.como_str(), num)?;
+        }
+        w.commit()?;
+        Ok(true)
+    }
+
+    /// Ajusta de quantas em quantas versões há um quadro-chave nas **próximas** gravações. Vale
+    /// trocar no meio do uso: cada registro guarda a distância até o seu quadro-chave, então bancos
+    /// gravados com N diferentes continuam abrindo. Notas grandes pedem N menor (ver [`Opcoes`]).
+    pub fn ajustar_quadro_chave(&mut self, a_cada: u64) {
+        self.opc.quadro_chave_a_cada = a_cada.max(1);
+    }
+
     // ------------------------------------------------------ reescrever cadeia
 
     /// Reescreve a cadeia inteira de uma nota numa passada, da mais nova para a mais antiga,

@@ -1,45 +1,139 @@
 use crate::{theme, ui_probe};
 use eframe::egui::{self, Align, FontId, Layout, RichText, ScrollArea, TextEdit};
 use rustidian::{
-    recovery::{Change, History, Version},
-    recovery_capture::Recorder,
+    historico_fundo::{
+        Historico, Leitor, Origem, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
+    },
     vault::{Document, Vault},
 };
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
+    time::SystemTime,
 };
 
 #[derive(Clone)]
 pub struct Restore {
     pub expected: Document,
-    pub version: u64,
+    /// O texto da versão, já lido para a tela: restaurar não espera o banco.
+    pub text: String,
+}
+
+/// Uma linha da lista: a versão e quanto o texto cresceu (ou encolheu) em relação à anterior.
+#[derive(Clone)]
+struct Linha {
+    info: VersaoInfo,
+    delta: i64,
 }
 
 struct Loaded {
     files: Option<Vec<PathBuf>>,
     path: Option<PathBuf>,
-    versions: Option<Vec<Version>>,
+    versions: Option<Vec<Linha>>,
     selected: Option<u64>,
     text: Option<String>,
-    changes: Vec<(Change, String)>,
+    changes: Vec<Trecho>,
+}
+
+/// Da mais nova para a mais antiga, com a mudança de tamanho de cada uma.
+fn linhas(ascendente: Vec<VersaoInfo>) -> Vec<Linha> {
+    let mut anterior = 0i64;
+    let mut linhas: Vec<Linha> = ascendente
+        .into_iter()
+        .map(|info| {
+            let tamanho = info.tamanho as i64;
+            let linha = Linha {
+                delta: tamanho - anterior,
+                info,
+            };
+            anterior = tamanho;
+            linha
+        })
+        .collect();
+    linhas.reverse();
+    linhas
+}
+
+/// "há 5 min", "há 2 h", "ontem 14:32", "12/11 09:10": a hora relativa que a lista mostra.
+pub fn rotulo_relativo(agora: chrono::DateTime<chrono::Local>, quando: SystemTime) -> String {
+    let quando: chrono::DateTime<chrono::Local> = quando.into();
+    let segundos = (agora - quando).num_seconds();
+    let hora = quando.format("%H:%M");
+    let hoje = agora.date_naive();
+    if segundos < 45 {
+        "agora há pouco".into()
+    } else if segundos < 3600 {
+        format!("há {} min · {hora}", (segundos / 60).max(1))
+    } else if segundos < 6 * 3600 {
+        format!("há {} h · {hora}", segundos / 3600)
+    } else if quando.date_naive() == hoje {
+        format!("hoje {hora}")
+    } else if hoje.pred_opt() == Some(quando.date_naive()) {
+        format!("ontem {hora}")
+    } else if quando.format("%Y").to_string() == agora.format("%Y").to_string() {
+        quando.format("%d/%m %H:%M").to_string()
+    } else {
+        quando.format("%d/%m/%Y %H:%M").to_string()
+    }
+}
+
+pub fn rotulo_origem(origem: Origem) -> &'static str {
+    match origem {
+        Origem::Editor => "você",
+        Origem::Externa => "mudou fora do app",
+        Origem::Sync => "sync",
+        Origem::Restauracao => "você · restaurada",
+    }
+}
+
+/// "+120 B", "−2,3 KB", "mesmo tamanho": quanto o texto mudou de tamanho nesta versão.
+pub fn rotulo_mudanca(delta: i64) -> String {
+    let tamanho = |bytes: u64| {
+        if bytes < 1024 {
+            format!("{bytes} B")
+        } else {
+            format!("{:.1} KB", bytes as f64 / 1024.0).replace('.', ",")
+        }
+    };
+    match delta {
+        0 => "mesmo tamanho".into(),
+        d if d > 0 => format!("+{}", tamanho(d as u64)),
+        d => format!("−{}", tamanho(d.unsigned_abs())),
+    }
+}
+
+/// Fundo do que entrou e do que saiu, nos dois temas.
+fn diff_colors(dark: bool) -> (egui::Color32, egui::Color32) {
+    if dark {
+        (
+            egui::Color32::from_rgb(29, 65, 46),
+            egui::Color32::from_rgb(70, 33, 35),
+        )
+    } else {
+        (
+            egui::Color32::from_rgb(211, 243, 219),
+            egui::Color32::from_rgb(255, 219, 219),
+        )
+    }
 }
 
 #[derive(Default)]
 pub struct Manager {
     pub open: bool,
-    history: Option<History>,
+    history: Option<Leitor>,
     files: Vec<PathBuf>,
     matcher: Option<rustidian::search::FileMatcher>,
     path: Option<PathBuf>,
-    versions: Vec<Version>,
+    versions: Vec<Linha>,
     selected: Option<u64>,
     text: Option<String>,
-    changes: Vec<(Change, String)>,
+    changes: Vec<Trecho>,
     expected: Option<Document>,
     input: String,
     choosing_file: bool,
     show_changes: bool,
+    /// Compara a versão com o texto de agora (e não com a versão anterior).
+    compare_current: bool,
     loading: Option<Receiver<Result<Loaded, String>>>,
     clearing: Option<Receiver<Result<(), String>>>,
     confirm_clear: bool,
@@ -63,7 +157,7 @@ impl Manager {
     }
     pub fn open(
         &mut self,
-        history: History,
+        history: Leitor,
         vault: &Vault,
         path: Option<PathBuf>,
         ctx: &egui::Context,
@@ -72,6 +166,7 @@ impl Manager {
             open: true,
             history: Some(history),
             focus: true,
+            show_changes: true,
             ..Default::default()
         };
         self.select_file(path, vault, ctx);
@@ -96,7 +191,9 @@ impl Manager {
         self.expected = Some(document);
         self.error = None;
         self.notice = Some("Versão restaurada".into());
-        self.reload(ctx, false);
+        // A versão nova (origem "restaurada") entra no topo da lista e fica escolhida.
+        self.selected = None;
+        self.reload(ctx, true);
     }
 
     fn select_file(&mut self, path: Option<PathBuf>, vault: &Vault, ctx: &egui::Context) {
@@ -118,7 +215,7 @@ impl Manager {
         self.changes.clear();
         self.selected_file = 0;
         self.choosing_file = self.path.is_none();
-        self.show_changes = false;
+        self.show_changes = true;
         self.reload(ctx, true);
     }
 
@@ -129,6 +226,9 @@ impl Manager {
         let path = self.path.clone();
         let selected = self.selected;
         let current = self.expected.as_ref().map(|document| document.text.clone());
+        let compare_current = self.compare_current;
+        // Da mais nova para a mais antiga, como a lista da tela.
+        let known: Vec<u64> = self.versions.iter().map(|linha| linha.info.id.0).collect();
         let (sender, receiver) = mpsc::channel();
         self.loading = Some(receiver);
         // A failed version query must never leave another version's preview
@@ -138,34 +238,44 @@ impl Manager {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = (|| {
-                let files = refresh_list.then(|| history.files()).transpose()?;
+                let files = refresh_list.then(|| history.notas()).transpose()?;
                 let versions = if refresh_list {
-                    Some(
+                    Some(linhas(
                         path.as_ref()
-                            .map(|path| history.versions(path))
+                            .map(|path| history.versoes(path))
                             .transpose()?
                             .unwrap_or_default(),
-                    )
+                    ))
                 } else {
                     None
                 };
-                let selected = if let Some(versions) = &versions {
-                    selected
-                        .filter(|id| versions.iter().any(|version| version.id == *id))
-                        .or_else(|| versions.first().map(|version| version.id))
-                } else {
-                    selected
-                };
+                let order: Vec<u64> = versions.as_ref().map_or(known, |versions| {
+                    versions.iter().map(|linha| linha.info.id.0).collect()
+                });
+                let selected = selected
+                    .filter(|id| order.contains(id))
+                    .or_else(|| order.first().copied());
                 let text = match (&path, selected) {
-                    (Some(path), Some(id)) => Some(history.content(path, id)?),
+                    (Some(path), Some(id)) => Some(history.ler(path, VersaoId(id))?),
                     _ => None,
                 };
-                let changes = text
-                    .as_ref()
-                    .map(|text| {
-                        rustidian::recovery::changes(text, current.as_deref().unwrap_or_default())
-                    })
-                    .unwrap_or_default();
+                let changes = match (&path, &text, selected) {
+                    (_, Some(text), _) if compare_current => {
+                        diff_palavras(text, current.as_deref().unwrap_or_default())
+                    }
+                    (Some(path), Some(text), Some(id)) => {
+                        // O "antes" é a versão anterior; a primeira versão não tem antes.
+                        let before = order
+                            .iter()
+                            .position(|candidate| *candidate == id)
+                            .and_then(|at| order.get(at + 1))
+                            .map(|previous| history.ler(path, VersaoId(*previous)))
+                            .transpose()?
+                            .unwrap_or_default();
+                        diff_palavras(&before, text)
+                    }
+                    _ => Vec::new(),
+                };
                 Ok(Loaded {
                     files,
                     path,
@@ -252,12 +362,13 @@ impl Manager {
         &mut self,
         ctx: &egui::Context,
         vault: &Vault,
-        recorder: &Recorder,
+        historico: &Historico,
     ) -> Option<Restore> {
         self.poll(ctx);
         let mut restore = None;
         let mut select_file = None;
         let mut select_version = None;
+        let mut compare_changed = false;
         let mut close = false;
         if self.open {
             let dialog =
@@ -270,6 +381,7 @@ impl Manager {
                 // notices arrive, including the first version's sizing pass.
                 ui.set_height(height + 56.0);
                 let busy = self.loading.is_some() || self.clearing.is_some();
+                let touch = egui::vec2(0.0, theme::space::CONTROL);
                 let body_size = egui::vec2(ui.available_width(), height);
                 let body_layout = Layout::left_to_right(Align::Min);
                 ui.allocate_ui_with_layout(body_size, body_layout, |ui| {
@@ -305,41 +417,36 @@ impl Manager {
                                 .max_height(height - 50.0)
                                 .min_scrolled_height(height - 50.0);
                             if !self.choosing_file && !self.versions.is_empty() {
-                                scroll.show_rows(ui, 46.0, self.versions.len(), |ui, rows| {
-                                    for version in &self.versions[rows] {
-                                        let time = chrono::DateTime::from_timestamp_millis(
-                                            version.timestamp_ms,
-                                        )
-                                        .map(|time| {
-                                            time.with_timezone(&chrono::Local)
-                                                .format("%d/%m/%Y %H:%M")
-                                                .to_string()
-                                        })
-                                        .unwrap_or_else(|| "Data desconhecida".into());
-                                        let size = if version.bytes < 1024 {
-                                            format!("{} B", version.bytes)
-                                        } else {
-                                            format!("{:.2} KB", version.bytes as f64 / 1024.0)
-                                        };
+                                let now = chrono::Local::now();
+                                scroll.show_rows(ui, 56.0, self.versions.len(), |ui, rows| {
+                                    for linha in &self.versions[rows] {
+                                        let version = &linha.info;
                                         let button = ui.add_enabled(
                                             !busy,
                                             egui::Button::selectable(
-                                                self.selected == Some(version.id),
-                                                RichText::new(format!("{time}\n{size}")).size(13.0),
+                                                self.selected == Some(version.id.0),
+                                                RichText::new(format!(
+                                                    "{}
+{} · {}",
+                                                    rotulo_relativo(now, version.quando),
+                                                    rotulo_origem(version.origem),
+                                                    rotulo_mudanca(linha.delta)
+                                                ))
+                                                .size(13.0),
                                             )
                                             .min_size(egui::vec2(
                                                 ui.available_width(),
-                                                2.0 * crate::theme::space::XL,
+                                                theme::space::XXL + theme::space::M,
                                             ))
                                             .wrap(),
                                         );
                                         ui_probe::record(
                                             ctx,
-                                            format!("recovery-version:{}", version.id),
+                                            format!("recovery-version:{}", version.id.0),
                                             button.rect.intersect(ui.clip_rect()),
                                         );
                                         if button.clicked() {
-                                            select_version = Some(version.id);
+                                            select_version = Some(version.id.0);
                                         }
                                     }
                                 });
@@ -426,7 +533,7 @@ impl Manager {
                                 .map(|name| name.to_string_lossy())
                                 .unwrap_or_default();
                             ui.add_sized(
-                                egui::vec2((ui.available_width() - 320.0).max(20.0), 24.0),
+                                egui::vec2((ui.available_width() - 250.0).max(20.0), 24.0),
                                 egui::Label::new(RichText::new(name.as_ref()).strong()).truncate(),
                             )
                             .on_hover_text(name.as_ref());
@@ -439,21 +546,21 @@ impl Manager {
                                 close = button.clicked();
                                 let button = ui.add_enabled(
                                     !busy && self.text.is_some() && self.expected.is_some(),
-                                    egui::Button::new("Restaurar"),
+                                    egui::Button::new("Restaurar").min_size(touch),
                                 );
                                 ui_probe::record(ctx, "recovery-restore", button.rect);
                                 if button.clicked()
-                                    && let (Some(expected), Some(version)) =
-                                        (&self.expected, self.selected)
+                                    && let (Some(expected), Some(text)) =
+                                        (&self.expected, &self.text)
                                 {
                                     restore = Some(Restore {
                                         expected: expected.clone(),
-                                        version,
+                                        text: text.clone(),
                                     });
                                 }
                                 let button = ui.add_enabled(
                                     !busy && self.text.is_some(),
-                                    egui::Button::new("Copiar"),
+                                    egui::Button::new("Copiar").min_size(touch),
                                 );
                                 ui_probe::record(ctx, "recovery-copy", button.rect);
                                 if !busy {
@@ -476,50 +583,75 @@ impl Manager {
                                     self.notice =
                                         Some("Copiado para a área de transferência".into());
                                 }
-                                let changes = ui.add_enabled(
-                                    !busy && self.text.is_some(),
-                                    egui::Checkbox::new(
-                                        &mut self.show_changes,
-                                        "Mostrar alterações",
-                                    ),
-                                );
-                                ui_probe::record(ctx, "recovery-changes", changes.rect);
                             });
                         });
+                        // Alvos de 32 px ou mais: o dedo no Android acerta.
+                        ui.horizontal_wrapped(|ui| {
+                            let ready = !busy && self.text.is_some();
+                            let changes = ui.add_enabled(
+                                ready,
+                                egui::Button::selectable(self.show_changes, "Mostrar alterações")
+                                    .min_size(touch),
+                            );
+                            ui_probe::record(ctx, "recovery-changes", changes.rect);
+                            if changes.clicked() {
+                                self.show_changes = !self.show_changes;
+                            }
+                            let current = ui.add_enabled(
+                                ready && self.show_changes,
+                                egui::Button::selectable(
+                                    self.compare_current,
+                                    "Comparar com o texto atual",
+                                )
+                                .min_size(touch),
+                            );
+                            ui_probe::record(ctx, "recovery-compare", current.rect);
+                            if current.clicked() {
+                                self.compare_current = !self.compare_current;
+                                compare_changed = true;
+                            }
+                        });
+                        if self.show_changes && self.text.is_some() {
+                            let caption = if self.compare_current {
+                                "Desta versão até agora. "
+                            } else {
+                                "O que mudou nesta versão. "
+                            };
+                            let (green, red) = diff_colors(ui.visuals().dark_mode);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = theme::space::XS;
+                                ui.label(RichText::new(caption).small().weak());
+                                ui.label(RichText::new(" entrou ").small().background_color(green));
+                                ui.label(RichText::new(" saiu ").small().background_color(red));
+                            });
+                        }
                         ui.separator();
                         ScrollArea::both()
-                            .id_salt(("recovery-text", self.selected))
+                            .id_salt(("recovery-text", self.selected, self.compare_current))
                             .auto_shrink([false, false])
-                            .max_height(height - 48.0)
-                            .min_scrolled_height(height - 48.0)
+                            .max_height(height - 112.0)
+                            .min_scrolled_height(height - 112.0)
                             .show(ui, |ui| {
                                 let response = if self.show_changes {
+                                    let (green, red) = diff_colors(ui.visuals().dark_mode);
+                                    let color = ui.visuals().text_color();
                                     let mut job = egui::text::LayoutJob::default();
-                                    for (change, text) in &self.changes {
-                                        let background = match change {
-                                            Change::Context => egui::Color32::TRANSPARENT,
-                                            Change::Removed => {
-                                                if ui.visuals().dark_mode {
-                                                    egui::Color32::from_rgb(70, 33, 35)
-                                                } else {
-                                                    egui::Color32::from_rgb(255, 219, 219)
-                                                }
+                                    for part in &self.changes {
+                                        let (background, strikethrough) = match part.tipo {
+                                            Tipo::Igual => {
+                                                (egui::Color32::TRANSPARENT, egui::Stroke::NONE)
                                             }
-                                            Change::Added => {
-                                                if ui.visuals().dark_mode {
-                                                    egui::Color32::from_rgb(29, 65, 46)
-                                                } else {
-                                                    egui::Color32::from_rgb(211, 243, 219)
-                                                }
-                                            }
+                                            Tipo::Saiu => (red, egui::Stroke::new(1.0, color)),
+                                            Tipo::Entrou => (green, egui::Stroke::NONE),
                                         };
                                         job.append(
-                                            text,
+                                            &part.texto,
                                             0.0,
                                             egui::TextFormat {
                                                 font_id: FontId::proportional(18.0),
-                                                color: ui.visuals().text_color(),
+                                                color,
                                                 background,
+                                                strikethrough,
                                                 ..Default::default()
                                             },
                                         );
@@ -591,7 +723,7 @@ impl Manager {
             if clear {
                 self.confirm_clear = false;
                 self.loading = None;
-                match recorder.clear() {
+                match historico.limpar() {
                     Ok(receiver) => self.clearing = Some(receiver),
                     Err(error) => self.error = Some(error),
                 }
@@ -604,7 +736,62 @@ impl Manager {
             self.selected = Some(id);
             self.error = None;
             self.reload(ctx, false);
+        } else if compare_changed {
+            self.reload(ctx, false);
         }
         restore
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn local(
+        ano: i32,
+        mes: u32,
+        dia: u32,
+        hora: u32,
+        minuto: u32,
+    ) -> chrono::DateTime<chrono::Local> {
+        chrono::Local
+            .with_ymd_and_hms(ano, mes, dia, hora, minuto, 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn a_hora_relativa_fala_a_lingua_de_quem_escreve() {
+        let agora = local(2026, 11, 18, 15, 30);
+        let antes =
+            |minutos: i64| -> SystemTime { (agora - chrono::Duration::minutes(minutos)).into() };
+        assert_eq!(rotulo_relativo(agora, antes(0)), "agora há pouco");
+        assert_eq!(rotulo_relativo(agora, antes(5)), "há 5 min · 15:25");
+        assert_eq!(rotulo_relativo(agora, antes(125)), "há 2 h · 13:25");
+        // Mais de 6 h atrás, mas hoje.
+        let cedo: SystemTime = local(2026, 11, 18, 7, 5).into();
+        assert_eq!(rotulo_relativo(agora, cedo), "hoje 07:05");
+        let ontem: SystemTime = local(2026, 11, 17, 23, 40).into();
+        assert_eq!(rotulo_relativo(agora, ontem), "ontem 23:40");
+        let semana: SystemTime = local(2026, 11, 12, 9, 10).into();
+        assert_eq!(rotulo_relativo(agora, semana), "12/11 09:10");
+        let ano: SystemTime = local(2025, 3, 2, 18, 0).into();
+        assert_eq!(rotulo_relativo(agora, ano), "02/03/2025 18:00");
+    }
+
+    #[test]
+    fn a_mudanca_de_tamanho_aparece_com_sinal() {
+        assert_eq!(rotulo_mudanca(0), "mesmo tamanho");
+        assert_eq!(rotulo_mudanca(120), "+120 B");
+        assert_eq!(rotulo_mudanca(-35), "−35 B");
+        assert_eq!(rotulo_mudanca(2350), "+2,3 KB");
+        assert_eq!(rotulo_mudanca(-2048), "−2,0 KB");
+    }
+
+    #[test]
+    fn a_origem_tem_palavras_de_gente() {
+        assert_eq!(rotulo_origem(Origem::Editor), "você");
+        assert_eq!(rotulo_origem(Origem::Externa), "mudou fora do app");
+        assert_eq!(rotulo_origem(Origem::Sync), "sync");
     }
 }
