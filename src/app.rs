@@ -6063,6 +6063,16 @@ impl NotesApp {
         {
             historico.renomear(source, destination);
         }
+        // O que ficou esperando para ir ao histórico com o nome antigo vai com o nome novo.
+        self.recovery_saved = std::mem::take(&mut self.recovery_saved)
+            .into_iter()
+            .map(|(path, texto)| {
+                (
+                    rustidian::paths::moved_path(&path, source, destination, true),
+                    texto,
+                )
+            })
+            .collect();
         self.retarget_boards(source, destination);
         crate::explorer_selection::moved(&self.ctx, source, destination);
         self.page_preview.close();

@@ -136,6 +136,8 @@ impl Historico {
             banco: None,
             indisponivel: None,
             notas: HashMap::new(),
+            renomeados: Vec::new(),
+            proprios: HashMap::new(),
             inicio: Instant::now(),
             gravacao_pendente: None,
             proxima_poda: Instant::now(),
@@ -365,6 +367,17 @@ struct Nota {
     texto: String,
 }
 
+/// Por quanto tempo um texto gravado pelo app ainda conta como "nosso" se voltar do disco.
+const JANELA_DO_ECO: Duration = Duration::from_secs(30);
+
+/// Impressão barata (só para reconhecer o eco; o histórico usa blake3 no que guarda).
+fn impressao_rapida(texto: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    texto.hash(&mut h);
+    h.finish()
+}
+
 struct Fundo {
     rx: Receiver<Pedido>,
     raiz: PathBuf,
@@ -374,6 +387,14 @@ struct Fundo {
     /// Por que o banco não abriu; o aviso sai uma vez.
     indisponivel: Option<String>,
     notas: HashMap<PathBuf, Nota>,
+    /// Renomeações já feitas (mais antiga primeiro). Uma mensagem que ainda chega com o nome
+    /// antigo (o watcher avisa da mudança depois da troca) é levada ao nome novo, para nada ser
+    /// gravado sob um id que já não existe.
+    renomeados: Vec<(PathBuf, PathBuf)>,
+    /// Impressões dos textos que o próprio app acabou de gravar (por nota). O watcher devolve o
+    /// eco de cada salvamento, às vezes depois de a digitação já ter andado: sem este filtro o eco
+    /// viraria uma versão "de fora" com texto velho, fora de ordem.
+    proprios: HashMap<PathBuf, Vec<(u64, Instant)>>,
     inicio: Instant,
     /// Desde quando há gravação sem `persistir`.
     gravacao_pendente: Option<Instant>,
@@ -426,7 +447,38 @@ impl Fundo {
         espera.max(Duration::from_millis(1))
     }
 
+    /// Leva um caminho de nome antigo ao nome atual. Se o arquivo antigo existe de novo no cofre
+    /// (alguém criou outra nota com aquele nome), a renomeação deixa de valer para ele.
+    fn resolver(&mut self, nota: PathBuf) -> PathBuf {
+        let mut atual = nota;
+        let mut i = 0;
+        while i < self.renomeados.len() {
+            let (de, para) = &self.renomeados[i];
+            if atual.starts_with(de) {
+                if self.raiz.join(&atual).exists() {
+                    self.renomeados.remove(i);
+                    continue;
+                }
+                atual = paths::moved_path(&atual, de, para, true);
+            }
+            i += 1;
+        }
+        atual
+    }
+
     fn tratar(&mut self, pedido: Pedido) {
+        let pedido = match pedido {
+            Pedido::Abriu(n, t) => Pedido::Abriu(self.resolver(n), t),
+            Pedido::Editou(n, t) => Pedido::Editou(self.resolver(n), t),
+            Pedido::Salvou(n) => Pedido::Salvou(self.resolver(n)),
+            Pedido::Carregou(n, t) => Pedido::Carregou(self.resolver(n), t),
+            Pedido::Saiu(n) => Pedido::Saiu(self.resolver(n)),
+            Pedido::Fechou(n) => Pedido::Fechou(self.resolver(n)),
+            Pedido::Gravar(n, t, o, r) => Pedido::Gravar(self.resolver(n), t, o, r),
+            Pedido::GravarEm(n, t, o, q) => Pedido::GravarEm(self.resolver(n), t, o, q),
+            Pedido::ApagarTexto(n, t, r) => Pedido::ApagarTexto(self.resolver(n), t, r),
+            outro => outro,
+        };
         match pedido {
             Pedido::Abriu(nota, texto) => self.abriu(nota, texto),
             Pedido::Editou(nota, texto) => {
@@ -677,6 +729,23 @@ impl Fundo {
         (self.acordar)();
     }
 
+    fn e_eco_proprio(&mut self, nota: &Path, impressao: u64) -> bool {
+        let Some(lista) = self.proprios.get_mut(nota) else {
+            return false;
+        };
+        lista.retain(|(_, quando)| quando.elapsed() < JANELA_DO_ECO);
+        lista.iter().any(|(i, _)| *i == impressao)
+    }
+
+    fn lembrar_proprio(&mut self, nota: &Path, impressao: u64) {
+        let lista = self.proprios.entry(nota.to_owned()).or_default();
+        lista.retain(|(i, quando)| *i != impressao && quando.elapsed() < JANELA_DO_ECO);
+        lista.push((impressao, Instant::now()));
+        if lista.len() > 16 {
+            lista.remove(0);
+        }
+    }
+
     fn gravar(&mut self, nota: &Path, texto: &str, origem: Origem) -> Resultado<bool> {
         self.gravar_em(nota, texto, origem, SystemTime::now())
     }
@@ -688,6 +757,10 @@ impl Fundo {
         origem: Origem,
         quando: SystemTime,
     ) -> Resultado<bool> {
+        let impressao = impressao_rapida(texto);
+        if matches!(origem, Origem::Externa | Origem::Sync) && self.e_eco_proprio(nota, impressao) {
+            return Ok(false);
+        }
         let id = id_da_nota(nota);
         let banco = self.banco()?;
         banco.ajustar_quadro_chave(quadro_chave_para(texto.len()));
@@ -697,6 +770,9 @@ impl Fundo {
         match versao {
             Ok(versao) => {
                 self.gravacao_pendente.get_or_insert_with(Instant::now);
+                if matches!(origem, Origem::Editor | Origem::Restauracao) {
+                    self.lembrar_proprio(nota, impressao);
+                }
                 if versao.is_some() {
                     let _ = self.gravou.send(nota.to_owned());
                     (self.acordar)();
@@ -769,6 +845,24 @@ impl Fundo {
     fn renomear(&mut self, de: &Path, para: &Path) {
         if de == para {
             return;
+        }
+        // Quem ainda falar do nome antigo é levado ao novo; o caminho novo deixa de ser "antigo".
+        self.renomeados.retain(|(d, _)| !d.starts_with(para));
+        self.renomeados.push((de.to_owned(), para.to_owned()));
+        if self.renomeados.len() > 256 {
+            self.renomeados.remove(0);
+        }
+        let ecos: Vec<PathBuf> = self
+            .proprios
+            .keys()
+            .filter(|k| k.starts_with(de))
+            .cloned()
+            .collect();
+        for antigo in ecos {
+            if let Some(lista) = self.proprios.remove(&antigo) {
+                self.proprios
+                    .insert(paths::moved_path(&antigo, de, para, true), lista);
+            }
         }
         // O estado da tela acompanha (a nota inteira ou tudo o que está na pasta).
         let movidas: Vec<PathBuf> = self
@@ -997,6 +1091,97 @@ mod testes {
         let h = abrir(d.path());
         assert_eq!(versoes(&h, "outra/nova.md").len(), 3);
         assert!(versoes(&h, "pasta/velha.md").is_empty());
+    }
+
+    /// A corrida de verdade: o watcher só avisa da mudança depois da troca de nome, e o aviso
+    /// chega à thread com o caminho antigo. A ordem das mensagens é a mesma em toda rodada, então
+    /// o teste não depende de carga: nada pode ser gravado sob o id antigo.
+    #[test]
+    fn mensagem_com_o_nome_antigo_depois_de_renomear_vai_para_o_nome_novo() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        let leitor = h.leitor();
+        h.abriu(Path::new("Pasta/Nova.md"), "um");
+        h.renomear(Path::new("Pasta"), Path::new("Arquivo"));
+        // Tudo isto fala do nome antigo (o arquivo já não existe lá).
+        h.gravar(Path::new("Pasta/Nova.md"), "dois", Origem::Externa);
+        #[cfg(windows)]
+        h.gravar(Path::new(r"Pasta\Nova.md"), "tres", Origem::Sync);
+        h.gravar_em(
+            Path::new("Pasta/Nova.md"),
+            "quatro",
+            Origem::Externa,
+            SystemTime::now(),
+        );
+        h.abriu(Path::new("Pasta/Nova.md"), "cinco");
+        h.editou(Path::new("Pasta/Nova.md"), "seis");
+        h.salvou(Path::new("Pasta/Nova.md"));
+        h.fechou(Path::new("Pasta/Nova.md"));
+        let notas = leitor.notas().unwrap();
+        assert!(
+            notas.iter().all(|n| !n.starts_with("Pasta")),
+            "o nome antigo ganhou histórico: {notas:?}"
+        );
+        assert!(
+            !leitor
+                .versoes(Path::new("Arquivo/Nova.md"))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            leitor
+                .versoes(Path::new("Pasta/Nova.md"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn nome_antigo_criado_de_novo_no_cofre_volta_a_ter_historico_proprio() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        let leitor = h.leitor();
+        h.abriu(Path::new("a.md"), "um");
+        h.renomear(Path::new("a.md"), Path::new("b.md"));
+        // Alguém cria outra nota "a.md": é uma nota nova, não a que foi renomeada.
+        std::fs::write(d.path().join("a.md"), "outra coisa").unwrap();
+        h.gravar(Path::new("a.md"), "outra coisa", Origem::Externa);
+        assert_eq!(leitor.versoes(Path::new("a.md")).unwrap().len(), 1);
+        assert_eq!(leitor.versoes(Path::new("b.md")).unwrap().len(), 1);
+    }
+
+    /// O watcher devolve o eco de um salvamento depois de a digitação já ter andado. Esse eco
+    /// não é uma mudança de fora e não pode entrar como versão velha no fim da cadeia.
+    #[test]
+    fn eco_do_proprio_salvamento_nao_vira_versao_de_fora() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        let leitor = h.leitor();
+        let nota = Path::new("a.md");
+        h.abriu(nota, "um");
+        h.editou(nota, "dois");
+        h.salvou(nota);
+        h.editou(nota, "tres");
+        h.salvou(nota);
+        let antes = leitor.versoes(nota).unwrap().len();
+        assert_eq!(antes, 3);
+        let ate = ms(2000);
+        // O eco do salvamento de "dois", que chega depois de "tres": ignorado.
+        assert_eq!(
+            h.gravar_esperando(nota, "dois", Origem::Externa, ate)
+                .unwrap(),
+            Some(false)
+        );
+        assert_eq!(leitor.versoes(nota).unwrap().len(), antes);
+        // Uma mudança de verdade (texto que o app nunca gravou) continua entrando.
+        assert_eq!(
+            h.gravar_esperando(nota, "de outro programa", Origem::Externa, ate)
+                .unwrap(),
+            Some(true)
+        );
+        let versoes = leitor.versoes(nota).unwrap();
+        assert_eq!(versoes.len(), antes + 1);
+        assert_eq!(versoes.last().unwrap().origem, Origem::Externa);
     }
 
     #[test]
