@@ -13,6 +13,7 @@ mod canvas;
 mod dividir;
 mod edicao;
 mod historico;
+mod historico_config;
 mod navegacao;
 mod nota_quadro;
 mod onde_aparece;

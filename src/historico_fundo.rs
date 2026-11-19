@@ -30,10 +30,11 @@ use crate::{
     recovery::History as Legado,
     vault::{Document, Vault},
 };
-use nota_historico::{
-    Agrupador, Evento, Historico as Banco, NotaId, PoliticaRetencao, impressao_do_texto,
+use nota_historico::{Agrupador, Evento, Historico as Banco, NotaId, impressao_do_texto};
+pub use nota_historico::{
+    ApagadoEmTodas, Estatisticas, Origem, PoliticaRetencao, RelatorioCompactacao, RelatorioPoda,
+    Ritmo, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
 };
-pub use nota_historico::{Origem, Ritmo, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras};
 use std::{
     collections::HashMap,
     fs,
@@ -52,6 +53,15 @@ const NOTA_GRANDE: usize = 1024 * 1024;
 /// Quanto esperar o disco depois de uma gravação com `persistir` (a régua do briefing: no máximo 1 s).
 const PERSISTIR_APOS: Duration = Duration::from_secs(1);
 const PODAR_A_CADA: Duration = Duration::from_secs(3600);
+/// Depois de mudar a política, a próxima poda só vem daqui a este tempo: quem arrasta um número de
+/// 30 para 1 passa por valores intermediários, e podar a cada um apagaria versões que ele não quis
+/// apagar. Cada mudança nova recomeça a contagem.
+const ESPERA_DEPOIS_DE_MUDAR_POLITICA: Duration = Duration::from_secs(60);
+/// Tamanho máximo do nome de uma versão, em caracteres.
+const NOME_MAXIMO: usize = 80;
+/// O arquivo só é compactado por tamanho (sem a poda ter removido nada) quando passa de 1 MiB e de
+/// duas vezes o que tinha logo depois da última compactação.
+const COMPACTAR_ACIMA_DE: u64 = 1024 * 1024;
 
 /// O id estável de uma nota no histórico: o caminho relativo, com `/`.
 pub fn id_da_nota(relativo: &Path) -> NotaId {
@@ -89,8 +99,14 @@ enum Pedido {
     GravarEm(PathBuf, String, Origem, SystemTime),
     Renomear(PathBuf, PathBuf),
     Configurar(bool),
+    Politica(PoliticaRetencao),
     Limpar(Sender<Resultado<()>>),
     ApagarTexto(PathBuf, String, Sender<Resultado<usize>>),
+    ApagarTextoEmTodas(String, Sender<Resultado<ApagadoEmTodas>>),
+    Nomear(PathBuf, VersaoId, Option<String>, Sender<Resultado<()>>),
+    Estatisticas(Sender<Resultado<Estatisticas>>),
+    Compactar(Sender<Resultado<RelatorioCompactacao>>),
+    PodarAgora(Sender<Resultado<RelatorioPoda>>),
     Versoes(PathBuf, Sender<Resultado<Vec<VersaoInfo>>>),
     Ler(PathBuf, VersaoId, Sender<Resultado<String>>),
     Notas(Sender<Resultado<Vec<PathBuf>>>),
@@ -103,6 +119,8 @@ pub struct Historico {
     pronto: Receiver<()>,
     juntar: Option<JoinHandle<()>>,
     habilitado: bool,
+    /// A última política mandada à linha de fundo.
+    politica: PoliticaRetencao,
     /// Avisos para mostrar ao usuário (o histórico indisponível, por exemplo).
     pub avisos: Receiver<String>,
     /// Um caminho a cada versão gravada: a tela de versões se atualiza.
@@ -121,6 +139,7 @@ impl Historico {
     pub fn iniciar(
         raiz: &Path,
         habilitado: bool,
+        politica: PoliticaRetencao,
         ritmo: Ritmo,
         acordar: impl Fn() + Send + 'static,
     ) -> Self {
@@ -133,6 +152,8 @@ impl Historico {
             raiz: raiz.to_owned(),
             ritmo,
             habilitado,
+            politica,
+            tamanho_apos_compactar: 0,
             banco: None,
             indisponivel: None,
             notas: HashMap::new(),
@@ -158,6 +179,7 @@ impl Historico {
             pronto,
             juntar,
             habilitado,
+            politica,
             avisos,
             gravou,
         }
@@ -268,6 +290,26 @@ impl Historico {
         }
     }
 
+    /// Muda quanto o histórico guarda. Só manda se a política mudou. A poda não vem na hora: espera
+    /// 60 s sem outra mudança (quem arrasta um número passa por valores intermediários).
+    pub fn ajustar_politica(&mut self, politica: PoliticaRetencao) {
+        if self.politica != politica {
+            self.politica = politica;
+            let _ = self.tx.send(Pedido::Politica(politica));
+        }
+    }
+
+    /// Poda agora, com a política guardada, e compacta se removeu algo (ou se o arquivo passou do
+    /// limite de tamanho). Para os testes da tela; o app poda sozinho de hora em hora. A resposta
+    /// chega quando acabar.
+    pub fn podar_agora(&self) -> Resultado<Receiver<Resultado<RelatorioPoda>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::PodarAgora(resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
     /// Apaga todo o histórico do cofre. A resposta chega quando acabar.
     pub fn limpar(&self) -> Resultado<Receiver<Resultado<()>>> {
         let (resp, rx) = mpsc::channel();
@@ -287,6 +329,57 @@ impl Historico {
                 trecho.to_owned(),
                 resp,
             ))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Tira `trecho` de todas as versões de **todas** as notas (uma senha colada em mais de uma).
+    /// Tire também dos `.md`. Devolve em quantas notas e versões aparecia.
+    pub fn apagar_texto_em_todas(
+        &self,
+        trecho: &str,
+    ) -> Resultado<Receiver<Resultado<ApagadoEmTodas>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::ApagarTextoEmTodas(trecho.to_owned(), resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Dá nome a uma versão (que então nunca é podada) ou tira o nome (`None`). O nome perde os
+    /// espaços das pontas; vazio tira o nome; passando de 80 caracteres, é cortado em 80.
+    pub fn nomear(
+        &self,
+        nota: &Path,
+        versao: VersaoId,
+        nome: Option<String>,
+    ) -> Resultado<Receiver<Resultado<()>>> {
+        let nome = nome
+            .map(|n| n.trim().chars().take(NOME_MAXIMO).collect::<String>())
+            .map(|n| n.trim_end().to_owned())
+            .filter(|n| !n.is_empty());
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Nomear(nota.to_owned(), versao, nome, resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Os números do banco (notas, versões, bytes). A resposta chega quando o fundo puder.
+    pub fn estatisticas(&self) -> Resultado<Receiver<Resultado<Estatisticas>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Estatisticas(resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// Refaz os quadros-chave e devolve o espaço livre do arquivo ao sistema. Pode demorar: a
+    /// resposta chega quando acabar.
+    pub fn compactar(&self) -> Resultado<Receiver<Resultado<RelatorioCompactacao>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Compactar(resp))
             .map_err(|_| "O histórico local está fechado.".to_string())?;
         Ok(rx)
     }
@@ -383,6 +476,10 @@ struct Fundo {
     raiz: PathBuf,
     ritmo: Ritmo,
     habilitado: bool,
+    /// Quanto guardar de cada faixa de idade (a poda usa esta).
+    politica: PoliticaRetencao,
+    /// Tamanho do arquivo logo depois da última compactação (0 = ainda não compactou).
+    tamanho_apos_compactar: u64,
     banco: Option<Banco>,
     /// Por que o banco não abriu; o aviso sai uma vez.
     indisponivel: Option<String>,
@@ -477,6 +574,7 @@ impl Fundo {
             Pedido::Gravar(n, t, o, r) => Pedido::Gravar(self.resolver(n), t, o, r),
             Pedido::GravarEm(n, t, o, q) => Pedido::GravarEm(self.resolver(n), t, o, q),
             Pedido::ApagarTexto(n, t, r) => Pedido::ApagarTexto(self.resolver(n), t, r),
+            Pedido::Nomear(n, v, nome, r) => Pedido::Nomear(self.resolver(n), v, nome, r),
             outro => outro,
         };
         match pedido {
@@ -558,6 +656,10 @@ impl Fundo {
                     }
                 }
             }
+            Pedido::Politica(politica) => {
+                self.politica = politica;
+                self.proxima_poda = Instant::now() + ESPERA_DEPOIS_DE_MUDAR_POLITICA;
+            }
             Pedido::Limpar(resp) => {
                 let r = self.apagar_arquivos();
                 if r.is_ok() {
@@ -572,6 +674,49 @@ impl Fundo {
                     b.apagar_texto_do_historico(&id_da_nota(&nota), &trecho)
                         .map_err(|e| e.to_string())
                 });
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::ApagarTextoEmTodas(trecho, resp) => {
+                let r = self
+                    .banco()
+                    .and_then(|b| b.apagar_texto_de_todas(&trecho).map_err(|e| e.to_string()));
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::Nomear(nota, versao, nome, resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.nomear(&id_da_nota(&nota), versao, nome)
+                        .map_err(|e| format!("Não foi possível dar nome à versão: {e}"))
+                });
+                if r.is_ok() {
+                    self.gravacao_pendente.get_or_insert_with(Instant::now);
+                }
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::Estatisticas(resp) => {
+                let r = self
+                    .banco()
+                    .and_then(|b| b.estatisticas().map_err(|e| e.to_string()));
+                let _ = resp.send(r);
+            }
+            Pedido::Compactar(resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.compactar()
+                        .map_err(|e| format!("Não foi possível compactar o histórico: {e}"))
+                });
+                if let Ok(relatorio) = &r {
+                    self.tamanho_apos_compactar = relatorio.bytes_depois;
+                }
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::PodarAgora(resp) => {
+                let r = self.podar_e_compactar();
+                if r.is_ok() {
+                    self.gravacao_pendente.get_or_insert_with(Instant::now);
+                }
                 let _ = resp.send(r);
                 (self.acordar)();
             }
@@ -687,22 +832,32 @@ impl Fundo {
         }
         if self.habilitado && self.indisponivel.is_none() && Instant::now() >= self.proxima_poda {
             self.proxima_poda = Instant::now() + PODAR_A_CADA;
-            if self.banco().is_ok()
-                && let Some(banco) = &mut self.banco
-            {
-                match banco.podar(SystemTime::now(), &PoliticaRetencao::default()) {
-                    Ok(relatorio) if relatorio.versoes_removidas > 0 => {
-                        if let Err(erro) = banco.compactar() {
-                            self.avisar(format!("Não foi possível compactar o histórico: {erro}"));
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(erro) => {
-                        self.avisar(format!("Não foi possível podar o histórico: {erro}"));
-                    }
-                }
+            if let Err(erro) = self.podar_e_compactar() {
+                self.avisar(erro);
             }
         }
+    }
+
+    /// Poda com a política guardada. Compacta se a poda removeu algo ou se o arquivo passou do
+    /// dobro do que tinha depois da última compactação (e de 1 MiB): assim ele também deixa de
+    /// crescer quando o usuário só escreve.
+    fn podar_e_compactar(&mut self) -> Resultado<RelatorioPoda> {
+        let politica = self.politica;
+        let referencia = self.tamanho_apos_compactar;
+        let banco = self.banco()?;
+        let relatorio = banco
+            .podar(SystemTime::now(), &politica)
+            .map_err(|e| format!("Não foi possível podar o histórico: {e}"))?;
+        let tamanho = banco
+            .tamanho_em_disco()
+            .map_err(|e| format!("Não foi possível medir o histórico: {e}"))?;
+        if relatorio.versoes_removidas > 0 || tamanho > COMPACTAR_ACIMA_DE.max(referencia * 2) {
+            let compactado = banco
+                .compactar()
+                .map_err(|e| format!("Não foi possível compactar o histórico: {e}"))?;
+            self.tamanho_apos_compactar = compactado.bytes_depois;
+        }
+        Ok(relatorio)
     }
 
     /// Grava o que sobrou e guarda em disco, no fim.
@@ -989,7 +1144,61 @@ mod testes {
     }
 
     fn abrir(raiz: &Path) -> Historico {
-        Historico::iniciar(raiz, true, ritmo_rapido(), || {})
+        Historico::iniciar(
+            raiz,
+            true,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        )
+    }
+
+    fn abrir_com(raiz: &Path, politica: PoliticaRetencao) -> Historico {
+        Historico::iniciar(raiz, true, politica, ritmo_rapido(), || {})
+    }
+
+    /// Tudo o que tem alguma idade cai fora da retenção: só a mais nova e as nomeadas ficam.
+    fn politica_agressiva() -> PoliticaRetencao {
+        PoliticaRetencao {
+            tudo_ate: Duration::ZERO,
+            intervalo: Duration::ZERO,
+            intervalo_ate: Duration::ZERO,
+            por_dia_ate: Duration::ZERO,
+        }
+    }
+
+    /// Não poda nada que tenha menos de 10 anos.
+    fn politica_que_guarda_tudo() -> PoliticaRetencao {
+        PoliticaRetencao {
+            tudo_ate: Duration::from_secs(3650 * 86_400),
+            ..PoliticaRetencao::default()
+        }
+    }
+
+    /// Quatro horários dentro da mesma semana (UTC, de segunda a domingo) de 14 semanas atrás: a
+    /// retenção semanal os junta num balde só, e a semana não vira no meio do teste.
+    fn horarios_de_uma_semana_antiga() -> [SystemTime; 4] {
+        const DIA_MS: u64 = 86_400_000;
+        let agora = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let semana = (agora / DIA_MS + 3) / 7;
+        let primeiro_dia = 7 * (semana - 14) - 3;
+        let base = primeiro_dia * DIA_MS + 3_600_000;
+        [0, 1, 2, 3].map(|i| UNIX_EPOCH + Duration::from_millis(base + i * 3_600_000))
+    }
+
+    fn gravar_antigas(h: &Historico, nota: &str) {
+        for (i, quando) in horarios_de_uma_semana_antiga().into_iter().enumerate() {
+            h.gravar_em(
+                Path::new(nota),
+                &format!("versão {i} de {nota}"),
+                Origem::Editor,
+                quando,
+            );
+        }
+        esperar(|| versoes(h, nota).len() == 4);
     }
 
     fn esperar(condicao: impl Fn() -> bool) {
@@ -1053,7 +1262,7 @@ mod testes {
         let mut ritmo = ritmo_rapido();
         ritmo.pausa_geral = Duration::from_secs(60);
         ritmo.pausa_frase = Duration::from_secs(60);
-        let h = Historico::iniciar(d.path(), true, ritmo, || {});
+        let h = Historico::iniciar(d.path(), true, PoliticaRetencao::default(), ritmo, || {});
         let nota = Path::new("c.md");
         h.abriu(nota, "base");
         h.editou(nota, "base 1");
@@ -1231,9 +1440,15 @@ mod testes {
         esperar(|| versoes(&primeira, "e.md").len() == 1);
         let avisos = Arc::new(AtomicUsize::new(0));
         let conta = avisos.clone();
-        let segunda = Historico::iniciar(d.path(), true, ritmo_rapido(), move || {
-            conta.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        });
+        let segunda = Historico::iniciar(
+            d.path(),
+            true,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            move || {
+                conta.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            },
+        );
         segunda.abriu(Path::new("e.md"), "outro");
         assert!(segunda.leitor().versoes(Path::new("e.md")).is_err());
         segunda.editou(Path::new("e.md"), "outro mais");
@@ -1268,7 +1483,13 @@ mod testes {
             esperar(|| versoes(&h, "i.md").len() == 1);
         }
         assert!(arquivo_do_cofre(d.path()).exists());
-        let h = Historico::iniciar(d.path(), false, ritmo_rapido(), || {});
+        let h = Historico::iniciar(
+            d.path(),
+            false,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        );
         esperar(|| !arquivo_do_cofre(d.path()).exists());
         drop(h);
     }
@@ -1303,6 +1524,130 @@ mod testes {
         for v in versoes(&h, "h.md") {
             assert!(!h.leitor().ler(nota, v.id).unwrap().contains("HUNTER2"));
         }
+    }
+
+    #[test]
+    fn apagar_texto_em_todas_some_de_varias_notas_e_conta() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        for nome in ["a.md", "b.md", "c.md"] {
+            h.abriu(Path::new(nome), &format!("{nome} com HUNTER2 dentro"));
+            h.gravar(
+                Path::new(nome),
+                &format!("{nome} com HUNTER2 dentro, e mais"),
+                Origem::Externa,
+            );
+        }
+        h.abriu(Path::new("d.md"), "sem nada");
+        esperar(|| versoes(&h, "c.md").len() == 2 && versoes(&h, "d.md").len() == 1);
+        let r = h
+            .apagar_texto_em_todas("HUNTER2")
+            .unwrap()
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            r,
+            ApagadoEmTodas {
+                notas: 3,
+                versoes: 6
+            }
+        );
+        for nome in ["a.md", "b.md", "c.md", "d.md"] {
+            for v in versoes(&h, nome) {
+                let t = h.leitor().ler(Path::new(nome), v.id).unwrap();
+                assert!(!t.contains("HUNTER2"), "{nome}: {t}");
+            }
+        }
+        assert!(
+            h.apagar_texto_em_todas("")
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn nomear_corta_o_nome_e_tira_com_vazio() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        let nota = Path::new("n.md");
+        h.abriu(nota, "um");
+        h.gravar(nota, "dois", Origem::Externa);
+        esperar(|| versoes(&h, "n.md").len() == 2);
+        let v1 = versoes(&h, "n.md")[0].id;
+        let nome = |h: &Historico| versoes(h, "n.md")[0].nome.clone();
+        let nomear = |h: &Historico, n: Option<&str>| {
+            h.nomear(nota, v1, n.map(str::to_owned))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .unwrap();
+        };
+        nomear(&h, Some("  enviado ao editor  "));
+        assert_eq!(nome(&h).as_deref(), Some("enviado ao editor"));
+        nomear(&h, Some(&"ã".repeat(120)));
+        assert_eq!(nome(&h).unwrap().chars().count(), 80);
+        nomear(&h, Some("   "));
+        assert_eq!(nome(&h), None);
+        nomear(&h, Some("de novo"));
+        nomear(&h, None);
+        assert_eq!(nome(&h), None);
+        // Versão que não existe: erro, sem travar.
+        assert!(
+            h.nomear(nota, VersaoId(99), Some("x".into()))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn estatisticas_e_compactar_respondem() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir(d.path());
+        h.abriu(Path::new("e.md"), "um texto");
+        h.gravar(Path::new("e.md"), "um texto maior", Origem::Externa);
+        esperar(|| versoes(&h, "e.md").len() == 2);
+        let e = h.estatisticas().unwrap().recv().unwrap().unwrap();
+        assert_eq!((e.notas, e.versoes), (1, 2));
+        assert!(e.tamanho_em_disco > 0);
+        let c = h.compactar().unwrap().recv().unwrap().unwrap();
+        assert!(c.bytes_antes > 0 && c.bytes_depois > 0);
+        assert_eq!(versoes(&h, "e.md").len(), 2);
+    }
+
+    #[test]
+    fn pedidos_novos_com_o_historico_desligado_respondem_erro_e_nao_gravam() {
+        let d = tempfile::tempdir().unwrap();
+        let h = Historico::iniciar(
+            d.path(),
+            false,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        );
+        let nota = Path::new("x.md");
+        assert!(
+            h.apagar_texto_em_todas("a")
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+        assert!(
+            h.nomear(nota, VersaoId(1), Some("a".into()))
+                .unwrap()
+                .recv()
+                .unwrap()
+                .is_err()
+        );
+        let erro = h.estatisticas().unwrap().recv().unwrap().unwrap_err();
+        assert!(erro.contains("desligado"), "{erro}");
+        assert!(h.compactar().unwrap().recv().unwrap().is_err());
+        assert!(!arquivo_do_cofre(d.path()).exists());
     }
 
     #[test]
@@ -1357,5 +1702,108 @@ mod testes {
         assert_eq!(quadro_chave_para(5_000), 128);
         assert_eq!(quadro_chave_para(300_000), 48);
         assert_eq!(quadro_chave_para(2_000_000), 32);
+    }
+
+    #[test]
+    fn versao_nomeada_sobrevive_a_poda_e_as_antigas_sem_nome_saem() {
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir_com(d.path(), politica_que_guarda_tudo());
+        let nota = Path::new("n.md");
+        gravar_antigas(&h, "n.md");
+        let ids: Vec<VersaoId> = versoes(&h, "n.md").iter().map(|v| v.id).collect();
+        h.nomear(nota, ids[0], Some("marco".into()))
+            .unwrap()
+            .recv()
+            .unwrap()
+            .unwrap();
+        // Com a política que guarda tudo, a poda não toca em nada.
+        let r = h.podar_agora().unwrap().recv().unwrap().unwrap();
+        assert_eq!(r.versoes_removidas, 0);
+        let mut h = h;
+        h.ajustar_politica(politica_agressiva());
+        let r = h.podar_agora().unwrap().recv().unwrap().unwrap();
+        // A semana tem a nomeada (fica), duas sem nome (só a mais nova da semana fica) e a mais
+        // nova da nota (fica sempre).
+        assert_eq!(r.versoes_removidas, 1, "só a primeira sem nome sai");
+        let restantes = versoes(&h, "n.md");
+        assert_eq!(
+            restantes.iter().map(|v| v.id).collect::<Vec<_>>(),
+            [ids[0], ids[2], ids[3]]
+        );
+        assert_eq!(restantes[0].nome.as_deref(), Some("marco"));
+        assert_eq!(
+            h.leitor().ler(nota, ids[0]).unwrap(),
+            "versão 0 de n.md",
+            "a nomeada continua abrindo"
+        );
+        assert_eq!(h.leitor().ler(nota, ids[2]).unwrap(), "versão 2 de n.md");
+        assert_eq!(h.leitor().ler(nota, ids[3]).unwrap(), "versão 3 de n.md");
+    }
+
+    #[test]
+    fn ajustar_politica_muda_o_resultado_de_podar_agora() {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = abrir_com(d.path(), politica_que_guarda_tudo());
+        gravar_antigas(&h, "p.md");
+        assert_eq!(
+            h.podar_agora()
+                .unwrap()
+                .recv()
+                .unwrap()
+                .unwrap()
+                .versoes_removidas,
+            0
+        );
+        assert_eq!(versoes(&h, "p.md").len(), 4);
+        h.ajustar_politica(politica_agressiva());
+        let r = h.podar_agora().unwrap().recv().unwrap().unwrap();
+        assert_eq!((r.versoes_removidas, r.notas_afetadas), (2, 1));
+        assert_eq!(versoes(&h, "p.md").len(), 2);
+        // Mandar a mesma política de novo não muda nada.
+        h.ajustar_politica(politica_agressiva());
+        let r = h.podar_agora().unwrap().recv().unwrap().unwrap();
+        assert_eq!(r.versoes_removidas, 0);
+    }
+
+    #[test]
+    fn ajustar_politica_nao_poda_sozinho_logo_em_seguida() {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = abrir(d.path());
+        // Uma resposta garante que a primeira passada de manutenção (com o banco vazio) já foi.
+        let _ = h.leitor().versoes(Path::new("q.md"));
+        gravar_antigas(&h, "q.md");
+        h.ajustar_politica(politica_agressiva());
+        std::thread::sleep(ms(300));
+        assert_eq!(
+            versoes(&h, "q.md").len(),
+            4,
+            "a poda espera 60 s depois de mudar a política"
+        );
+    }
+
+    #[test]
+    fn a_poda_automatica_usa_a_politica_do_iniciar() {
+        // Política que guarda tudo: a poda das 1 h seguintes (já na abertura) nada remove.
+        let d = tempfile::tempdir().unwrap();
+        let h = abrir_com(d.path(), politica_que_guarda_tudo());
+        let _ = h.leitor().versoes(Path::new("r.md"));
+        gravar_antigas(&h, "r.md");
+        std::thread::sleep(ms(200));
+        assert_eq!(versoes(&h, "r.md").len(), 4);
+    }
+
+    #[test]
+    fn pedidos_de_poda_com_o_historico_desligado_respondem_erro() {
+        let d = tempfile::tempdir().unwrap();
+        let h = Historico::iniciar(
+            d.path(),
+            false,
+            PoliticaRetencao::default(),
+            ritmo_rapido(),
+            || {},
+        );
+        let erro = h.podar_agora().unwrap().recv().unwrap().unwrap_err();
+        assert!(erro.contains("desligado"), "{erro}");
+        assert!(!arquivo_do_cofre(d.path()).exists());
     }
 }

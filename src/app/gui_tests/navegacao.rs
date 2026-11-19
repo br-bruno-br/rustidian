@@ -1354,11 +1354,23 @@ fn formularios_padrao_abrem_cancelam_e_deixam_a_digitacao_intacta() {
     }
 }
 
+/// Abre o diálogo "Add property", espera ele existir e o campo ter o foco (o foco é pedido por
+/// alguns quadros), digita e só então manda o Enter. Sem a espera, sob carga o texto e o Enter
+/// chegavam antes do campo e se perdiam.
+fn add_property(session: &mut Session, name: &str) {
+    session.command("Add property");
+    session.wait_for(|app| app.dialog == Some(Dialog::AddProperty) && !app.dialog_focus);
+    session.type_text(name);
+    session.wait_for(|app| app.dialog_input == name);
+    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+}
+
 #[test]
 fn salvar_uma_copia_e_adicionar_propriedade_gravam_o_que_foi_pedido() {
     let mut session = Session::open();
     session.open_note("Second");
     session.command("Save a copy");
+    session.wait_for(|app| app.dialog == Some(Dialog::SaveCopy) && !app.dialog_focus);
     fill_dialog(&mut session, "Copias/Second backup.md");
     session.wait_for(|app| app.dialog.is_none());
     assert_eq!(
@@ -1366,19 +1378,22 @@ fn salvar_uma_copia_e_adicionar_propriedade_gravam_o_que_foi_pedido() {
         SECOND
     );
     // Propriedade nova entra no cabeçalho da nota ativa (a cópia).
-    session.command("Add property");
-    session.type_text("status");
-    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    add_property(&mut session, "status");
     session.wait_for(|app| app.dialog.is_none());
     assert!(
         session.active_text().starts_with("---\nstatus:"),
         "{}",
         session.active_text()
     );
+    // O autosave da nota (600 ms depois da edição) limpa `app.error` ao terminar; se ele caísse
+    // entre o Enter e a leitura do erro, a mensagem sumiria. Espera a nota ficar salva antes.
+    session.wait_for(|app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|tab| !tab.document.dirty())
+    });
     // Repetir a mesma propriedade é recusado com mensagem.
-    session.command("Add property");
-    session.type_text("status");
-    session.key(egui::Modifiers::NONE, egui::Key::Enter);
+    add_property(&mut session, "status");
     session.wait_for(|app| app.error.is_some());
     session.key(egui::Modifiers::NONE, egui::Key::Escape);
     assert_eq!(

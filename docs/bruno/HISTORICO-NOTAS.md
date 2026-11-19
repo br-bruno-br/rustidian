@@ -96,3 +96,30 @@ Teste de propriedade: reconstruir **cada** versão e comparar com a impressão d
 - **Android:** a crate `zstd` compila C (zstd-sys). Funciona com o NDK, mas é mais uma coisa no build. Alternativas em Rust puro: `lz4_flex` (mais rápido, comprime menos) ou `ruzstd`. Medir os dois.
 - **Sync:** na H1 o histórico é local de cada aparelho. Sincronizar o histórico fica para depois da H2.
 - **Nunca gravar na linha da tela:** a gravação e a compactação vão numa linha de fundo.
+
+## H2 Máquina do tempo: o que foi feito (19/11/2026)
+
+Ramo `h2-maquina-tempo`, partindo da H1 (0ef6ed5). Tudo em pt-BR e sem gravar tecla a tecla: a versão continua nascendo no fim da frase, na pausa, ao salvar e ao trocar de nota (o `Agrupador` da H1).
+
+**Na tela de versões** (`src/recovery_ui.rs`):
+- **Linha do tempo:** uma barra deslizante da versão mais antiga (esquerda) à mais nova (direita), com ◀ e ▶. Arrastar mostra o texto daquele momento com o que entrou em verde e o que saiu em vermelho, por palavra (contra a versão anterior, ou contra o texto atual se "Comparar com o texto atual" estiver ligado). A lista da esquerda acompanha. A barra lê uma versão por vez e a última posição vence: arrastar rápido não trava nem faz o botão voltar.
+- **Versões com nome:** "Dar nome" / "Mudar nome" / "Tirar o nome" (até 80 caracteres). A versão com nome aparece em destaque na lista, ganha um tracinho na barra e nunca sai do histórico. O botão "Só com nome" filtra a lista.
+- **Apagar do histórico:** cola-se um trecho (uma senha, um dado colado por engano) e ele some de todas as versões da nota, ou de todas as notas do cofre. Pede 3 caracteres ou mais e avisa se a nota ainda tem o trecho (senão a próxima versão o traz de volta). Não dá para desfazer.
+
+**Nas configurações** (Recuperação de arquivos), os dois campos que diziam "Sem efeito" agora valem:
+- **Guardar todas as versões por N dias** (`keepDays`, padrão 1): nesse período nenhuma versão sai.
+- **Intervalo das versões antigas** (`intervalMinutes`, padrão 5): depois disso fica 1 versão a cada N minutos até 7 dias, 1 por dia até 30 dias e 1 por semana para sempre. Com 0, todas ficam até 7 dias.
+- A mudança vale 1 minuto depois do último ajuste (arrastar de 30 para 1 dia não apaga nada no caminho).
+- **Espaço:** "N versões de M notas · X em disco" e o botão **Compactar agora**. A compactação também roda sozinha: depois de cada poda que tirou algo, ou quando o arquivo passa de 1 MB e do dobro do tamanho da última compactação.
+
+**Por baixo:** `PoliticaRetencao` ganhou `intervalo` e `intervalo_ate` (o padrão do crate continua o da H1); `Config::politica()` traduz as configurações; a linha de fundo ganhou `nomear`, `estatisticas`, `compactar`, `apagar_texto_em_todas`, `podar_agora` e `ajustar_politica` (nada disso roda no quadro da tela). Testes de GUI sem janela para a barra, o coalescer, os nomes, a poda que poupa a nomeada, o apagar e a página de configurações. Prints em `C:/dev/_wt/prints-rustidian/h2/`.
+
+**Também:** o teste `salvar_uma_copia_e_adicionar_propriedade...` falhava 6 em 20 mesmo sem carga. A causa não era o Enter: o salvamento automático da nota (600 ms depois) apaga a mensagem de erro do diálogo. O teste agora espera o salvamento; 20/20 e 5/5 com carga.
+
+**Ficou para depois:**
+- Teto de espaço por nota e por cofre (o briefing pede "configurável"): a compactação e a retenção seguram o crescimento, mas não há teto.
+- O aviso "a nota ainda tem este trecho" olha o arquivo salvo, não o que está só no editor sem salvar.
+- O salvamento automático apagar a mensagem de erro de um diálogo aberto parece um defeito do app (`after_note_saved` zera `error`); não foi mexido.
+- `.canvas` continua fora do histórico.
+- O histórico segue local, sem sync e sem cifra (fica para depois da H2, como já dizia o plano).
+- Detalhes de acabamento: "1 dias" no singular e "5.0 min" com ponto (o campo numérico do egui usa sufixo e ponto fixos); os botões alternáveis "Só com nome" e "Em todas as notas do cofre" desligados parecem texto comum.

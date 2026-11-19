@@ -633,15 +633,16 @@ impl NotesApp {
                                 ui.separator();
                                 changed |= row(
                                     ui,
-                                    "Intervalo entre versões",
-                                    "Sem efeito: o histórico agrupa sozinho, no fim da frase, ao pular de parágrafo, depois de 2 s parado, a cada ~300 caracteres e ao salvar.",
+                                    "Intervalo das versões antigas",
+                                    "Passado o período abaixo, fica 1 versão a cada N minutos até 7 dias; depois 1 por dia até 30 dias e 1 por semana para sempre. Com 0, todas ficam até 7 dias.",
                                     |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
                                                 &mut self.recovery_config.interval_minutes,
                                             )
                                             .range(0.0..=f64::MAX)
-                                            .speed(0.1),
+                                            .speed(0.1)
+                                            .suffix(" min"),
                                         );
                                         crate::ui_probe::record(
                                             ctx,
@@ -652,13 +653,17 @@ impl NotesApp {
                                     },
                                 );
                                 ui.separator();
-                                changed |=
-                                    row(ui, "Duração do histórico", "Sem efeito: tudo das últimas 24 h, 1 versão por hora na semana, 1 por dia no mês e 1 por semana depois.", |ui| {
+                                changed |= row(
+                                    ui,
+                                    "Guardar todas as versões por",
+                                    "Nesse período nenhuma versão sai. Versões com nome nunca saem. A mudança vale depois de 1 minuto.",
+                                    |ui| {
                                         let response = ui.add(
                                             egui::DragValue::new(
                                                 &mut self.recovery_config.keep_days,
                                             )
-                                            .range(1.0..=f64::MAX),
+                                            .range(1.0..=f64::MAX)
+                                            .suffix(" dias"),
                                         );
                                         crate::ui_probe::record(
                                             ctx,
@@ -666,7 +671,50 @@ impl NotesApp {
                                             response.rect,
                                         );
                                         response.changed()
+                                    },
+                                );
+                                ui.separator();
+                                {
+                                    let ligado = self.recovery_config.enabled;
+                                    self.espaco.quadro(
+                                        ctx,
+                                        self.historico.as_ref(),
+                                        ligado,
+                                        self.recovery_manager.active(),
+                                    );
+                                    let rotulo = self.espaco.rotulo(ligado);
+                                    let ocupado = self.espaco.compactando();
+                                    let pronto = ligado
+                                        && !ocupado
+                                        && !self.espaco.calculando()
+                                        && self.historico.is_some();
+                                    let aviso = self.espaco.aviso.clone();
+                                    let mut compactar = false;
+                                    row(ui, "Espaço", &rotulo, |ui| {
+                                        let botao = ui.add_enabled(
+                                            pronto,
+                                            egui::Button::new("Compactar agora"),
+                                        );
+                                        crate::ui_probe::record(
+                                            ctx,
+                                            "settings-recovery-compact",
+                                            botao.rect,
+                                        );
+                                        compactar = botao.clicked();
+                                        if ocupado {
+                                            ui.spinner();
+                                        }
+                                        false
                                     });
+                                    if let Some(aviso) = aviso
+                                        && ligado
+                                    {
+                                        ui.label(RichText::new(aviso).size(13.0).weak());
+                                    }
+                                    if compactar && let Some(historico) = &self.historico {
+                                        self.espaco.compactar(historico);
+                                    }
+                                }
                                 ui.separator();
                                 row(
                                     ui,

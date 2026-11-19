@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
 type Result<T> = std::result::Result<T, String>;
@@ -59,6 +60,38 @@ impl Config {
 
     fn cutoff(&self, now_ms: i64) -> i64 {
         now_ms.saturating_sub((self.keep_days * 86_400_000.0) as i64)
+    }
+
+    /// A política de retenção do novo histórico (`nota-historico`) que esta configuração pede:
+    /// tudo por `keep_days` dias (no mínimo 1); depois, uma versão por `interval_minutes` até
+    /// 7 dias (ou até `keep_days`, se for maior); depois, uma por dia até 30 dias (idem); depois,
+    /// uma por semana. Valor que não é número ou é negativo cai no padrão (1 dia, 5 minutos).
+    /// Intervalo zero guarda tudo na segunda faixa.
+    pub fn politica(&self) -> nota_historico::PoliticaRetencao {
+        const DIA: f64 = 86_400.0;
+        // Um teto só para `Duration::from_secs_f64` nunca estourar com um número absurdo.
+        const TETO_S: f64 = 36_500.0 * DIA;
+        let padrao = Self::default();
+        let dias = if self.keep_days.is_finite() && self.keep_days >= 1.0 {
+            self.keep_days
+        } else {
+            padrao.keep_days
+        };
+        let minutos = if self.interval_minutes.is_finite() && self.interval_minutes >= 0.0 {
+            self.interval_minutes
+        } else {
+            padrao.interval_minutes
+        };
+        let tudo_ate = Duration::from_secs_f64((dias * DIA).min(TETO_S));
+        let intervalo = Duration::from_secs_f64((minutos * 60.0).min(TETO_S));
+        let intervalo_ate = tudo_ate.max(Duration::from_secs(7 * 86_400));
+        let por_dia_ate = intervalo_ate.max(Duration::from_secs(30 * 86_400));
+        nota_historico::PoliticaRetencao {
+            tudo_ate,
+            intervalo,
+            intervalo_ate,
+            por_dia_ate,
+        }
     }
 }
 
@@ -439,4 +472,82 @@ fn supported(path: &Path) -> Result<&str> {
     }
     path.to_str()
         .ok_or_else(|| "Este nome de arquivo não pode ser guardado no histórico local.".into())
+}
+
+#[cfg(test)]
+mod politica_testes {
+    use super::*;
+
+    const DIA: u64 = 86_400;
+
+    fn dias(n: u64) -> Duration {
+        Duration::from_secs(n * DIA)
+    }
+
+    #[test]
+    fn padrao_do_config_e_o_padrao_da_retencao() {
+        let p = Config::default().politica();
+        assert_eq!(p.tudo_ate, dias(1));
+        assert_eq!(p.intervalo, Duration::from_secs(300));
+        assert_eq!(p.intervalo_ate, dias(7));
+        assert_eq!(p.por_dia_ate, dias(30));
+    }
+
+    #[test]
+    fn guardar_dez_dias_estende_a_segunda_faixa() {
+        let p = Config {
+            keep_days: 10.0,
+            ..Config::default()
+        }
+        .politica();
+        assert_eq!(p.tudo_ate, dias(10));
+        assert_eq!(p.intervalo_ate, dias(10));
+        assert_eq!(p.por_dia_ate, dias(30));
+    }
+
+    #[test]
+    fn guardar_quarenta_e_cinco_dias_estende_a_terceira_faixa() {
+        let p = Config {
+            keep_days: 45.0,
+            ..Config::default()
+        }
+        .politica();
+        assert_eq!(p.tudo_ate, dias(45));
+        assert_eq!(p.intervalo_ate, dias(45));
+        assert_eq!(p.por_dia_ate, dias(45));
+    }
+
+    #[test]
+    fn valores_invalidos_caem_no_padrao_e_zero_vale() {
+        let ruim = Config {
+            keep_days: f64::NAN,
+            interval_minutes: -3.0,
+            enabled: true,
+        }
+        .politica();
+        assert_eq!(ruim.tudo_ate, dias(1));
+        assert_eq!(ruim.intervalo, Duration::from_secs(300));
+        let curto = Config {
+            keep_days: 0.2,
+            interval_minutes: f64::INFINITY,
+            enabled: true,
+        }
+        .politica();
+        assert_eq!(curto.tudo_ate, dias(1));
+        assert_eq!(curto.intervalo, Duration::from_secs(300));
+        let zero = Config {
+            interval_minutes: 0.0,
+            ..Config::default()
+        }
+        .politica();
+        assert_eq!(zero.intervalo, Duration::ZERO);
+        // Número absurdo não derruba o app.
+        let enorme = Config {
+            keep_days: 1e300,
+            interval_minutes: 1e300,
+            enabled: true,
+        }
+        .politica();
+        assert!(enorme.tudo_ate >= dias(36_000));
+    }
 }

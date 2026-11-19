@@ -113,6 +113,15 @@ pub struct RelatorioCompactacao {
     pub bytes_depois: u64,
 }
 
+/// O que apagar um trecho de todas as notas fez.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ApagadoEmTodas {
+    /// Em quantas notas o trecho aparecia.
+    pub notas: usize,
+    /// Em quantas versões (somando todas as notas).
+    pub versoes: usize,
+}
+
 /// Quanto espaço uma nota usa.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EstatisticasNota {
@@ -883,6 +892,42 @@ impl Historico {
         if trecho.is_empty() {
             return Err(Erro::Argumento("trecho vazio".into()));
         }
+        let n = self.apagar_texto_sem_compactar(nota, trecho)?;
+        if n > 0 {
+            self.db.compact()?;
+            self.nao_persistido = false;
+        }
+        Ok(n)
+    }
+
+    /// Como [`Historico::apagar_texto_do_historico`], mas em **todas** as notas (uma senha colada
+    /// em mais de uma). O arquivo é compactado uma vez, no fim, e só se algo foi apagado. Devolve
+    /// em quantas notas e em quantas versões o trecho aparecia. Valem os mesmos limites: só some o
+    /// trecho inteiro, e é preciso tirá-lo também dos `.md`.
+    ///
+    /// Custo: reconstrói e recodifica a cadeia de cada nota que tem o trecho; as outras só são
+    /// lidas. Rode em segundo plano.
+    pub fn apagar_texto_de_todas(&mut self, trecho: &str) -> Result<ApagadoEmTodas> {
+        if trecho.is_empty() {
+            return Err(Erro::Argumento("trecho vazio".into()));
+        }
+        let mut total = ApagadoEmTodas::default();
+        for (nome, _) in self.todas_as_notas()? {
+            let n = self.apagar_texto_sem_compactar(&NotaId(nome), trecho)?;
+            if n > 0 {
+                total.notas += 1;
+                total.versoes += n;
+            }
+        }
+        if total.versoes > 0 {
+            self.db.compact()?;
+            self.nao_persistido = false;
+        }
+        Ok(total)
+    }
+
+    /// O miolo de [`Historico::apagar_texto_do_historico`], sem compactar o arquivo. `trecho` não vazio.
+    fn apagar_texto_sem_compactar(&mut self, nota: &NotaId, trecho: &str) -> Result<usize> {
         let num = {
             let r = self.db.begin_read()?;
             let notas = r.open_table(NOTAS)?;
@@ -893,7 +938,7 @@ impl Historico {
         };
         let vazio = HashSet::new();
         let trocar = |t: &str| t.contains(trecho).then(|| t.replace(trecho, ""));
-        let n = self.reescrever_nota(
+        self.reescrever_nota(
             nota,
             num,
             &Mudancas {
@@ -901,12 +946,7 @@ impl Historico {
                 trocar: Some(&trocar),
                 refazer: false,
             },
-        )?;
-        if n > 0 {
-            self.db.compact()?;
-            self.nao_persistido = false;
-        }
-        Ok(n)
+        )
     }
 
     // --------------------------------------------------------- estatísticas

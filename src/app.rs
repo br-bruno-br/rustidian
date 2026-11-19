@@ -244,6 +244,7 @@ pub struct NotesApp {
     /// O histórico completo das notas (H1): uma linha de fundo dona de `.rustidian/historico.redb`.
     pub(crate) historico: Option<rustidian::historico_fundo::Historico>,
     historico_ui: historico_ui::Ligacao,
+    pub(crate) espaco: historico_ui::EspacoDoHistorico,
     recovery_changed_paths: std::collections::HashSet<PathBuf>,
     recovery_index_paths: std::collections::HashSet<PathBuf>,
     recovery_saved: std::collections::HashMap<PathBuf, String>,
@@ -367,6 +368,7 @@ impl NotesApp {
             recovery_config: Default::default(),
             historico: None,
             historico_ui: Default::default(),
+            espaco: Default::default(),
             recovery_changed_paths: Default::default(),
             recovery_index_paths: Default::default(),
             recovery_saved: Default::default(),

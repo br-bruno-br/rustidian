@@ -2,15 +2,18 @@
 //! quem chama passa o `agora`), no estilo do Time Machine do Mac.
 //!
 //! Padrão ([`PoliticaRetencao::default`]):
-//! - tudo das últimas 24 h;
-//! - 1 versão por hora até 7 dias;
-//! - 1 por dia até 30 dias;
+//! - tudo das últimas 24 h (`tudo_ate`);
+//! - 1 versão por intervalo (1 hora) até 7 dias (`intervalo_ate`);
+//! - 1 por dia até 30 dias (`por_dia_ate`);
 //! - 1 por semana depois disso, para sempre.
+//!
+//! O intervalo da segunda faixa é configurável (`intervalo`): com 5 minutos, fica a versão mais
+//! nova de cada balde de 5 minutos. Com `intervalo` zero nada é removido nessa faixa (guarda tudo).
 //!
 //! Sempre ficam: a versão mais nova da nota e as que têm nome. As versões com nome não ocupam a
 //! vaga do balde (podem sobrar duas no mesmo dia: a nomeada e a representante do dia).
 //!
-//! Os baldes são fixos no calendário UTC (hora cheia, dia, semana começando na segunda), não
+//! Os baldes são fixos no calendário UTC (múltiplos do intervalo desde a época, dia, semana começando na segunda), não
 //! relativos à idade. Assim a poda é idempotente: podar de novo, com o mesmo `agora`, não remove
 //! nada; e, com o passar do tempo, de cada balde fica a versão mais nova (o "estado final" da hora,
 //! do dia ou da semana).
@@ -26,8 +29,11 @@ const DIA_MS: u64 = 24 * HORA_MS;
 pub struct PoliticaRetencao {
     /// Até esta idade, tudo fica.
     pub tudo_ate: Duration,
-    /// Até esta idade, 1 por hora.
-    pub por_hora_ate: Duration,
+    /// Tamanho do balde da segunda faixa: dela, fica a versão mais nova de cada intervalo.
+    /// Zero = nada sai na segunda faixa.
+    pub intervalo: Duration,
+    /// Até esta idade, 1 por `intervalo`.
+    pub intervalo_ate: Duration,
     /// Até esta idade, 1 por dia. Depois disso, 1 por semana.
     pub por_dia_ate: Duration,
 }
@@ -36,7 +42,8 @@ impl Default for PoliticaRetencao {
     fn default() -> Self {
         Self {
             tudo_ate: Duration::from_secs(24 * 3600),
-            por_hora_ate: Duration::from_secs(7 * 24 * 3600),
+            intervalo: Duration::from_secs(3600),
+            intervalo_ate: Duration::from_secs(7 * 24 * 3600),
             por_dia_ate: Duration::from_secs(30 * 24 * 3600),
         }
     }
@@ -61,7 +68,8 @@ pub(crate) fn escolher_remocoes(
     let mut remover = HashSet::new();
     let ultima = versoes.last().map(|v| v.id);
     let tudo = p.tudo_ate.as_millis() as u64;
-    let hora = p.por_hora_ate.as_millis() as u64;
+    let intervalo = p.intervalo.as_millis() as u64;
+    let ate_intervalo = p.intervalo_ate.as_millis() as u64;
     let dia = p.por_dia_ate.as_millis() as u64;
     for v in versoes {
         if v.nomeada || Some(v.id) == ultima {
@@ -71,8 +79,12 @@ pub(crate) fn escolher_remocoes(
         if idade <= tudo {
             continue;
         }
-        let balde = if idade <= hora {
-            (1u8, v.quando_ms / HORA_MS)
+        let balde = if idade <= ate_intervalo {
+            // Intervalo zero: não há balde, a versão fica (e não divide por zero).
+            if intervalo == 0 {
+                continue;
+            }
+            (1u8, v.quando_ms / intervalo)
         } else if idade <= dia {
             (2u8, v.quando_ms / DIA_MS)
         } else {
@@ -162,6 +174,58 @@ mod testes {
         let resto: Vec<Candidata> = v.iter().copied().filter(|c| !r.contains(&c.id)).collect();
         assert!(!r.is_empty());
         assert!(escolher_remocoes(&resto, agora, &p).is_empty());
+    }
+
+    #[test]
+    fn intervalo_de_cinco_minutos_fica_a_mais_nova_de_cada_balde() {
+        let agora = 100 * D;
+        let m5 = 5 * 60_000;
+        // Há 3 dias: quatro versões em dois baldes de 5 min.
+        let base = agora - 3 * D;
+        let base = base - base % m5;
+        // A quinta é recente (a mais nova da nota nunca sai).
+        let v = versoes(&[
+            base + 1_000,
+            base + 100_000,
+            base + m5 + 2_000,
+            base + m5 + 200_000,
+            agora - 1_000,
+        ]);
+        let p = PoliticaRetencao {
+            intervalo: Duration::from_secs(300),
+            ..PoliticaRetencao::default()
+        };
+        assert_eq!(escolher_remocoes(&v, agora, &p), HashSet::from([1, 3]));
+        // Com o balde de 1 hora do padrão, as quatro caem no mesmo balde (agora é hora cheia).
+        let r = escolher_remocoes(&v, agora, &PoliticaRetencao::default());
+        assert_eq!(r, HashSet::from([1, 2, 3]));
+    }
+
+    #[test]
+    fn intervalo_zero_nao_remove_nada_na_segunda_faixa() {
+        let agora = 100 * D;
+        let base = agora - 3 * D;
+        let v = versoes(&[base, base + 1, base + 2, base + 3, base + H]);
+        let p = PoliticaRetencao {
+            intervalo: Duration::ZERO,
+            ..PoliticaRetencao::default()
+        };
+        assert!(escolher_remocoes(&v, agora, &p).is_empty());
+    }
+
+    #[test]
+    fn padrao_continua_igual_ao_da_h1() {
+        let p = PoliticaRetencao::default();
+        assert_eq!(p.tudo_ate, Duration::from_secs(24 * 3600));
+        assert_eq!(p.intervalo, Duration::from_secs(3600));
+        assert_eq!(p.intervalo_ate, Duration::from_secs(7 * 24 * 3600));
+        assert_eq!(p.por_dia_ate, Duration::from_secs(30 * 24 * 3600));
+        // Mesmo resultado de "1 por hora": os baldes de 1 h do intervalo são os da hora cheia.
+        let agora = 100 * D;
+        let base = agora - 3 * D;
+        let base = base - base % H;
+        let v = versoes(&[base + 60_000, base + 120_000, base + H + 5]);
+        assert_eq!(escolher_remocoes(&v, agora, &p), HashSet::from([1]));
     }
 
     #[test]
