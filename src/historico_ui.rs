@@ -32,6 +32,11 @@ impl NotesApp {
     /// Uma vez por quadro: sobe o histórico do cofre, entrega o que mudou nas abas e recolhe os
     /// avisos. Nada aqui toca banco, compressão ou hash.
     pub(crate) fn historico_tick(&mut self, ctx: &egui::Context) {
+        if self.dialog != Some(Dialog::Settings)
+            || self.settings_page != settings_ui::Page::Recovery
+        {
+            self.espaco.fechada();
+        }
         let Some(vault) = &self.vault else { return };
         if self.historico.is_none() {
             let acordar = ctx.clone();
@@ -153,5 +158,169 @@ impl NotesApp {
                 historico.gravar(&path, &texto, origem);
             }
         }
+    }
+}
+
+/// Número com ponto de milhar: 1234 vira "1.234".
+pub(crate) fn milhar(numero: usize) -> String {
+    let digitos = numero.to_string();
+    let mut saida = String::new();
+    for (i, c) in digitos.chars().enumerate() {
+        if i > 0 && (digitos.len() - i) % 3 == 0 {
+            saida.push('.');
+        }
+        saida.push(c);
+    }
+    saida
+}
+
+/// "380 B", "380 KB", "1,2 MB": o tamanho em disco como a pessoa lê.
+pub(crate) fn tamanho_legivel(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{} KB", (bytes as f64 / 1024.0).round() as u64)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)).replace('.', ",")
+    }
+}
+
+/// O que a página "Recuperação de arquivos" sabe do espaço do histórico. Nada aqui espera a linha
+/// de fundo: só `try_recv` a cada quadro.
+#[derive(Default)]
+pub(crate) struct EspacoDoHistorico {
+    numeros: Option<rustidian::historico_fundo::Estatisticas>,
+    esperando:
+        Option<std::sync::mpsc::Receiver<Result<rustidian::historico_fundo::Estatisticas, String>>>,
+    compactando: Option<
+        std::sync::mpsc::Receiver<Result<rustidian::historico_fundo::RelatorioCompactacao, String>>,
+    >,
+    /// Aviso do fim da compactação, ou a mensagem de erro.
+    pub(crate) aviso: Option<String>,
+    /// A página já pediu os números nesta abertura.
+    pediu: bool,
+    /// A gerência do histórico (limpar, apagar) estava ocupada no quadro anterior.
+    gerencia_ativa: bool,
+}
+
+impl EspacoDoHistorico {
+    /// A página saiu da tela: a próxima abertura pede os números de novo.
+    pub(crate) fn fechada(&mut self) {
+        self.pediu = false;
+    }
+
+    pub(crate) fn calculando(&self) -> bool {
+        self.esperando.is_some() || (self.numeros.is_none() && self.aviso.is_none())
+    }
+
+    pub(crate) fn compactando(&self) -> bool {
+        self.compactando.is_some()
+    }
+
+    /// O rótulo da linha "Espaço".
+    pub(crate) fn rotulo(&self, ligado: bool) -> String {
+        if !ligado {
+            return "Histórico desligado".into();
+        }
+        if let Some(erro) = &self.aviso
+            && self.numeros.is_none()
+        {
+            return erro.clone();
+        }
+        match self.numeros {
+            Some(n) => format!(
+                "{} versões de {} notas · {} em disco",
+                milhar(n.versoes),
+                milhar(n.notas),
+                tamanho_legivel(n.tamanho_em_disco)
+            ),
+            None => "Calculando…".into(),
+        }
+    }
+
+    fn pedir_numeros(&mut self, historico: &Historico) {
+        match historico.estatisticas() {
+            Ok(rx) => self.esperando = Some(rx),
+            Err(erro) => self.aviso = Some(erro),
+        }
+    }
+
+    pub(crate) fn compactar(&mut self, historico: &Historico) {
+        match historico.compactar() {
+            Ok(rx) => {
+                self.compactando = Some(rx);
+                self.aviso = None;
+            }
+            Err(erro) => self.aviso = Some(erro),
+        }
+    }
+
+    /// Chamado a cada quadro em que a página aparece: pede os números na primeira vez (e depois
+    /// de limpar), recolhe respostas e pede repaint enquanto algo espera.
+    pub(crate) fn quadro(
+        &mut self,
+        ctx: &egui::Context,
+        historico: Option<&Historico>,
+        ligado: bool,
+        gerencia_ativa: bool,
+    ) {
+        let nova_abertura = !self.pediu;
+        self.pediu = true;
+        let Some(historico) = historico.filter(|_| ligado) else {
+            return;
+        };
+        let acabou_de_limpar = self.gerencia_ativa && !gerencia_ativa;
+        self.gerencia_ativa = gerencia_ativa;
+        if nova_abertura {
+            self.numeros = None;
+            self.aviso = None;
+        }
+        if (nova_abertura || acabou_de_limpar) && self.esperando.is_none() {
+            self.pedir_numeros(historico);
+        }
+        if let Some(rx) = &self.esperando
+            && let Ok(resposta) = rx.try_recv()
+        {
+            self.esperando = None;
+            match resposta {
+                Ok(n) => self.numeros = Some(n),
+                Err(erro) => self.aviso = Some(erro),
+            }
+        }
+        if let Some(rx) = &self.compactando
+            && let Ok(resposta) = rx.try_recv()
+        {
+            self.compactando = None;
+            match resposta {
+                Ok(r) => {
+                    self.aviso = Some(format!(
+                        "Compactado: {} → {}",
+                        tamanho_legivel(r.bytes_antes),
+                        tamanho_legivel(r.bytes_depois)
+                    ));
+                    self.pedir_numeros(historico);
+                }
+                Err(erro) => self.aviso = Some(erro),
+            }
+        }
+        if self.esperando.is_some() || self.compactando.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+    }
+}
+
+#[cfg(test)]
+mod testes_do_espaco {
+    use super::*;
+
+    #[test]
+    fn milhar_e_tamanho() {
+        assert_eq!(milhar(0), "0");
+        assert_eq!(milhar(999), "999");
+        assert_eq!(milhar(1234), "1.234");
+        assert_eq!(milhar(1_234_567), "1.234.567");
+        assert_eq!(tamanho_legivel(512), "512 B");
+        assert_eq!(tamanho_legivel(380 * 1024), "380 KB");
+        assert_eq!(tamanho_legivel(1_258_291), "1,2 MB");
     }
 }
