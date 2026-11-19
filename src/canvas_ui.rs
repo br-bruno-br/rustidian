@@ -1897,13 +1897,6 @@ fn show_toolbar(
                         state.fit();
                     }
                     ui.label(format!("{:.0}%", state.camera.zoom * 100.0));
-                    if ui
-                        .button("Lista")
-                        .on_hover_text("Ler o quadro como uma nota (Ctrl+Shift+B alterna)")
-                        .clicked()
-                    {
-                        tab.board_list = true;
-                    }
                     ui.separator();
                     if ui
                         .add_enabled(!state.undo.is_empty(), egui::Button::new("Desfazer"))

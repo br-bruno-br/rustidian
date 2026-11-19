@@ -612,3 +612,26 @@ fn o_seletor_num_quadro_sem_nota_par_avisa_em_vez_de_criar() {
         session.app().status
     );
 }
+
+#[test]
+fn a_barra_de_ferramentas_do_quadro_nao_tem_mais_o_botao_lista() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    // A barra continua com as ferramentas de criar cartão...
+    for label in ["Texto", "Link", "Grupo"] {
+        assert!(session.has_label(label), "falta o botão {label}");
+    }
+    // ...e o único "Lista" fora do rodapé é o segmento do cabeçalho.
+    let outside_header_and_footer = session
+        .harness
+        .query_all_by_label("Lista")
+        .filter(|node| node.rect().min.y > 130.0 && node.rect().min.y < 800.0 - 28.0)
+        .count();
+    assert_eq!(outside_header_and_footer, 0);
+    // O seletor segue levando à Lista.
+    click_segment(&mut session, "Lista");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+}
