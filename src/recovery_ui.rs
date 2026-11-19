@@ -66,6 +66,36 @@ fn indice_na_barra(versoes: &[Linha], escolhida: Option<u64>) -> usize {
         .map_or(ultima, |lugar| ultima - lugar)
 }
 
+/// A barra da linha do tempo: o trilho e o preenchimento até a posição aparecem nos dois temas
+/// (as cores do `theme::slider` compacto), e a altura de 28 px deixa o dedo acertar.
+fn barra_do_tempo(ui: &mut egui::Ui, valor: &mut usize, ultimo: usize) -> egui::Response {
+    ui.scope(|ui| {
+        let dark = ui.visuals().dark_mode;
+        let style = ui.style_mut();
+        style.spacing.interact_size.y = 28.0;
+        style.spacing.slider_rail_height = 4.0;
+        for (visuals, fill, outline) in [
+            (&mut style.visuals.widgets.inactive, 66, 170),
+            (&mut style.visuals.widgets.hovered, 108, 190),
+            (&mut style.visuals.widgets.active, 128, 200),
+        ] {
+            visuals.bg_fill = egui::Color32::from_gray(if dark { fill } else { 230 - fill / 2 });
+            visuals.fg_stroke = egui::Stroke::new(
+                1.0,
+                egui::Color32::from_gray(if dark { outline } else { 230 - outline }),
+            );
+            visuals.expansion = 0.0;
+        }
+        ui.add(
+            egui::Slider::new(valor, 0..=ultimo)
+                .show_value(false)
+                .handle_shape(egui::style::HandleShape::Circle)
+                .trailing_fill(true),
+        )
+    })
+    .inner
+}
+
 /// O texto de uma linha da lista, sempre em duas linhas (a altura é a mesma para `show_rows`).
 /// Sem nome: a hora, e embaixo "origem · mudança". Com nome: o nome em destaque, e embaixo
 /// "hora · origem · mudança".
@@ -76,6 +106,12 @@ fn texto_da_linha(
 ) -> egui::WidgetText {
     let info = &linha.info;
     let relativo = rotulo_relativo(agora, info.quando);
+    // Na linha com nome a hora vem curta ("08:27", "ontem 09:27"), para a mudança de tamanho caber.
+    let hora = relativo
+        .rsplit(" · ")
+        .next()
+        .unwrap_or(&relativo)
+        .to_owned();
     let detalhe = format!(
         "{} · {}",
         rotulo_origem(info.origem),
@@ -124,7 +160,7 @@ fn texto_da_linha(
         },
     );
     job.append(
-        &format!("{relativo} · {detalhe}"),
+        &format!("{hora} · {detalhe}"),
         0.0,
         TextFormat {
             font_id: fonte,
@@ -979,13 +1015,8 @@ impl Manager {
                                 }
                                 ui.spacing_mut().slider_width =
                                     (ui.available_width() - theme::space::CONTROL - sp).max(60.0);
-                                ui.spacing_mut().slider_rail_height = 4.0;
                                 let mut valor = atual;
-                                let barra = ui.add(
-                                    egui::Slider::new(&mut valor, 0..=total - 1)
-                                        .show_value(false)
-                                        .handle_shape(egui::style::HandleShape::Circle),
-                                );
+                                let barra = barra_do_tempo(ui, &mut valor, total - 1);
                                 barra.widget_info(|| {
                                     egui::WidgetInfo::slider(true, valor as f64, "Linha do tempo")
                                 });
@@ -1005,8 +1036,8 @@ impl Manager {
                                                 / (total - 1) as f32;
                                         ui.painter().line_segment(
                                             [
-                                                egui::pos2(x, barra.rect.bottom() - 8.0),
-                                                egui::pos2(x, barra.rect.bottom() - 1.0),
+                                                egui::pos2(x, barra.rect.bottom() - 7.0),
+                                                egui::pos2(x, barra.rect.bottom() + 1.0),
                                             ],
                                             egui::Stroke::new(2.0, marca),
                                         );
@@ -1289,8 +1320,15 @@ impl Manager {
                     self.erase_focus = ui.is_sizing_pass();
                 }
                 ui_probe::record(ctx, "recovery-erase-field", field.rect);
-                let all = ui.checkbox(&mut self.erase_all, "Em todas as notas do cofre");
+                // Um botão alternável como os da tela: o quadradinho do checkbox some no tema escuro.
+                let all = ui.add(
+                    egui::Button::selectable(self.erase_all, "Em todas as notas do cofre")
+                        .min_size(touch),
+                );
                 ui_probe::record(ctx, "recovery-erase-all", all.rect);
+                if all.clicked() {
+                    self.erase_all = !self.erase_all;
+                }
                 if ainda_na_nota {
                     let aviso = ui.colored_label(
                         ui.visuals().error_fg_color,
