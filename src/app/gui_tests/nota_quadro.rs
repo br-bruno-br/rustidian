@@ -1,5 +1,5 @@
-//! H2b: trocar entre nota e quadro sem perder nada. O atalho Ctrl+Shift+B cria (e abre) o quadro
-//! par de uma nota, e num quadro alterna entre o desenho e a Lista; Ctrl+Alt+B volta à nota.
+//! H2b: trocar entre nota e quadro sem perder nada. O atalho Ctrl+Shift+B cicla Nota, Quadro e
+//! Lista (cria o quadro par de uma nota se faltar); a paleta vai direto a um modo.
 //! "Transformar em nota" troca um cartão de texto por um cartão vivo de uma nota nova, e renomear
 //! uma nota pelo app leva os cartões dos quadros junto.
 
@@ -14,7 +14,7 @@ fn toggle(session: &mut Session) {
 }
 
 fn to_note(session: &mut Session) {
-    session.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+    session.command("ir para a nota");
 }
 
 fn active_path(session: &Session) -> PathBuf {
@@ -96,7 +96,7 @@ fn o_atalho_pela_paleta_faz_o_mesmo_e_a_nota_e_o_quadro_vao_e_voltam_sem_refazer
     wait_active(&mut session, "Alpha.canvas");
     let first = read(&session, "Alpha.canvas");
 
-    // Volta à nota par e de novo ao quadro: o quadro que já existe é aberto, não refeito.
+    // Volta à nota par pela paleta e de novo ao quadro: o quadro que já existe é aberto, não refeito.
     to_note(&mut session);
     wait_active(&mut session, "Alpha.md");
     assert_eq!(session.active_text(), ALPHA);
@@ -138,8 +138,9 @@ fn no_quadro_o_atalho_alterna_a_lista_na_mesma_aba_e_guarda_o_modo() {
     // Ler a Lista não muda o arquivo nem suja a aba.
     assert!(!session.app().tabs[0].document.dirty());
 
+    // Da Lista, o mesmo atalho volta à nota par (Home.md existe) e a Lista some.
     toggle(&mut session);
-    assert!(!session.app().tabs[0].board_list, "de novo volta ao quadro");
+    wait_active(&mut session, "Home.md");
     assert!(!session.has_label("Lista do quadro"));
 }
 
@@ -350,10 +351,8 @@ fn o_rodape_mostra_o_modo_atual_e_a_ajuda_da_lista_some_ao_sair_dela() {
     assert_eq!(footer_mode(&session), Some(BoardMode::List));
     assert!(!session.has_label("Ctrl+Shift+B volta ao quadro"));
 
-    // De volta ao quadro e depois a uma nota comum: nenhuma mensagem da Lista sobrevive.
+    // Da Lista de volta à nota (o caso do print 05): nenhuma mensagem da Lista sobrevive.
     toggle(&mut session);
-    assert_eq!(footer_mode(&session), Some(BoardMode::Board));
-    to_note(&mut session);
     wait_active(&mut session, "Home.md");
     assert_eq!(footer_mode(&session), Some(BoardMode::Note));
     assert!(
@@ -398,4 +397,120 @@ fn a_mensagem_de_status_sai_quando_a_aba_ou_o_modo_muda() {
     toggle(&mut session);
     assert!(session.app().tabs[0].board_list);
     assert!(session.app().status.is_empty(), "{}", session.app().status);
+}
+
+fn mode(session: &Session) -> Option<BoardMode> {
+    session.app().board_mode()
+}
+
+#[test]
+fn o_atalho_cicla_nota_quadro_lista_nota_na_mesma_aba() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    let board = read(&session, "Home.canvas");
+
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.active_text(), HOME);
+
+    // Uma volta inteira, sempre na mesma aba, e o quadro não é refeito.
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(read(&session, "Home.canvas"), board);
+    assert_eq!(session.app().tabs.len(), 1);
+}
+
+#[test]
+fn sem_nota_par_a_lista_volta_ao_quadro() {
+    let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().open_note(Path::new("Ideias.canvas"));
+    session.settle();
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    toggle(&mut session);
+    assert_eq!(
+        mode(&session),
+        Some(BoardMode::Board),
+        "sem Ideias.md, volta ao quadro"
+    );
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert!(
+        !session.path("Ideias.md").exists(),
+        "nenhuma nota nasce por ora"
+    );
+}
+
+#[test]
+fn ctrl_alt_b_nao_e_mais_atalho() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    to_note_old_shortcut(&mut session);
+    session.settle();
+    assert_eq!(
+        active_path(&session),
+        Path::new("Home.canvas"),
+        "Ctrl+Alt+B não faz nada"
+    );
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+}
+
+fn to_note_old_shortcut(session: &mut Session) {
+    session.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+}
+
+#[test]
+fn a_paleta_vai_direto_a_nota_ao_quadro_e_a_lista() {
+    let mut session = Session::open();
+    session.open_note("Alpha");
+
+    // Da nota direto à Lista: cria o quadro e já abre na Lista.
+    session.command("ir para a lista");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    assert!(session.path("Alpha.canvas").exists());
+
+    session.command("ir para o quadro");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    session.command("ir para a lista");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    session.command("ir para a nota");
+    wait_active(&mut session, "Alpha.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    session.command("ir para o quadro");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    assert_eq!(session.app().tabs.len(), 1);
+}
+
+#[test]
+fn a_paleta_nao_oferece_ir_para_o_modo_em_que_ja_esta() {
+    let mut session = Session::open();
+    session.open_note("Alpha");
+    let names = |session: &mut Session| -> Vec<String> {
+        session.key(CTRL, egui::Key::P);
+        session.type_text("ir para");
+        let found = ["Ir para a nota", "Ir para o quadro", "Ir para a lista"]
+            .into_iter()
+            .filter(|name| session.has_label(name))
+            .map(String::from)
+            .collect();
+        session.key(NONE, egui::Key::Escape);
+        found
+    };
+    assert_eq!(names(&mut session), ["Ir para o quadro", "Ir para a lista"]);
+    toggle(&mut session);
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(names(&mut session), ["Ir para a nota", "Ir para a lista"]);
 }

@@ -2094,15 +2094,11 @@ impl NotesApp {
         }
         if self.dialog.is_none() {
             // Ctrl+Shift+A só abre a aba do agente com a feature `agente`; sem ela nada acontece.
-            // H2b: Ctrl+Shift+B alterna nota/quadro (e Lista); Ctrl+Alt+B vai do quadro à nota.
+            // H2b: Ctrl+Shift+B cicla Nota, Quadro e Lista.
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::B)
             }) {
-                self.toggle_note_board();
-            } else if ctx.input_mut(|input| {
-                input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::B)
-            }) {
-                self.open_board_note();
+                self.cycle_board_mode();
             }
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::A)
@@ -5903,20 +5899,26 @@ impl NotesApp {
                             !matches!(
                                 command.name,
                                 rustidian::commands::TOGGLE_CANVAS_LIBRARY
-                                    | rustidian::commands::OPEN_BOARD_NOTE
                                     | rustidian::commands::EXPORT_BOARD_AS_NOTE
                             )
                         });
                     }
-                    if !tab.is_some_and(|tab| {
-                        crate::canvas_ui::is_canvas_tab(tab)
-                            || (rustidian::vault::is_markdown(&tab.document.path)
-                                && !tab.document.is_blank())
-                    }) {
-                        matches.retain(|command| {
-                            command.name != rustidian::commands::TOGGLE_NOTE_BOARD
-                        });
-                    }
+                    // Nota, quadro e Lista: só onde há o que alternar, e sem o comando que leva
+                    // ao modo em que já se está.
+                    let mode = self.board_mode();
+                    matches.retain(|command| match command.name {
+                        rustidian::commands::TOGGLE_NOTE_BOARD => mode.is_some(),
+                        rustidian::commands::GO_TO_NOTE => {
+                            mode.is_some_and(|mode| mode != BoardMode::Note)
+                        }
+                        rustidian::commands::GO_TO_BOARD => {
+                            mode.is_some_and(|mode| mode != BoardMode::Board)
+                        }
+                        rustidian::commands::GO_TO_LIST => {
+                            mode.is_some_and(|mode| mode != BoardMode::List)
+                        }
+                        _ => true,
+                    });
                     if !self.panes.is_split() {
                         matches.retain(|command| {
                             !matches!(
@@ -6818,8 +6820,10 @@ impl NotesApp {
                     self.canvases.toggle_library(tab.id());
                 }
             }
-            rustidian::commands::TOGGLE_NOTE_BOARD => self.toggle_note_board(),
-            rustidian::commands::OPEN_BOARD_NOTE => self.open_board_note(),
+            rustidian::commands::TOGGLE_NOTE_BOARD => self.cycle_board_mode(),
+            rustidian::commands::GO_TO_NOTE => self.go_to_mode(BoardMode::Note),
+            rustidian::commands::GO_TO_BOARD => self.go_to_mode(BoardMode::Board),
+            rustidian::commands::GO_TO_LIST => self.go_to_mode(BoardMode::List),
             rustidian::commands::EXPORT_BOARD_AS_NOTE => self.export_board_list(),
             rustidian::commands::FOCUS_OTHER_PANE => {
                 if let Some(other) = self.panes.other() {
@@ -7163,31 +7167,102 @@ impl NotesApp {
         }
     }
 
-    /// H2b: alterna nota e quadro. Numa nota `X.md`, abre o quadro par `X.canvas` (cria a
-    /// partir da nota se não existe, sem tocar no `.md`). Num quadro, alterna a mesma aba entre
-    /// o quadro e a Lista; do código-fonte volta ao quadro desenhado.
-    fn toggle_note_board(&mut self) {
+    /// H2b: Ctrl+Shift+B cicla Nota, Quadro e Lista. Da Lista volta à nota par (ou ao quadro,
+    /// se a nota par não existe). Num quadro em código-fonte, volta ao quadro desenhado.
+    fn cycle_board_mode(&mut self) {
+        let Some(mode) = self.board_mode() else {
+            if self.tabs.get(self.active).is_some_and(|tab| {
+                !tab.document.is_blank() && !tab.document.is_image() && tab.view != View::Graph
+            }) {
+                self.status = "Só uma nota ou um quadro alterna.".into();
+            }
+            return;
+        };
+        if mode == BoardMode::Board
+            && self
+                .tabs
+                .get(self.active)
+                .is_some_and(|tab| tab.view == View::Source)
+        {
+            self.go_to_mode(BoardMode::Board);
+            return;
+        }
+        let next = match mode {
+            BoardMode::Note => BoardMode::Board,
+            BoardMode::Board => BoardMode::List,
+            BoardMode::List if self.pair_note().is_some() => BoardMode::Note,
+            BoardMode::List => BoardMode::Board,
+        };
+        self.go_to_mode(next);
+    }
+
+    /// H2b: vai para o modo pedido (atalho, paleta e seletor do cabeçalho usam este caminho).
+    /// Quadro e Lista criam o quadro par de uma nota se ele não existe; Nota, num quadro sem
+    /// nota par, só avisa.
+    fn go_to_mode(&mut self, target: BoardMode) {
+        let Some(current) = self.board_mode() else {
+            return;
+        };
+        let source = self
+            .tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.view == View::Source);
+        match (current, target) {
+            (BoardMode::Note, BoardMode::Note) => {}
+            (BoardMode::Note, BoardMode::Board) => {
+                self.open_board_of_note();
+            }
+            (BoardMode::Note, BoardMode::List) => {
+                if self.open_board_of_note() {
+                    self.set_board_list(true);
+                }
+            }
+            (BoardMode::Board | BoardMode::List, BoardMode::Note) => self.open_pair_note(),
+            (BoardMode::Board, BoardMode::Board) | (BoardMode::List, BoardMode::Board) => {
+                if source {
+                    self.set_view(View::Read);
+                }
+                self.set_board_list(false);
+            }
+            (BoardMode::Board, BoardMode::List) => self.set_board_list(true),
+            (BoardMode::List, BoardMode::List) => {}
+        }
+    }
+
+    /// Liga ou desliga a Lista na aba ativa, se ela é um quadro (e a mostra desenhada, não como
+    /// código-fonte).
+    fn set_board_list(&mut self, on: bool) {
         let Some(tab) = self.tabs.get_mut(self.active) else {
             return;
         };
-        if tab.document.is_blank() || tab.document.is_image() || tab.view == View::Graph {
+        if !rustidian::canvas::is_canvas(&tab.document.path) || tab.document.is_blank() {
             return;
         }
-        if rustidian::canvas::is_canvas(&tab.document.path) {
-            if tab.view == View::Source {
-                tab.set_view(View::Read);
-                tab.board_list = false;
-            } else {
-                tab.board_list = !tab.board_list;
-            }
-            // O modo atual aparece no rodapé (`BoardMode`); nada de mensagem que ficaria velha.
-            self.status.clear();
-            return;
+        if on && tab.view == View::Source {
+            tab.set_view(View::Read);
         }
-        if !rustidian::vault::is_markdown(&tab.document.path) {
-            self.status = "Só uma nota ou um quadro alterna.".into();
-            return;
+        tab.board_list = on;
+    }
+
+    /// A nota `X.md` par do quadro ativo, se o quadro está na aba e a nota existe no cofre.
+    fn pair_note(&self) -> Option<PathBuf> {
+        let tab = self.tabs.get(self.active)?;
+        if !rustidian::canvas::is_canvas(&tab.document.path) {
+            return None;
         }
+        let note = rustidian::board_note::note_of(&tab.document.path);
+        self.vault
+            .as_ref()
+            .is_some_and(|vault| vault.note(&note).is_some())
+            .then_some(note)
+    }
+
+    /// Da nota `X.md` ao quadro par `X.canvas`, na mesma aba: cria o quadro a partir da nota se
+    /// ele não existe (sem tocar no `.md`) e o abre. `false` se não deu.
+    fn open_board_of_note(&mut self) -> bool {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return false;
+        };
         let note = tab.document.path.clone();
         let text = tab.document.text.clone();
         let board = rustidian::board_note::board_of(&note);
@@ -7199,7 +7274,7 @@ impl NotesApp {
         if !open_here && !on_disk {
             let Some(vault) = self.vault.as_mut() else {
                 self.error = Some("Abra um cofre antes de criar um quadro.".into());
-                return;
+                return false;
             };
             let linked = rustidian::board_note::linked_files(&note, &text, |target| {
                 vault.resolve_destination(&note, target)
@@ -7209,7 +7284,7 @@ impl NotesApp {
             document.text = canvas.to_json();
             if let Err(error) = vault.save(&mut document) {
                 self.error = Some(error);
-                return;
+                return false;
             }
             self.refresh_file_views();
             self.status = format!(
@@ -7219,27 +7294,30 @@ impl NotesApp {
             );
         }
         self.open_note(&board);
+        self.tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.document.path == board)
     }
 
-    /// H2b: do quadro `X.canvas` à nota par `X.md`, se ela existe.
-    fn open_board_note(&mut self) {
+    /// Do quadro `X.canvas` à nota par `X.md`, se ela existe.
+    fn open_pair_note(&mut self) {
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
-        if !crate::canvas_ui::is_canvas_tab(tab)
-            && !rustidian::canvas::is_canvas(&tab.document.path)
-        {
+        if !rustidian::canvas::is_canvas(&tab.document.path) {
             return;
         }
-        let note = rustidian::board_note::note_of(&tab.document.path);
-        let exists = self
-            .vault
-            .as_ref()
-            .is_some_and(|vault| vault.note(&note).is_some());
-        if exists {
-            self.open_note(&note);
-        } else {
-            self.status = format!("Este quadro não tem a nota par {}.", note.display());
+        match self.pair_note() {
+            Some(note) => self.open_note(&note),
+            None => {
+                // TODO(H2b, mudança 7): aqui nasce a nota par ("Criar a nota deste quadro"); por
+                // enquanto só um aviso claro.
+                let note = rustidian::board_note::note_of(&tab.document.path);
+                self.status = format!(
+                    "Este quadro ainda não tem uma nota com o mesmo nome ({}).",
+                    note.display()
+                );
+            }
         }
     }
 
