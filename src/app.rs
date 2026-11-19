@@ -7391,7 +7391,7 @@ impl NotesApp {
         };
         let title = rustidian::vault::file_title(&note);
         let mut answer = None;
-        let response = egui::Modal::new(egui::Id::new("pair-note-ask"))
+        let response = egui::Modal::new(egui::Id::unique("pair-note-ask"))
             .frame(theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 theme::dialog_style(ui);

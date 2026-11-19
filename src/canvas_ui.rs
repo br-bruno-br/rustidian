@@ -953,7 +953,7 @@ fn paint_empty_board_hint(ui: &egui::Ui, rect: egui::Rect) {
     }
     let width = (rect.width() - 48.0).clamp(80.0, 560.0);
     let fill = ui.visuals().extreme_bg_color.gamma_multiply(0.92);
-    egui::Area::new(egui::Id::new("canvas-empty-hint"))
+    egui::Area::new(egui::Id::unique("canvas-empty-hint"))
         .order(egui::Order::Foreground)
         .interactable(false)
         .pivot(Align2::CENTER_BOTTOM)
@@ -962,7 +962,7 @@ fn paint_empty_board_hint(ui: &egui::Ui, rect: egui::Rect) {
             egui::Frame::NONE
                 .fill(fill)
                 .corner_radius(8)
-                .inner_margin(egui::Margin::symmetric(12, 7))
+                .inner_margin(theme::space::margin(theme::space::M, theme::space::S))
                 .show(ui, |ui| {
                     ui.set_max_width(width);
                     ui.add(
@@ -1024,25 +1024,31 @@ fn show_text_card_button(
     );
     let node_id = id.clone();
     let text = node.text.clone().unwrap_or_default();
-    egui::Area::new(egui::Id::new(("canvas-text-card-button", node_id.as_str())))
-        .order(egui::Order::Foreground)
-        .fixed_pos(Pos2::new(left, top))
-        .show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style())
-                .inner_margin(egui::Margin::same(2))
-                .show(ui, |ui| {
-                    let button = ui
-                        .add(
-                            egui::Button::new("Transformar em nota")
-                                .min_size(Vec2::new(0.0, HEIGHT - 4.0)),
-                        )
-                        .on_hover_text("Cria uma nota com este texto e troca o cartão por ela");
-                    crate::ui_probe::record(ui.ctx(), "canvas-to-note", button.rect);
-                    if button.clicked() {
-                        outcome.to_note = Some(ToNote { node_id, text });
-                    }
-                });
-        });
+    egui::Area::new(egui::Id::unique((
+        "canvas-text-card-button",
+        node_id.as_str(),
+    )))
+    .order(egui::Order::Foreground)
+    .fixed_pos(Pos2::new(left, top))
+    .show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style())
+            .inner_margin(theme::space::margin(
+                theme::space::XS / 2.0,
+                theme::space::XS / 2.0,
+            ))
+            .show(ui, |ui| {
+                let button = ui
+                    .add(
+                        egui::Button::new("Transformar em nota")
+                            .min_size(Vec2::new(0.0, HEIGHT - 4.0)),
+                    )
+                    .on_hover_text("Cria uma nota com este texto e troca o cartão por ela");
+                crate::ui_probe::record(ui.ctx(), "canvas-to-note", button.rect);
+                if button.clicked() {
+                    outcome.to_note = Some(ToNote { node_id, text });
+                }
+            });
+    });
 }
 
 fn zoom_at(state: &mut CanvasState, factor: f32, pointer: Pos2) {
