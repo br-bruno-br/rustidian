@@ -992,6 +992,17 @@ pub fn dialog_actions(
     label: &str,
     destructive: bool,
 ) -> (egui::Response, egui::Response) {
+    dialog_actions_enabled(ui, label, destructive, true)
+}
+
+/// Como [`dialog_actions`], com o botão de confirmar podendo ficar desabilitado (o Cancelar
+/// continua valendo).
+pub fn dialog_actions_enabled(
+    ui: &mut egui::Ui,
+    label: &str,
+    destructive: bool,
+    enabled: bool,
+) -> (egui::Response, egui::Response) {
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1005,7 +1016,8 @@ pub fn dialog_actions(
             } else {
                 Color32::from_rgb(17, 21, 23)
             };
-            let submit = ui.add(
+            let submit = ui.add_enabled(
+                enabled,
                 egui::Button::new(egui::RichText::new(label).color(foreground))
                     .fill(background)
                     .stroke(egui::Stroke::NONE)

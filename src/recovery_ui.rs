@@ -5,7 +5,8 @@ use eframe::egui::{
 };
 use rustidian::{
     historico_fundo::{
-        Historico, Leitor, Origem, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
+        ApagadoEmTodas, Historico, Leitor, Origem, Tipo, Trecho, VersaoId, VersaoInfo,
+        diff_palavras,
     },
     vault::{Document, Vault},
 };
@@ -36,6 +37,20 @@ struct Loaded {
     selected: Option<u64>,
     text: Option<String>,
     changes: Vec<Trecho>,
+}
+
+/// O pedido de apagar um trecho que está rodando: numa nota ou em todas.
+enum Apagando {
+    Nota(Receiver<Result<usize, String>>),
+    Todas(Receiver<Result<ApagadoEmTodas, String>>),
+}
+
+/// "1 versão" ou "5 versões".
+fn versoes_por_extenso(quantas: usize) -> String {
+    match quantas {
+        1 => "1 versão".into(),
+        n => format!("{n} versões"),
+    }
 }
 
 /// Altura de cada linha da lista de versões. `show_rows` precisa dela igual à altura real do
@@ -239,6 +254,11 @@ pub struct Manager {
     name_target: Option<(PathBuf, u64, bool)>,
     /// A resposta do pedido de nome; o booleano diz se era para tirar o nome.
     naming: Option<(Receiver<Result<(), String>>, bool)>,
+    erase_open: bool,
+    erase_input: String,
+    erase_all: bool,
+    erase_focus: bool,
+    erasing: Option<Apagando>,
     /// A barra mexeu na escolha: a lista da esquerda rola até a linha escolhida.
     rolar_lista: bool,
 }
@@ -256,6 +276,8 @@ impl Manager {
             || self.clearing.is_some()
             || self.naming_open
             || self.naming.is_some()
+            || self.erase_open
+            || self.erasing.is_some()
     }
     pub fn open(
         &mut self,
@@ -322,6 +344,64 @@ impl Manager {
         } else {
             self.reload_com(ctx, false, false);
         }
+    }
+
+    fn pedir_apagar(&mut self, historico: &Historico, trecho: &str) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        let pedido = if self.erase_all {
+            historico.apagar_texto_em_todas(trecho).map(Apagando::Todas)
+        } else {
+            historico.apagar_texto(&path, trecho).map(Apagando::Nota)
+        };
+        match pedido {
+            Ok(apagando) => {
+                self.error = None;
+                self.erasing = Some(apagando);
+            }
+            Err(error) => self.error = Some(error),
+        }
+        // O texto colado não fica na memória da tela depois do pedido.
+        self.erase_input.clear();
+    }
+
+    /// A resposta do pedido de apagar, quando chegou: o aviso e o erro.
+    fn terminou_de_apagar(&mut self) -> Option<Result<String, String>> {
+        fn cru<T>(receiver: &Receiver<Result<T, String>>) -> Option<Result<T, String>> {
+            match receiver.try_recv() {
+                Ok(resposta) => Some(resposta),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    Some(Err("Não foi possível apagar o trecho do histórico.".into()))
+                }
+                Err(mpsc::TryRecvError::Empty) => None,
+            }
+        }
+        let resposta = match self.erasing.as_ref()? {
+            Apagando::Nota(receiver) => cru(receiver).map(|resposta| {
+                resposta.map(|versoes| match versoes {
+                    0 => "O trecho não estava no histórico".to_string(),
+                    n => format!("Apagado de {}", versoes_por_extenso(n)),
+                })
+            }),
+            Apagando::Todas(receiver) => cru(receiver).map(|resposta| {
+                resposta.map(|total| match total.versoes {
+                    0 => "O trecho não estava no histórico".to_string(),
+                    n => format!(
+                        "Apagado de {} em {}",
+                        versoes_por_extenso(n),
+                        match total.notas {
+                            1 => "1 nota".to_string(),
+                            m => format!("{m} notas"),
+                        }
+                    ),
+                })
+            }),
+        };
+        if resposta.is_some() {
+            self.erasing = None;
+        }
+        resposta
     }
 
     fn pedir_nome(&mut self, historico: &Historico, nome: Option<String>) {
@@ -534,6 +614,18 @@ impl Manager {
                 }
             }
         }
+        if let Some(resposta) = self.terminou_de_apagar() {
+            match resposta {
+                Ok(aviso) => {
+                    self.notice = Some(aviso);
+                    // A lista e o texto voltam sem o trecho.
+                    if self.open {
+                        self.reload(ctx, true);
+                    }
+                }
+                Err(error) => self.error = Some(error),
+            }
+        }
         // Like the reference, keep displayed versions fixed while browsing.
         // File selection/reopening reads new metadata; version clicks read text.
         if self.refresh_due
@@ -545,7 +637,11 @@ impl Manager {
             self.refresh_due = false;
             self.reload(ctx, true);
         }
-        if self.loading.is_some() || self.clearing.is_some() || self.naming.is_some() {
+        if self.loading.is_some()
+            || self.clearing.is_some()
+            || self.naming.is_some()
+            || self.erasing.is_some()
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
@@ -563,6 +659,7 @@ impl Manager {
         let mut compare_changed = false;
         let mut timeline_to = None;
         let mut open_naming = false;
+        let mut open_erase = false;
         let touch = egui::vec2(0.0, theme::space::CONTROL);
         let mut close = false;
         if self.open {
@@ -575,8 +672,10 @@ impl Manager {
                 // Keep controls stationary while async content and clipboard
                 // notices arrive, including the first version's sizing pass.
                 ui.set_height(height + 56.0);
-                let busy =
-                    self.loading.is_some() || self.clearing.is_some() || self.naming.is_some();
+                let busy = self.loading.is_some()
+                    || self.clearing.is_some()
+                    || self.naming.is_some()
+                    || self.erasing.is_some();
                 let body_size = egui::vec2(ui.available_width(), height);
                 let body_layout = Layout::left_to_right(Align::Min);
                 ui.allocate_ui_with_layout(body_size, body_layout, |ui| {
@@ -854,6 +953,12 @@ impl Manager {
                                 self.compare_current = !self.compare_current;
                                 compare_changed = true;
                             }
+                            let apagar = ui.add_enabled(
+                                !busy && self.path.is_some() && !self.choosing_file,
+                                egui::Button::new("Apagar do histórico…").min_size(touch),
+                            );
+                            ui_probe::record(ctx, "recovery-erase", apagar.rect);
+                            open_erase = apagar.clicked();
                         });
                         let total = self.versions.len();
                         if !self.choosing_file && total >= 2 {
@@ -1039,7 +1144,11 @@ impl Manager {
                     });
             });
             ui_probe::record(ctx, "recovery-dialog", modal.response.rect);
-            if (close || modal.should_close()) && !self.confirm_clear && !self.naming_open {
+            if (close || modal.should_close())
+                && !self.confirm_clear
+                && !self.naming_open
+                && !self.erase_open
+            {
                 self.open = false;
                 self.loading = None;
                 self.refresh_due = false;
@@ -1138,6 +1247,69 @@ impl Manager {
             } else if cancel || modal.should_close() {
                 self.naming_open = false;
                 self.name_target = None;
+            }
+        }
+        if open_erase {
+            self.erase_input.clear();
+            self.erase_all = false;
+            self.erase_focus = true;
+            self.erase_open = true;
+        }
+        if self.erase_open {
+            let (mut apagar, mut cancel) = (false, false);
+            let trecho = self.erase_input.clone();
+            // O trecho vai exato (sem trim) para o fundo; só vale com 3 letras de verdade.
+            let valido = trecho.chars().filter(|c| !c.is_whitespace()).count() >= 3;
+            let ainda_na_nota = valido
+                && self
+                    .expected
+                    .as_ref()
+                    .is_some_and(|document| document.text.contains(&trecho));
+            let dialog = egui::Modal::new(egui::Id::unique("erase-history-text"))
+                .frame(theme::dialog_frame(ctx));
+            let modal = dialog.show(ctx, |ui| {
+                theme::dialog_style(ui);
+                ui.set_width(440.0_f32.min((ctx.content_rect().width() - 48.0).max(280.0)));
+                cancel |=
+                    theme::dialog_header(ui, "Apagar um trecho do histórico", "Fechar diálogo")
+                        .clicked();
+                ui.label(
+                    "O trecho some de todas as versões desta nota. Serve para uma senha ou um \
+                     dado colado por engano. Não dá para desfazer.",
+                );
+                let field = ui.add(
+                    TextEdit::multiline(&mut self.erase_input)
+                        .id(ui.make_persistent_id("recovery-erase-input"))
+                        .desired_rows(3)
+                        .hint_text("Cole aqui o trecho a apagar")
+                        .desired_width(ui.available_width()),
+                );
+                if self.erase_focus {
+                    field.request_focus();
+                    self.erase_focus = ui.is_sizing_pass();
+                }
+                ui_probe::record(ctx, "recovery-erase-field", field.rect);
+                let all = ui.checkbox(&mut self.erase_all, "Em todas as notas do cofre");
+                ui_probe::record(ctx, "recovery-erase-all", all.rect);
+                if ainda_na_nota {
+                    let aviso = ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        "A nota ainda tem este trecho. Tire da nota também, senão a próxima \
+                         versão o traz de volta.",
+                    );
+                    ui_probe::record(ctx, "recovery-erase-warning", aviso.rect);
+                }
+                let (confirm, dismiss) = theme::dialog_actions_enabled(ui, "Apagar", true, valido);
+                ui_probe::record(ctx, "recovery-erase-confirm", confirm.rect);
+                ui_probe::record(ctx, "recovery-erase-cancel", dismiss.rect);
+                apagar = confirm.clicked();
+                cancel |= dismiss.clicked();
+            });
+            if apagar && valido {
+                self.erase_open = false;
+                self.pedir_apagar(historico, &trecho);
+            } else if cancel || modal.should_close() {
+                self.erase_open = false;
             }
         }
         if let Some(path) = select_file {
