@@ -840,8 +840,10 @@ impl Historico {
         let num = {
             let r = self.db.begin_read()?;
             let notas = r.open_table(NOTAS)?;
-            numero_da_nota(&notas, nota)?
-                .ok_or_else(|| Erro::NaoEncontrada(format!("nota {nota:?}")))?
+            match numero_da_nota(&notas, nota)? {
+                Some(n) => n,
+                None => return Ok(0),
+            }
         };
         let vazio = HashSet::new();
         let trocar = |t: &str| t.contains(trecho).then(|| t.replace(trecho, ""));
