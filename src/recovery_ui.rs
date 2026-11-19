@@ -191,7 +191,9 @@ impl Manager {
         self.expected = Some(document);
         self.error = None;
         self.notice = Some("Versão restaurada".into());
-        self.reload(ctx, false);
+        // A versão nova (origem "restaurada") entra no topo da lista e fica escolhida.
+        self.selected = None;
+        self.reload(ctx, true);
     }
 
     fn select_file(&mut self, path: Option<PathBuf>, vault: &Vault, ctx: &egui::Context) {
