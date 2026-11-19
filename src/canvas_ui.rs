@@ -583,24 +583,24 @@ fn show_list(
                 ui.vertical(|ui| {
                     ui.set_max_width((ui.available_width() - 24.0).clamp(200.0, 780.0));
                     ui.add_space(theme::space::L);
-                    ui.horizontal_wrapped(|ui| {
+                    // O botão fica no topo, à direita, longe do título; o modo se escolhe no
+                    // seletor do cabeçalho.
+                    ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Lista do quadro").size(20.0).strong());
-                        if ui
-                            .button("Voltar ao quadro")
-                            .on_hover_text("Ctrl+Shift+B alterna")
-                            .clicked()
-                        {
-                            back = true;
-                        }
-                        if ui
-                            .button("Exportar como nota (cópia)")
-                            .on_hover_text(
-                                "Cria uma nota nova com esta lista. É uma cópia: não acompanha o quadro.",
-                            )
-                            .clicked()
-                        {
-                            outcome.export_list = true;
-                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new("Exportar como nota (cópia)")
+                                        .min_size(egui::vec2(0.0, theme::space::CONTROL)),
+                                )
+                                .on_hover_text(
+                                    "Cria uma nota nova com esta lista. É uma cópia: não acompanha o quadro.",
+                                )
+                                .clicked()
+                            {
+                                outcome.export_list = true;
+                            }
+                        });
                     });
                     ui.label(
                         egui::RichText::new(
@@ -639,36 +639,43 @@ fn show_list(
                                     snippet,
                                     missing,
                                 } => {
-                                    ui.horizontal_wrapped(|ui| {
+                                    // O título abre a nota; o trecho mostra o cartão no quadro.
+                                    let title = egui::RichText::new(&item.title).strong();
+                                    if *missing {
                                         if ui
-                                            .link(egui::RichText::new(&item.title).strong())
+                                            .link(title)
                                             .on_hover_text("Mostrar no quadro")
                                             .clicked()
                                         {
                                             go_to = Some(item.node_id.clone());
                                         }
-                                        if !missing && ui.small_button("abrir nota").clicked() {
-                                            outcome.follow = Some(path.clone());
-                                        }
-                                    });
-                                    if *missing {
                                         ui.label(
                                             egui::RichText::new("Nota não encontrada no cofre.")
                                                 .color(weak),
                                         );
-                                    } else if !snippet.is_empty() {
-                                        ui.label(egui::RichText::new(snippet).color(weak));
+                                    } else {
+                                        if ui.link(title).on_hover_text("Abrir a nota").clicked() {
+                                            outcome.follow = Some(path.clone());
+                                        }
+                                        if !snippet.is_empty()
+                                            && ui
+                                                .add(
+                                                    egui::Label::new(
+                                                        egui::RichText::new(snippet).color(weak),
+                                                    )
+                                                    .sense(Sense::click()),
+                                                )
+                                                .on_hover_text("Mostrar no quadro")
+                                                .clicked()
+                                        {
+                                            go_to = Some(item.node_id.clone());
+                                        }
                                     }
                                 }
                                 ItemKind::File { path } => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui.link(&item.title).clicked() {
-                                            go_to = Some(item.node_id.clone());
-                                        }
-                                        if ui.small_button("abrir").clicked() {
-                                            outcome.follow = Some(path.clone());
-                                        }
-                                    });
+                                    if ui.link(&item.title).on_hover_text("Abrir o arquivo").clicked() {
+                                        outcome.follow = Some(path.clone());
+                                    }
                                 }
                                 ItemKind::Text { text } => {
                                     egui::Frame::NONE
@@ -691,15 +698,9 @@ fn show_list(
                                         });
                                 }
                                 ItemKind::Link { url } => {
-                                    ui.horizontal_wrapped(|ui| {
-                                        if ui.link(url).on_hover_text("Mostrar no quadro").clicked()
-                                        {
-                                            go_to = Some(item.node_id.clone());
-                                        }
-                                        if ui.small_button("abrir link").clicked() {
-                                            outcome.follow = Some(url.clone());
-                                        }
-                                    });
+                                    if ui.link(url).on_hover_text("Abrir o link").clicked() {
+                                        outcome.follow = Some(url.clone());
+                                    }
                                 }
                                 ItemKind::Other => {
                                     if ui.link(&item.title).clicked() {

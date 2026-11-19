@@ -161,7 +161,11 @@ fn clicar_num_item_da_lista_volta_ao_quadro_focando_o_cartao() {
     toggle(&mut session);
     assert!(session.app().tabs[0].board_list);
 
-    session.harness.get_by_label("Alpha").click();
+    // O título abre a nota; o trecho do item mostra o cartão no quadro.
+    session
+        .harness
+        .get_by_label_contains("palavra rara")
+        .click();
     session.settle();
     session.settle();
     assert!(!session.app().tabs[0].board_list, "voltou ao quadro");
@@ -634,4 +638,37 @@ fn a_barra_de_ferramentas_do_quadro_nao_tem_mais_o_botao_lista() {
     // O seletor segue levando à Lista.
     click_segment(&mut session, "Lista");
     assert_eq!(mode(&session), Some(BoardMode::List));
+}
+
+#[test]
+fn na_lista_o_titulo_abre_a_nota_e_o_exportar_e_um_botao_no_topo() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+
+    // Nada de "abrir nota" solto, nem "Voltar ao quadro" (o seletor cobre).
+    assert!(!session.has_label("abrir nota"));
+    assert!(!session.has_label("Voltar ao quadro"));
+    // "Exportar como nota (cópia)" é um botão de tamanho de toque, longe do título.
+    let title = session.harness.get_by_label("Lista do quadro").rect();
+    let export = session
+        .harness
+        .get_by_label("Exportar como nota (cópia)")
+        .rect();
+    assert!(export.height() >= 32.0, "{export:?}");
+    assert!(
+        export.min.x > title.max.x + 40.0 && (export.center().y - title.center().y).abs() < 20.0,
+        "o botão {export:?} deve ficar separado do título {title:?}, na mesma faixa do topo"
+    );
+
+    // Clicar no título do item abre a nota (na mesma aba, com o quadro atrás no histórico).
+    session.harness.get_by_label("Second").click();
+    session.settle();
+    session.settle();
+    wait_active(&mut session, "Second.md");
+    assert_eq!(session.active_text(), SECOND);
 }
