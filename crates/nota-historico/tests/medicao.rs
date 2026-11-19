@@ -28,6 +28,8 @@ struct Resultado {
     pedacos: usize,
     gravar_medio: Duration,
     gravar_pior: Duration,
+    gravar_p50: Duration,
+    gravar_p99: Duration,
     abrir_medio: Duration,
     abrir_pior: Duration,
     abrir_pior_bruto: Duration,
@@ -76,6 +78,7 @@ fn rodar(durab: Durabilidade, n_notas: usize, edicoes: usize, fluxos: Fluxos) ->
         })
         .collect();
     let (mut soma, mut pior, mut cnt) = (Duration::ZERO, Duration::ZERO, 0u32);
+    let mut tempos: Vec<Duration> = Vec::new();
     for i in 0..edicoes {
         for k in 0..n_notas {
             editar(&mut sorteios[k], &mut atuais[k], 50);
@@ -93,10 +96,12 @@ fn rodar(durab: Durabilidade, n_notas: usize, edicoes: usize, fluxos: Fluxos) ->
             .unwrap();
             let dt = ini.elapsed();
             soma += dt;
+            tempos.push(dt);
             cnt += 1;
             pior = pior.max(dt);
         }
     }
+    tempos.sort();
     h.persistir().unwrap();
     let est = h.estatisticas().unwrap();
 
@@ -128,6 +133,8 @@ fn rodar(durab: Durabilidade, n_notas: usize, edicoes: usize, fluxos: Fluxos) ->
         pedacos: est.pedacos,
         gravar_medio: soma / cnt,
         gravar_pior: pior,
+        gravar_p50: tempos[tempos.len() / 2],
+        gravar_p99: tempos[tempos.len() * 99 / 100],
         abrir_medio: soma_a / infos.len() as u32,
         abrir_pior: pior_a,
         abrir_pior_bruto: pior_bruto,
@@ -137,7 +144,7 @@ fn rodar(durab: Durabilidade, n_notas: usize, edicoes: usize, fluxos: Fluxos) ->
 fn mostrar(nome: &str, r: &Resultado) {
     println!(
         "{nome}\n    arquivo {} B ({:.1} KB; {} B antes de compactar) | registros {} B | pedaços {} B em {} | \
-         gravar médio {:?} (pior {:?}) | abrir médio {:?}, pior {:?} (pior leitura bruta {:?})",
+         gravar médio {:?} (p50 {:?}, p99 {:?}, pior {:?}) | abrir médio {:?}, pior {:?} (pior leitura bruta {:?})",
         r.arquivo,
         r.arquivo as f64 / 1000.0,
         r.arquivo_sem_compactar,
@@ -145,6 +152,8 @@ fn mostrar(nome: &str, r: &Resultado) {
         r.bytes_pedacos,
         r.pedacos,
         r.gravar_medio,
+        r.gravar_p50,
+        r.gravar_p99,
         r.gravar_pior,
         r.abrir_medio,
         r.abrir_pior,
