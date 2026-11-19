@@ -16,8 +16,8 @@ pub use codec::{Codec, ZstdCodec};
 pub use diff::{Tipo, Trecho, diff_palavras};
 pub use erro::{Erro, Result};
 pub use historico::{
-    Durabilidade, Estatisticas, EstatisticasNota, Historico, Opcoes, RelatorioCompactacao,
-    RelatorioPoda,
+    ApagadoEmTodas, Durabilidade, Estatisticas, EstatisticasNota, Historico, Opcoes,
+    RelatorioCompactacao, RelatorioPoda,
 };
 pub use pedacos::ParametrosPedacos;
 pub use registro::{Impressao, NotaId, Origem, VersaoId, VersaoInfo, impressao_do_texto};

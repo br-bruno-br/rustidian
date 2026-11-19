@@ -3,8 +3,8 @@ mod gerador;
 
 use gerador::{Sorteio, editar, texto};
 use nota_historico::{
-    Codec, Durabilidade, Erro, Historico, NotaId, Opcoes, Origem, ParametrosPedacos,
-    PoliticaRetencao, VersaoId, ZstdCodec,
+    ApagadoEmTodas, Codec, Durabilidade, Erro, Historico, NotaId, Opcoes, Origem,
+    ParametrosPedacos, PoliticaRetencao, VersaoId, ZstdCodec,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -416,6 +416,72 @@ fn apagar_trecho_vazio_e_erro() {
         h.apagar_texto_do_historico(&nota("a"), "inexistente")
             .unwrap(),
         0
+    );
+}
+
+#[test]
+fn apagar_texto_de_todas_some_de_tres_notas_e_conta() {
+    let d = tempfile::tempdir().unwrap();
+    let caminho = d.path().join("h.redb");
+    let mut h =
+        Historico::abrir_com(&caminho, opcoes_pequenas(8), Box::new(ZstdCodec::default())).unwrap();
+    let segredo = "SENHA-EM-TODAS-5b1e90-qwx";
+    // Três notas com o segredo (2, 1 e 3 versões que o contêm), uma sem.
+    for (nome, com) in [("a", 2usize), ("b", 1), ("c", 3)] {
+        let id = nota(nome);
+        h.gravar(&id, &format!("{nome} antes"), em(10), Origem::Editor)
+            .unwrap();
+        for i in 0..com {
+            h.gravar(
+                &id,
+                &format!("{nome} com {segredo} v{i}"),
+                em(20 + i as u64),
+                Origem::Editor,
+            )
+            .unwrap();
+        }
+        h.gravar(&id, &format!("{nome} depois"), em(100), Origem::Editor)
+            .unwrap();
+    }
+    h.gravar(&nota("d"), "sem nada de mais", em(1), Origem::Editor)
+        .unwrap();
+
+    let r = h.apagar_texto_de_todas(segredo).unwrap();
+    assert_eq!(
+        r,
+        ApagadoEmTodas {
+            notas: 3,
+            versoes: 6
+        }
+    );
+    for nome in ["a", "b", "c"] {
+        for info in h.versoes(&nota(nome)).unwrap() {
+            let t = h.ler(&nota(nome), info.id).unwrap();
+            assert!(!t.contains(segredo));
+        }
+    }
+    assert!(
+        !h.pedacos_descomprimidos()
+            .unwrap()
+            .iter()
+            .any(|p| contem(p, segredo.as_bytes()))
+    );
+    h.conferir_referencias().unwrap();
+    // Repetir não acha mais nada.
+    assert_eq!(
+        h.apagar_texto_de_todas(segredo).unwrap(),
+        ApagadoEmTodas::default()
+    );
+    assert!(matches!(
+        h.apagar_texto_de_todas(""),
+        Err(Erro::Argumento(_))
+    ));
+    h.persistir().unwrap();
+    drop(h);
+    let bruto = std::fs::read(&caminho).unwrap();
+    assert!(
+        !contem(&bruto, segredo.as_bytes()),
+        "segredo nos bytes do arquivo"
     );
 }
 
