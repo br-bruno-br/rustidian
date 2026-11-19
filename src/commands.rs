@@ -30,8 +30,9 @@ pub const TOGGLE_CANVAS_LIBRARY: &str = "Canvas: Toggle note library";
 pub const FOCUS_OTHER_PANE: &str = "Focus the other pane";
 pub const TOGGLE_NOTE_BOARD: &str = "Board: Toggle between note and board";
 pub const TOGGLE_NOTE_BOARD_SHORTCUT: &str = "Ctrl+Shift+B";
-pub const OPEN_BOARD_NOTE: &str = "Board: Open the board's note";
-pub const OPEN_BOARD_NOTE_SHORTCUT: &str = "Ctrl+Alt+B";
+pub const GO_TO_NOTE: &str = "Board: Go to the note";
+pub const GO_TO_BOARD: &str = "Board: Go to the board";
+pub const GO_TO_LIST: &str = "Board: Go to the list";
 pub const EXPORT_BOARD_AS_NOTE: &str = "Board: Export the list as a note (copy)";
 pub const CLOSE_OTHER_TABS: &str = "Close all other tabs";
 pub const OPEN_FILE: &str = "Open file…";
@@ -139,8 +140,18 @@ pub const ALL: &[Command] = &[
         scope: Scope::Document,
     },
     Command {
-        name: OPEN_BOARD_NOTE,
-        shortcut: OPEN_BOARD_NOTE_SHORTCUT,
+        name: GO_TO_NOTE,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: GO_TO_BOARD,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: GO_TO_LIST,
+        shortcut: "",
         scope: Scope::Document,
     },
     Command {
@@ -453,8 +464,10 @@ pub fn label(name: &str) -> &str {
         CLOSE_PANE => "Fechar o painel dividido",
         FOCUS_OTHER_PANE => "Ir para o outro painel",
         TOGGLE_CANVAS_LIBRARY => "Quadro: Mostrar ou esconder a biblioteca de notas",
-        TOGGLE_NOTE_BOARD => "Quadro: Alternar entre nota e quadro (e Lista)",
-        OPEN_BOARD_NOTE => "Quadro: Abrir a nota do quadro",
+        TOGGLE_NOTE_BOARD => "Quadro: Alternar entre nota, quadro e lista",
+        GO_TO_NOTE => "Ir para a nota",
+        GO_TO_BOARD => "Ir para o quadro",
+        GO_TO_LIST => "Ir para a lista",
         EXPORT_BOARD_AS_NOTE => "Quadro: Exportar a lista como nota (cópia)",
         CLOSE_OTHER_TABS => "Fechar todas as outras abas",
         OPEN_FILE => "Abrir arquivo…",
@@ -735,10 +748,16 @@ mod tests {
             ranked("alternar nota quadro", Scope::Document)[0].name,
             TOGGLE_NOTE_BOARD
         );
-        assert_eq!(
-            ranked("nota do quadro", Scope::Document)[0].name,
-            OPEN_BOARD_NOTE
-        );
+        // Um atalho só (Ctrl+Shift+B cicla); ir direto a um modo é pela paleta, sem atalho.
+        assert!(ALL.iter().all(|command| command.shortcut != "Ctrl+Alt+B"));
+        for (query, wanted) in [
+            ("ir para a nota", GO_TO_NOTE),
+            ("ir para o quadro", GO_TO_BOARD),
+            ("ir para a lista", GO_TO_LIST),
+        ] {
+            assert_eq!(ranked(query, Scope::Document)[0].name, wanted, "{query}");
+            assert_eq!(label(wanted).to_lowercase(), query);
+        }
         assert!(ranked(EXPORT_BOARD_AS_NOTE, Scope::Global).is_empty());
     }
 

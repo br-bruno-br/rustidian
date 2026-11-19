@@ -40,6 +40,29 @@ enum Dialog {
     InsertTemplate,
     Settings,
 }
+/// H2b: os três jeitos de ver o mesmo assunto: a nota, o quadro desenhado e a Lista do quadro.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BoardMode {
+    Note,
+    Board,
+    List,
+}
+
+/// A largura de cada segmento do seletor Nota | Quadro | Lista do cabeçalho.
+const SEGMENT_WIDTH: f32 = 64.0;
+const MODE_SELECTOR_WIDTH: f32 = 3.0 * SEGMENT_WIDTH;
+
+impl BoardMode {
+    /// O nome que aparece no rodapé e no seletor do cabeçalho.
+    fn label(self) -> &'static str {
+        match self {
+            BoardMode::Note => "Nota",
+            BoardMode::Board => "Quadro",
+            BoardMode::List => "Lista",
+        }
+    }
+}
+
 #[derive(Clone)]
 enum Pending {
     CloseTab(usize),
@@ -131,6 +154,8 @@ pub struct NotesApp {
     pending: Option<Pending>,
     error: Option<String>,
     status: String,
+    /// A aba, o arquivo e o modo em que `status` foi escrito: ao mudar qualquer um, a mensagem velha sai.
+    status_scope: (Option<u64>, PathBuf, Option<BoardMode>),
     allow_close: bool,
     started: Instant,
     first_frame: bool,
@@ -276,6 +301,7 @@ impl NotesApp {
             pending: None,
             error: None,
             status: "Pronto".into(),
+            status_scope: (None, PathBuf::new(), None),
             allow_close: false,
             started,
             first_frame: true,
@@ -399,6 +425,11 @@ impl NotesApp {
             rustidian::canvas::is_canvas(&tab.document.path) && !tab.document.is_blank()
         });
         let label = match current {
+            View::Read
+                if canvas && self.tabs.get(self.active).is_some_and(|tab| tab.board_list) =>
+            {
+                "Board list"
+            }
             View::Read if canvas => "Canvas",
             View::Read => "Reading",
             View::Live => "Live preview",
@@ -947,7 +978,11 @@ impl NotesApp {
                         }
                     }
                     if let Some(vault) = &self.vault {
-                        self.status = format!("{} notes", vault.notes.len());
+                        // Só na abertura: uma releitura de fundo (watcher, sync) não pode apagar
+                        // o aviso que o usuário acabou de receber no rodapé.
+                        if opening {
+                            self.status = format!("{} notes", vault.notes.len());
+                        }
                         if !vault.warnings.is_empty() {
                             self.error = Some(format!(
                                 "Alguns arquivos não puderam ser indexados: {}",
@@ -2067,15 +2102,11 @@ impl NotesApp {
         }
         if self.dialog.is_none() {
             // Ctrl+Shift+A só abre a aba do agente com a feature `agente`; sem ela nada acontece.
-            // H2b: Ctrl+Shift+B alterna nota/quadro (e Lista); Ctrl+Alt+B vai do quadro à nota.
+            // H2b: Ctrl+Shift+B cicla Nota, Quadro e Lista.
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::B)
             }) {
-                self.toggle_note_board();
-            } else if ctx.input_mut(|input| {
-                input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::B)
-            }) {
-                self.open_board_note();
+                self.cycle_board_mode();
             }
             if ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::A)
@@ -4225,7 +4256,12 @@ impl NotesApp {
                                 };
                                 let actions_width = icons * theme::space::CONTROL
                                     + (icons - 1.0) * theme::space::S
-                                    + theme::space::S;
+                                    + theme::space::S
+                                    + if self.board_mode().is_some() {
+                                        MODE_SELECTOR_WIDTH + theme::space::M
+                                    } else {
+                                        0.0
+                                    };
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(
                                         (available - actions_width).max(20.0),
@@ -4258,6 +4294,10 @@ impl NotesApp {
                                         );
                                     },
                                 );
+                                // Nota | Quadro | Lista: o mesmo assunto em três jeitos de ver.
+                                if let Some(target) = self.mode_selector(ui) {
+                                    self.go_to_mode(target);
+                                }
                                 if self.tabs[self.active].document.is_image() {
                                     use rustidian::tab::ImageScale;
                                     for (label, scale) in
@@ -5876,20 +5916,26 @@ impl NotesApp {
                             !matches!(
                                 command.name,
                                 rustidian::commands::TOGGLE_CANVAS_LIBRARY
-                                    | rustidian::commands::OPEN_BOARD_NOTE
                                     | rustidian::commands::EXPORT_BOARD_AS_NOTE
                             )
                         });
                     }
-                    if !tab.is_some_and(|tab| {
-                        crate::canvas_ui::is_canvas_tab(tab)
-                            || (rustidian::vault::is_markdown(&tab.document.path)
-                                && !tab.document.is_blank())
-                    }) {
-                        matches.retain(|command| {
-                            command.name != rustidian::commands::TOGGLE_NOTE_BOARD
-                        });
-                    }
+                    // Nota, quadro e Lista: só onde há o que alternar, e sem o comando que leva
+                    // ao modo em que já se está.
+                    let mode = self.board_mode();
+                    matches.retain(|command| match command.name {
+                        rustidian::commands::TOGGLE_NOTE_BOARD => mode.is_some(),
+                        rustidian::commands::GO_TO_NOTE => {
+                            mode.is_some_and(|mode| mode != BoardMode::Note)
+                        }
+                        rustidian::commands::GO_TO_BOARD => {
+                            mode.is_some_and(|mode| mode != BoardMode::Board)
+                        }
+                        rustidian::commands::GO_TO_LIST => {
+                            mode.is_some_and(|mode| mode != BoardMode::List)
+                        }
+                        _ => true,
+                    });
                     if !self.panes.is_split() {
                         matches.retain(|command| {
                             !matches!(
@@ -6791,8 +6837,10 @@ impl NotesApp {
                     self.canvases.toggle_library(tab.id());
                 }
             }
-            rustidian::commands::TOGGLE_NOTE_BOARD => self.toggle_note_board(),
-            rustidian::commands::OPEN_BOARD_NOTE => self.open_board_note(),
+            rustidian::commands::TOGGLE_NOTE_BOARD => self.cycle_board_mode(),
+            rustidian::commands::GO_TO_NOTE => self.go_to_mode(BoardMode::Note),
+            rustidian::commands::GO_TO_BOARD => self.go_to_mode(BoardMode::Board),
+            rustidian::commands::GO_TO_LIST => self.go_to_mode(BoardMode::List),
             rustidian::commands::EXPORT_BOARD_AS_NOTE => self.export_board_list(),
             rustidian::commands::FOCUS_OTHER_PANE => {
                 if let Some(other) = self.panes.other() {
@@ -7096,34 +7144,190 @@ impl NotesApp {
         }
     }
 
-    /// H2b: alterna nota e quadro. Numa nota `X.md`, abre o quadro par `X.canvas` (cria a
-    /// partir da nota se não existe, sem tocar no `.md`). Num quadro, alterna a mesma aba entre
-    /// o quadro e a Lista; do código-fonte volta ao quadro desenhado.
-    fn toggle_note_board(&mut self) {
+    /// O modo da aba ativa: nota, quadro desenhado ou Lista do quadro. `None` para o que não é
+    /// nota nem quadro (imagem, texto puro, aba em branco, grafo).
+    fn board_mode(&self) -> Option<BoardMode> {
+        let tab = self.tabs.get(self.active)?;
+        if tab.document.is_blank() || tab.document.is_image() || tab.view == View::Graph {
+            return None;
+        }
+        if rustidian::canvas::is_canvas(&tab.document.path) {
+            Some(if tab.board_list && tab.view != View::Source {
+                BoardMode::List
+            } else {
+                BoardMode::Board
+            })
+        } else if rustidian::vault::is_markdown(&tab.document.path) {
+            Some(BoardMode::Note)
+        } else {
+            None
+        }
+    }
+
+    /// O seletor segmentado "Nota | Quadro | Lista" do cabeçalho: marca o modo atual e devolve o
+    /// modo em que o usuário tocou (outro que o atual). Cada segmento tem a altura de um controle
+    /// (32 px), para o toque.
+    fn mode_selector(&self, ui: &mut egui::Ui) -> Option<BoardMode> {
+        let current = self.board_mode()?;
+        let mut picked = None;
+        let modes = [BoardMode::Note, BoardMode::Board, BoardMode::List];
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (index, mode) in modes.into_iter().enumerate() {
+            let radius = 6;
+            let corners = egui::CornerRadius {
+                nw: if index == 0 { radius } else { 0 },
+                sw: if index == 0 { radius } else { 0 },
+                ne: if index == modes.len() - 1 { radius } else { 0 },
+                se: if index == modes.len() - 1 { radius } else { 0 },
+            };
+            let selected = mode == current;
+            let mut text = RichText::new(mode.label()).size(13.0);
+            if selected {
+                text = text.strong().color(theme::accent(ui));
+            }
+            let response = ui
+                .add(
+                    egui::Button::new(text)
+                        .frame(true)
+                        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                        .selected(selected)
+                        .corner_radius(corners)
+                        .min_size(egui::vec2(SEGMENT_WIDTH, theme::space::CONTROL)),
+                )
+                .on_hover_text(match mode {
+                    BoardMode::Note => "Ver como nota",
+                    BoardMode::Board => "Ver como quadro",
+                    BoardMode::List => "Ver o quadro como lista",
+                });
+            crate::ui_probe::record(
+                ui.ctx(),
+                format!("board-mode-select:{}", mode.label()),
+                response.rect,
+            );
+            if response.clicked() && !selected {
+                picked = Some(mode);
+            }
+        }
+        ui.spacing_mut().item_spacing.x = theme::space::S;
+        picked
+    }
+
+    /// Uma mensagem de status vale para a aba e o modo em que nasceu: ao trocar de aba ou de
+    /// modo (nota, quadro, Lista) ela sai, para o rodapé não contar o que já não é verdade.
+    /// Uma mensagem escrita neste mesmo quadro (`before` é o texto do começo dele) fica.
+    fn status_follows_scope(&mut self, before: &str) {
+        let scope = (
+            self.tabs.get(self.active).map(Tab::id),
+            self.tabs
+                .get(self.active)
+                .map(|tab| tab.document.path.clone())
+                .unwrap_or_default(),
+            self.board_mode(),
+        );
+        if scope != self.status_scope {
+            if self.status == before {
+                self.status.clear();
+            }
+            self.status_scope = scope;
+        }
+    }
+
+    /// H2b: Ctrl+Shift+B cicla Nota, Quadro e Lista. Da Lista volta à nota par (ou ao quadro,
+    /// se a nota par não existe). Num quadro em código-fonte, volta ao quadro desenhado.
+    fn cycle_board_mode(&mut self) {
+        let Some(mode) = self.board_mode() else {
+            if self.tabs.get(self.active).is_some_and(|tab| {
+                !tab.document.is_blank() && !tab.document.is_image() && tab.view != View::Graph
+            }) {
+                self.status = "Só uma nota ou um quadro alterna.".into();
+            }
+            return;
+        };
+        if mode == BoardMode::Board
+            && self
+                .tabs
+                .get(self.active)
+                .is_some_and(|tab| tab.view == View::Source)
+        {
+            self.go_to_mode(BoardMode::Board);
+            return;
+        }
+        let next = match mode {
+            BoardMode::Note => BoardMode::Board,
+            BoardMode::Board => BoardMode::List,
+            BoardMode::List if self.pair_note().is_some() => BoardMode::Note,
+            BoardMode::List => BoardMode::Board,
+        };
+        self.go_to_mode(next);
+    }
+
+    /// H2b: vai para o modo pedido (atalho, paleta e seletor do cabeçalho usam este caminho).
+    /// Quadro e Lista criam o quadro par de uma nota se ele não existe; Nota, num quadro sem
+    /// nota par, só avisa.
+    fn go_to_mode(&mut self, target: BoardMode) {
+        let Some(current) = self.board_mode() else {
+            return;
+        };
+        let source = self
+            .tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.view == View::Source);
+        match (current, target) {
+            (BoardMode::Note, BoardMode::Note) => {}
+            (BoardMode::Note, BoardMode::Board) => {
+                self.open_board_of_note();
+            }
+            (BoardMode::Note, BoardMode::List) => {
+                if self.open_board_of_note() {
+                    self.set_board_list(true);
+                }
+            }
+            (BoardMode::Board | BoardMode::List, BoardMode::Note) => self.open_pair_note(),
+            (BoardMode::Board, BoardMode::Board) | (BoardMode::List, BoardMode::Board) => {
+                if source {
+                    self.set_view(View::Read);
+                }
+                self.set_board_list(false);
+            }
+            (BoardMode::Board, BoardMode::List) => self.set_board_list(true),
+            (BoardMode::List, BoardMode::List) => {}
+        }
+    }
+
+    /// Liga ou desliga a Lista na aba ativa, se ela é um quadro (e a mostra desenhada, não como
+    /// código-fonte).
+    fn set_board_list(&mut self, on: bool) {
         let Some(tab) = self.tabs.get_mut(self.active) else {
             return;
         };
-        if tab.document.is_blank() || tab.document.is_image() || tab.view == View::Graph {
+        if !rustidian::canvas::is_canvas(&tab.document.path) || tab.document.is_blank() {
             return;
         }
-        if rustidian::canvas::is_canvas(&tab.document.path) {
-            if tab.view == View::Source {
-                tab.set_view(View::Read);
-                tab.board_list = false;
-            } else {
-                tab.board_list = !tab.board_list;
-            }
-            self.status = if tab.board_list {
-                "Lista do quadro (Ctrl+Shift+B volta ao quadro)".into()
-            } else {
-                "Quadro".into()
-            };
-            return;
+        if on && tab.view == View::Source {
+            tab.set_view(View::Read);
         }
-        if !rustidian::vault::is_markdown(&tab.document.path) {
-            self.status = "Só uma nota ou um quadro alterna.".into();
-            return;
+        tab.board_list = on;
+    }
+
+    /// A nota `X.md` par do quadro ativo, se o quadro está na aba e a nota existe no cofre.
+    fn pair_note(&self) -> Option<PathBuf> {
+        let tab = self.tabs.get(self.active)?;
+        if !rustidian::canvas::is_canvas(&tab.document.path) {
+            return None;
         }
+        let note = rustidian::board_note::note_of(&tab.document.path);
+        self.vault
+            .as_ref()
+            .is_some_and(|vault| vault.note(&note).is_some())
+            .then_some(note)
+    }
+
+    /// Da nota `X.md` ao quadro par `X.canvas`, na mesma aba: cria o quadro a partir da nota se
+    /// ele não existe (sem tocar no `.md`) e o abre. `false` se não deu.
+    fn open_board_of_note(&mut self) -> bool {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return false;
+        };
         let note = tab.document.path.clone();
         let text = tab.document.text.clone();
         let board = rustidian::board_note::board_of(&note);
@@ -7135,7 +7339,7 @@ impl NotesApp {
         if !open_here && !on_disk {
             let Some(vault) = self.vault.as_mut() else {
                 self.error = Some("Abra um cofre antes de criar um quadro.".into());
-                return;
+                return false;
             };
             let linked = rustidian::board_note::linked_files(&note, &text, |target| {
                 vault.resolve_destination(&note, target)
@@ -7145,7 +7349,7 @@ impl NotesApp {
             document.text = canvas.to_json();
             if let Err(error) = vault.save(&mut document) {
                 self.error = Some(error);
-                return;
+                return false;
             }
             self.refresh_file_views();
             self.status = format!(
@@ -7155,27 +7359,30 @@ impl NotesApp {
             );
         }
         self.open_note(&board);
+        self.tabs
+            .get(self.active)
+            .is_some_and(|tab| tab.document.path == board)
     }
 
-    /// H2b: do quadro `X.canvas` à nota par `X.md`, se ela existe.
-    fn open_board_note(&mut self) {
+    /// Do quadro `X.canvas` à nota par `X.md`, se ela existe.
+    fn open_pair_note(&mut self) {
         let Some(tab) = self.tabs.get(self.active) else {
             return;
         };
-        if !crate::canvas_ui::is_canvas_tab(tab)
-            && !rustidian::canvas::is_canvas(&tab.document.path)
-        {
+        if !rustidian::canvas::is_canvas(&tab.document.path) {
             return;
         }
-        let note = rustidian::board_note::note_of(&tab.document.path);
-        let exists = self
-            .vault
-            .as_ref()
-            .is_some_and(|vault| vault.note(&note).is_some());
-        if exists {
-            self.open_note(&note);
-        } else {
-            self.status = format!("Este quadro não tem a nota par {}.", note.display());
+        match self.pair_note() {
+            Some(note) => self.open_note(&note),
+            None => {
+                // TODO(H2b, mudança 7): aqui nasce a nota par ("Criar a nota deste quadro"); por
+                // enquanto só um aviso claro.
+                let note = rustidian::board_note::note_of(&tab.document.path);
+                self.status = format!(
+                    "Este quadro ainda não tem uma nota com o mesmo nome ({}).",
+                    note.display()
+                );
+            }
         }
     }
 
@@ -7533,7 +7740,15 @@ impl eframe::App for NotesApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let status_before = self.status.clone();
+        self.draw(ui, frame);
+        self.status_follows_scope(&status_before);
+    }
+}
+
+impl NotesApp {
+    fn draw(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let frame_started = Instant::now();
         // A frame that starts on another tab than the last one is a tab switch.
         let switched_tab =
@@ -7658,6 +7873,16 @@ impl eframe::App for NotesApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(theme::space::S);
+                    if let Some(mode) = self.board_mode() {
+                        let chip = ui.label(
+                            RichText::new(mode.label())
+                                .size(11.0)
+                                .strong()
+                                .color(theme::accent(ui)),
+                        );
+                        crate::ui_probe::record(ui.ctx(), "board-mode", chip.rect);
+                        ui.add_space(theme::space::S);
+                    }
                     ui.label(RichText::new(&self.status).size(11.0).weak());
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.add_space(theme::space::M);

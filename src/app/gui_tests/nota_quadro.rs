@@ -1,10 +1,11 @@
-//! H2b: trocar entre nota e quadro sem perder nada. O atalho Ctrl+Shift+B cria (e abre) o quadro
-//! par de uma nota, e num quadro alterna entre o desenho e a Lista; Ctrl+Alt+B volta à nota.
+//! H2b: trocar entre nota e quadro sem perder nada. O atalho Ctrl+Shift+B cicla Nota, Quadro e
+//! Lista (cria o quadro par de uma nota se faltar); a paleta vai direto a um modo.
 //! "Transformar em nota" troca um cartão de texto por um cartão vivo de uma nota nova, e renomear
 //! uma nota pelo app leva os cartões dos quadros junto.
 
 use super::canvas::{move_to, parsed, rect_of, state, tab_id};
 use super::*;
+use egui_kittest::kittest::NodeT;
 use rustidian::canvas::{Canvas, NodeKind};
 
 const NONE: egui::Modifiers = egui::Modifiers::NONE;
@@ -14,7 +15,7 @@ fn toggle(session: &mut Session) {
 }
 
 fn to_note(session: &mut Session) {
-    session.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+    session.command("ir para a nota");
 }
 
 fn active_path(session: &Session) -> PathBuf {
@@ -96,7 +97,7 @@ fn o_atalho_pela_paleta_faz_o_mesmo_e_a_nota_e_o_quadro_vao_e_voltam_sem_refazer
     wait_active(&mut session, "Alpha.canvas");
     let first = read(&session, "Alpha.canvas");
 
-    // Volta à nota par e de novo ao quadro: o quadro que já existe é aberto, não refeito.
+    // Volta à nota par pela paleta e de novo ao quadro: o quadro que já existe é aberto, não refeito.
     to_note(&mut session);
     wait_active(&mut session, "Alpha.md");
     assert_eq!(session.active_text(), ALPHA);
@@ -138,8 +139,9 @@ fn no_quadro_o_atalho_alterna_a_lista_na_mesma_aba_e_guarda_o_modo() {
     // Ler a Lista não muda o arquivo nem suja a aba.
     assert!(!session.app().tabs[0].document.dirty());
 
+    // Da Lista, o mesmo atalho volta à nota par (Home.md existe) e a Lista some.
     toggle(&mut session);
-    assert!(!session.app().tabs[0].board_list, "de novo volta ao quadro");
+    wait_active(&mut session, "Home.md");
     assert!(!session.has_label("Lista do quadro"));
 }
 
@@ -159,7 +161,11 @@ fn clicar_num_item_da_lista_volta_ao_quadro_focando_o_cartao() {
     toggle(&mut session);
     assert!(session.app().tabs[0].board_list);
 
-    session.harness.get_by_label("Alpha").click();
+    // O título abre a nota; o trecho do item mostra o cartão no quadro.
+    session
+        .harness
+        .get_by_label_contains("palavra rara")
+        .click();
     session.settle();
     session.settle();
     assert!(!session.app().tabs[0].board_list, "voltou ao quadro");
@@ -312,4 +318,357 @@ fn exportar_a_lista_gera_uma_nota_nova_que_nunca_sobrescreve() {
     session.settle();
     assert_eq!(read(&session, "Home (lista).md"), copy);
     assert!(session.path("Home (lista) 1.md").exists());
+}
+
+/// O rótulo do modo no rodapé (a etiqueta "board-mode" do `ui_probe` não é lida aqui: o texto na
+/// tela é que importa).
+fn footer_mode(session: &Session) -> Option<BoardMode> {
+    let found: Vec<BoardMode> = [BoardMode::Note, BoardMode::Board, BoardMode::List]
+        .into_iter()
+        .filter(|mode| {
+            session
+                .harness
+                .query_all_by_label(mode.label())
+                .any(|node| node.rect().min.y > 800.0 - 28.0)
+        })
+        .collect();
+    assert!(
+        found.len() <= 1,
+        "o rodapé mostra mais de um modo: {found:?}"
+    );
+    found.first().copied()
+}
+
+#[test]
+fn o_rodape_mostra_o_modo_atual_e_a_ajuda_da_lista_some_ao_sair_dela() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    session.settle();
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(footer_mode(&session), Some(BoardMode::Board));
+
+    toggle(&mut session);
+    assert!(session.app().tabs[0].board_list);
+    assert_eq!(footer_mode(&session), Some(BoardMode::List));
+    assert!(!session.has_label("Ctrl+Shift+B volta ao quadro"));
+
+    // Da Lista de volta à nota (o caso do print 05): nenhuma mensagem da Lista sobrevive.
+    toggle(&mut session);
+    wait_active(&mut session, "Home.md");
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+    assert!(
+        !session.has_label("Lista do quadro"),
+        "o rodapé não pode falar da Lista numa nota"
+    );
+    session.open_note("Second");
+    session.settle();
+    assert_eq!(footer_mode(&session), Some(BoardMode::Note));
+    assert!(!session.has_label("Lista do quadro"));
+}
+
+#[test]
+fn a_mensagem_de_status_sai_quando_a_aba_ou_o_modo_muda() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    // Uma mensagem velha, escrita em outro momento (num quadro de antes, digamos).
+    session.app_mut().status = "Mensagem velha".into();
+    session.settle();
+    assert!(
+        session.has_label("Mensagem velha"),
+        "enquanto nada muda, ela fica"
+    );
+
+    // Trocar de nota limpa.
+    session.open_note("Second");
+    session.settle();
+    assert!(!session.has_label("Mensagem velha"));
+
+    // A mensagem do próprio gesto (quadro criado a partir da nota) fica...
+    toggle(&mut session);
+    wait_active(&mut session, "Second.canvas");
+    assert!(
+        session.app().status.contains("criado a partir da nota"),
+        "{}",
+        session.app().status
+    );
+    session.settle();
+    assert!(session.has_label("criado a partir da nota"));
+    // ...até o modo mudar de novo.
+    toggle(&mut session);
+    assert!(session.app().tabs[0].board_list);
+    assert!(session.app().status.is_empty(), "{}", session.app().status);
+}
+
+fn mode(session: &Session) -> Option<BoardMode> {
+    session.app().board_mode()
+}
+
+#[test]
+fn o_atalho_cicla_nota_quadro_lista_nota_na_mesma_aba() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    let board = read(&session, "Home.canvas");
+
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+
+    toggle(&mut session);
+    wait_active(&mut session, "Home.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.active_text(), HOME);
+
+    // Uma volta inteira, sempre na mesma aba, e o quadro não é refeito.
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(read(&session, "Home.canvas"), board);
+    assert_eq!(session.app().tabs.len(), 1);
+}
+
+#[test]
+fn sem_nota_par_a_lista_volta_ao_quadro() {
+    let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().open_note(Path::new("Ideias.canvas"));
+    session.settle();
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    toggle(&mut session);
+    assert_eq!(
+        mode(&session),
+        Some(BoardMode::Board),
+        "sem Ideias.md, volta ao quadro"
+    );
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert!(
+        !session.path("Ideias.md").exists(),
+        "nenhuma nota nasce por ora"
+    );
+}
+
+#[test]
+fn ctrl_alt_b_nao_e_mais_atalho() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    to_note_old_shortcut(&mut session);
+    session.settle();
+    assert_eq!(
+        active_path(&session),
+        Path::new("Home.canvas"),
+        "Ctrl+Alt+B não faz nada"
+    );
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+}
+
+fn to_note_old_shortcut(session: &mut Session) {
+    session.key(CTRL | egui::Modifiers::ALT, egui::Key::B);
+}
+
+#[test]
+fn a_paleta_vai_direto_a_nota_ao_quadro_e_a_lista() {
+    let mut session = Session::open();
+    session.open_note("Alpha");
+
+    // Da nota direto à Lista: cria o quadro e já abre na Lista.
+    session.command("ir para a lista");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    assert!(session.path("Alpha.canvas").exists());
+
+    session.command("ir para o quadro");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    session.command("ir para a lista");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    session.command("ir para a nota");
+    wait_active(&mut session, "Alpha.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    session.command("ir para o quadro");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    assert_eq!(session.app().tabs.len(), 1);
+}
+
+#[test]
+fn a_paleta_nao_oferece_ir_para_o_modo_em_que_ja_esta() {
+    let mut session = Session::open();
+    session.open_note("Alpha");
+    let names = |session: &mut Session| -> Vec<String> {
+        session.key(CTRL, egui::Key::P);
+        session.type_text("ir para");
+        let found = ["Ir para a nota", "Ir para o quadro", "Ir para a lista"]
+            .into_iter()
+            .filter(|name| session.has_label(name))
+            .map(String::from)
+            .collect();
+        session.key(NONE, egui::Key::Escape);
+        found
+    };
+    assert_eq!(names(&mut session), ["Ir para o quadro", "Ir para a lista"]);
+    toggle(&mut session);
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(names(&mut session), ["Ir para a nota", "Ir para a lista"]);
+}
+
+/// O segmento "Nota", "Quadro" ou "Lista" do seletor do cabeçalho (a barra de ferramentas do
+/// quadro e o rodapé também têm textos iguais, por isso se filtra pela faixa do cabeçalho).
+pub(super) fn segment<'a>(session: &'a Session, label: &'a str) -> egui_kittest::Node<'a> {
+    session
+        .harness
+        .query_all_by_label(label)
+        .find(|node| {
+            let rect = node.rect();
+            rect.min.y > 60.0 && rect.max.y < 130.0
+        })
+        .unwrap_or_else(|| panic!("o seletor não tem o segmento {label}"))
+}
+
+pub(super) fn click_segment(session: &mut Session, label: &str) {
+    segment(session, label).click();
+    session.settle();
+    session.settle();
+}
+
+#[test]
+fn o_seletor_do_cabecalho_marca_o_modo_e_tem_tamanho_de_toque() {
+    let mut session = Session::open();
+    session.open_note("Home");
+    session.settle();
+    for label in ["Nota", "Quadro", "Lista"] {
+        let rect = segment(&session, label).rect();
+        assert!(
+            rect.height() >= 32.0 && rect.width() >= 48.0,
+            "{label}: {rect:?} é pequeno para o toque"
+        );
+    }
+    let selected = |session: &Session| -> Vec<&'static str> {
+        ["Nota", "Quadro", "Lista"]
+            .into_iter()
+            .filter(|label| {
+                segment(session, label).accesskit_node().toggled()
+                    == Some(egui::accesskit::Toggled::True)
+            })
+            .collect()
+    };
+    assert_eq!(selected(&session), ["Nota"]);
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Home.canvas");
+    assert_eq!(selected(&session), ["Quadro"]);
+    click_segment(&mut session, "Lista");
+    assert_eq!(selected(&session), ["Lista"]);
+    // O ícone de leitura/edição da nota continua lá, separado do seletor.
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Home.md");
+    assert_eq!(selected(&session), ["Nota"]);
+}
+
+#[test]
+fn o_seletor_leva_da_nota_ao_quadro_a_lista_e_de_volta_criando_o_quadro_se_faltar() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Alpha");
+    assert!(!session.path("Alpha.canvas").exists());
+
+    // "Lista" direto da nota cria o quadro e abre a Lista.
+    click_segment(&mut session, "Lista");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+    assert!(session.path("Alpha.canvas").exists());
+    assert_eq!(session.app().tabs.len(), 1);
+
+    click_segment(&mut session, "Quadro");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    click_segment(&mut session, "Nota");
+    wait_active(&mut session, "Alpha.md");
+    assert_eq!(mode(&session), Some(BoardMode::Note));
+    assert_eq!(session.active_text(), ALPHA);
+
+    // Clicar no segmento do modo atual não faz nada.
+    click_segment(&mut session, "Nota");
+    assert_eq!(active_path(&session), Path::new("Alpha.md"));
+    click_segment(&mut session, "Quadro");
+    wait_active(&mut session, "Alpha.canvas");
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+}
+
+#[test]
+fn o_seletor_num_quadro_sem_nota_par_avisa_em_vez_de_criar() {
+    let mut session = Session::open_with(&[("Ideias.canvas", IDEIAS.as_bytes())]);
+    session.app_mut().open_note(Path::new("Ideias.canvas"));
+    session.settle();
+    click_segment(&mut session, "Nota");
+    assert_eq!(active_path(&session), Path::new("Ideias.canvas"));
+    assert_eq!(mode(&session), Some(BoardMode::Board));
+    assert!(!session.path("Ideias.md").exists());
+    assert!(
+        session.has_label("ainda não tem uma nota com o mesmo nome"),
+        "{}",
+        session.app().status
+    );
+}
+
+#[test]
+fn a_barra_de_ferramentas_do_quadro_nao_tem_mais_o_botao_lista() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    // A barra continua com as ferramentas de criar cartão...
+    for label in ["Texto", "Link", "Grupo"] {
+        assert!(session.has_label(label), "falta o botão {label}");
+    }
+    // ...e o único "Lista" fora do rodapé é o segmento do cabeçalho.
+    let outside_header_and_footer = session
+        .harness
+        .query_all_by_label("Lista")
+        .filter(|node| node.rect().min.y > 130.0 && node.rect().min.y < 800.0 - 28.0)
+        .count();
+    assert_eq!(outside_header_and_footer, 0);
+    // O seletor segue levando à Lista.
+    click_segment(&mut session, "Lista");
+    assert_eq!(mode(&session), Some(BoardMode::List));
+}
+
+#[test]
+fn na_lista_o_titulo_abre_a_nota_e_o_exportar_e_um_botao_no_topo() {
+    let mut session = Session::open();
+    session.app_mut().show_left = false;
+    session.open_note("Home");
+    toggle(&mut session);
+    wait_active(&mut session, "Home.canvas");
+    toggle(&mut session);
+    assert_eq!(mode(&session), Some(BoardMode::List));
+
+    // Nada de "abrir nota" solto, nem "Voltar ao quadro" (o seletor cobre).
+    assert!(!session.has_label("abrir nota"));
+    assert!(!session.has_label("Voltar ao quadro"));
+    // "Exportar como nota (cópia)" é um botão de tamanho de toque, longe do título.
+    let title = session.harness.get_by_label("Lista do quadro").rect();
+    let export = session
+        .harness
+        .get_by_label("Exportar como nota (cópia)")
+        .rect();
+    assert!(export.height() >= 32.0, "{export:?}");
+    assert!(
+        export.min.x > title.max.x + 40.0 && (export.center().y - title.center().y).abs() < 20.0,
+        "o botão {export:?} deve ficar separado do título {title:?}, na mesma faixa do topo"
+    );
+
+    // Clicar no título do item abre a nota (na mesma aba, com o quadro atrás no histórico).
+    session.harness.get_by_label("Second").click();
+    session.settle();
+    session.settle();
+    wait_active(&mut session, "Second.md");
+    assert_eq!(session.active_text(), SECOND);
 }

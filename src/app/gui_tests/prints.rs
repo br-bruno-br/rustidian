@@ -284,3 +284,106 @@ fn print_da_lista_do_quadro() {
     assert!(session.app().tabs[index].board_list);
     save(&mut session, &dir, "quadro-lista.png");
 }
+
+fn ux_wait(session: &mut Session, name: &'static str) {
+    session.wait_for(move |app| {
+        app.tabs
+            .get(app.active)
+            .is_some_and(|t| t.document.path == Path::new(name))
+    });
+    session.settle();
+}
+
+/// O fluxo de usabilidade nota, quadro e Lista com o seletor do cabeçalho (`ux_fluxo`): gera uma
+/// sequência de PNGs em `RUSTIDIAN_PRINTS_DIR`. Para olhar o fluxo com os próprios olhos; não
+/// afirma pixels.
+#[test]
+#[ignore = "UX: gera prints do fluxo nota, quadro e Lista"]
+fn ux_fluxo() {
+    use super::canvas::{move_to, rect_of};
+    use super::nota_quadro::click_segment;
+    let dir = PathBuf::from(std::env::var_os("RUSTIDIAN_PRINTS_DIR").unwrap());
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = cofre_do_projeto();
+    std::fs::write(s.path("Solta.md"), "# Solta\n\nUma nota sem nenhum link.\n").unwrap();
+    std::fs::write(
+        s.path("Ideias.canvas"),
+        r#"{"nodes":[{"id":"t","type":"text","x":100,"y":50,"width":260,"height":120,"text":"Ideia solta\nsegunda linha"}],"edges":[]}"#,
+    )
+    .unwrap();
+    s.settle();
+    s.open_note("Projeto Aurora");
+    save(&mut s, &dir, "01-nota-aberta.png");
+    click_segment(&mut s, "Quadro");
+    ux_wait(&mut s, "Projeto Aurora.canvas");
+    save(&mut s, &dir, "02-quadro-gerado.png");
+    click_segment(&mut s, "Lista");
+    save(&mut s, &dir, "03-lista.png");
+    // O trecho do item mostra o cartão no quadro.
+    s.harness
+        .get_by_label_contains("Plano da nova vitrine")
+        .click();
+    s.settle();
+    s.settle();
+    save(&mut s, &dir, "04-trecho-volta-ao-quadro-foco.png");
+    click_segment(&mut s, "Nota");
+    ux_wait(&mut s, "Projeto Aurora.md");
+    save(&mut s, &dir, "05-volta-a-nota-pelo-seletor.png");
+    click_segment(&mut s, "Quadro");
+    ux_wait(&mut s, "Projeto Aurora.canvas");
+    save(&mut s, &dir, "06-quadro-ja-existia.png");
+    // O atalho cicla: quadro -> lista -> nota.
+    let cycle = |s: &mut Session| s.key(CTRL | egui::Modifiers::SHIFT, egui::Key::B);
+    cycle(&mut s);
+    s.settle();
+    save(&mut s, &dir, "07-atalho-quadro-para-lista.png");
+    cycle(&mut s);
+    ux_wait(&mut s, "Projeto Aurora.md");
+    save(&mut s, &dir, "08-atalho-lista-para-nota.png");
+    // Título do item abre a nota.
+    click_segment(&mut s, "Lista");
+    ux_wait(&mut s, "Projeto Aurora.canvas");
+    s.harness.get_all_by_label("Diário").last().unwrap().click();
+    s.settle();
+    s.settle();
+    ux_wait(&mut s, "Diário.md");
+    save(&mut s, &dir, "09-titulo-do-item-abre-a-nota.png");
+    // Paleta
+    s.key(CTRL, egui::Key::P);
+    s.type_text("ir para");
+    save(&mut s, &dir, "10-paleta-ir-para.png");
+    s.key(egui::Modifiers::NONE, egui::Key::Escape);
+    // Nota sem links
+    s.open_note("Solta");
+    save(&mut s, &dir, "11-nota-sem-links.png");
+    click_segment(&mut s, "Quadro");
+    ux_wait(&mut s, "Solta.canvas");
+    save(&mut s, &dir, "12-quadro-de-nota-sem-links.png");
+    // Quadro sem nota par
+    s.app_mut().open_note(Path::new("Ideias.canvas"));
+    s.settle();
+    save(&mut s, &dir, "13-quadro-sem-nota-par.png");
+    click_segment(&mut s, "Nota");
+    save(&mut s, &dir, "14-nota-sem-nota-par-aviso.png");
+    // Menu do cartão de texto
+    let c = rect_of(&s, "t").center();
+    move_to(&mut s, c);
+    for pressed in [true, false] {
+        s.harness.event(egui::Event::PointerButton {
+            pos: c,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        s.harness.step();
+    }
+    s.settle();
+    save(&mut s, &dir, "15-menu-do-cartao-texto.png");
+    s.harness.get_by_label("Transformar em nota").click();
+    s.settle();
+    s.settle();
+    save(&mut s, &dir, "16-transformado-em-nota.png");
+    // Lista do quadro Ideias, com o botão de exportar
+    click_segment(&mut s, "Lista");
+    save(&mut s, &dir, "17-lista-ideias.png");
+}
