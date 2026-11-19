@@ -159,6 +159,8 @@ pub struct Manager {
     focus: bool,
     selected_file: usize,
     pick_when_ready: bool,
+    /// A barra andou enquanto uma leitura rodava: o que chegar é de uma posição velha.
+    recarregar_depois: bool,
     /// A barra mexeu na escolha: a lista da esquerda rola até a linha escolhida.
     rolar_lista: bool,
 }
@@ -227,10 +229,17 @@ impl Manager {
         }
     }
 
+    /// Uma leitura por vez: se já há uma em andamento só marca que falta reler, e a última
+    /// posição sempre vence (o `poll` descarta o que chegar da posição velha).
     fn escolher(&mut self, id: u64, ctx: &egui::Context) {
         self.selected = Some(id);
         self.error = None;
-        self.reload(ctx, false);
+        if self.loading.is_some() {
+            self.recarregar_depois = true;
+            ctx.request_repaint();
+        } else {
+            self.reload_com(ctx, false, false);
+        }
     }
 
     fn select_file(&mut self, path: Option<PathBuf>, vault: &Vault, ctx: &egui::Context) {
@@ -257,6 +266,12 @@ impl Manager {
     }
 
     fn reload(&mut self, ctx: &egui::Context, refresh_list: bool) {
+        self.reload_com(ctx, refresh_list, true);
+    }
+
+    /// `limpar_texto` falso mantém o texto de antes na tela até o novo chegar (a barra arrasta sem
+    /// piscar; com a leitura em andamento Copiar e Restaurar ficam desabilitados).
+    fn reload_com(&mut self, ctx: &egui::Context, refresh_list: bool, limpar_texto: bool) {
         let Some(history) = self.history.clone() else {
             return;
         };
@@ -270,8 +285,11 @@ impl Manager {
         self.loading = Some(receiver);
         // A failed version query must never leave another version's preview
         // copyable or present it as the newly selected snapshot.
-        self.text = None;
-        self.changes.clear();
+        self.recarregar_depois = false;
+        if limpar_texto {
+            self.text = None;
+            self.changes.clear();
+        }
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = (|| {
@@ -331,6 +349,7 @@ impl Manager {
         if let Some(receiver) = &self.loading {
             match receiver.try_recv() {
                 Ok(Ok(loaded)) => {
+                    let velha = std::mem::take(&mut self.recarregar_depois);
                     if let Some(files) = loaded.files {
                         self.matcher = Some(rustidian::search::FileMatcher::new(files.clone()));
                         self.files = files;
@@ -339,17 +358,29 @@ impl Manager {
                     if let Some(versions) = loaded.versions {
                         self.versions = versions;
                     }
-                    self.selected = loaded.selected;
-                    self.text = loaded.text;
-                    self.changes = loaded.changes;
                     self.loading = None;
+                    if velha {
+                        // O texto que chegou é de uma posição que a barra já deixou: a escolha
+                        // atual (que a barra mexeu) não pode pular de volta; lê de novo.
+                        self.reload_com(ctx, false, false);
+                    } else {
+                        self.selected = loaded.selected;
+                        self.text = loaded.text;
+                        self.changes = loaded.changes;
+                    }
                 }
                 Ok(Err(error)) => {
                     self.error = Some(error);
+                    self.recarregar_depois = false;
+                    self.text = None;
+                    self.changes.clear();
                     self.loading = None;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.error = Some("Não foi possível ler o histórico local.".into());
+                    self.recarregar_depois = false;
+                    self.text = None;
+                    self.changes.clear();
                     self.loading = None;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
