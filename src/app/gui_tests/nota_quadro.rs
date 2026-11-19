@@ -722,3 +722,111 @@ fn vault_name(session: &Session) -> String {
         .map(rustidian::vault::Vault::name)
         .unwrap_or_default()
 }
+
+/// As linhas do explorador (coluna da esquerda), de cima para baixo: texto e posição.
+fn explorer_rows(session: &Session) -> Vec<(String, egui::Rect)> {
+    let mut rows: Vec<(String, egui::Rect)> = session
+        .harness
+        .query_all_by_label_contains("")
+        .filter_map(|node| {
+            let rect = node.rect();
+            let label = node.accesskit_node().label()?;
+            (rect.min.x > 50.0
+                && rect.max.x < 340.0
+                && rect.width() > 150.0
+                && rect.min.y > 140.0
+                && (28.0..40.0).contains(&rect.height()))
+            .then(|| (label.to_string(), rect))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.min.y.total_cmp(&b.1.min.y));
+    rows.dedup_by(|a, b| a.1.min.y == b.1.min.y);
+    rows
+}
+
+#[test]
+fn na_lista_de_arquivos_o_quadro_par_vira_um_item_recuado_sob_a_nota() {
+    let mut session = Session::open_with(&[
+        ("Home.canvas", br#"{"nodes":[],"edges":[]}"#),
+        ("Ideias.canvas", IDEIAS.as_bytes()),
+    ]);
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let names: Vec<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
+    // Home.canvas some como linha solta e aparece como "Quadro" logo abaixo de "Home".
+    assert!(!names.contains(&"Home.canvas"), "{names:?}");
+    let home = names.iter().position(|name| *name == "Home").expect("Home");
+    assert_eq!(names[home + 1], "Quadro", "{names:?}");
+    assert!(
+        rows[home + 1].1.height() >= 28.0,
+        "alvo de toque pequeno: {:?}",
+        rows[home + 1].1
+    );
+    // Um quadro sem nota par continua como hoje: linha solta com o nome do arquivo.
+    assert!(names.contains(&"Ideias.canvas"), "{names:?}");
+    assert_eq!(names.iter().filter(|name| **name == "Quadro").count(), 1);
+}
+
+#[test]
+fn clicar_no_quadro_recuado_abre_o_quadro_e_o_arquivo_segue_no_disco() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let (_, rect) = rows
+        .iter()
+        .find(|(name, _)| name == "Quadro")
+        .expect("item do quadro");
+    move_to(&mut session, rect.center());
+    for pressed in [true, false] {
+        session.harness.event(egui::Event::PointerButton {
+            pos: rect.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: NONE,
+        });
+        session.harness.step();
+    }
+    session.settle();
+    wait_active(&mut session, "Home.canvas");
+    assert!(session.path("Home.canvas").exists());
+}
+
+#[test]
+fn o_quadro_recuado_acompanha_a_nota_na_ordem_inversa() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.app_mut().sort_descending = true;
+    session.settle();
+    session.settle();
+    let rows = explorer_rows(&session);
+    let names: Vec<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
+    let home = names.iter().position(|name| *name == "Home").expect("Home");
+    assert_eq!(names[home + 1], "Quadro", "{names:?}");
+    // Z a A: Second vem antes de Home.
+    assert!(
+        names.iter().position(|name| *name == "Second") < Some(home),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn o_menu_do_quadro_recuado_renomeia_o_arquivo_do_quadro() {
+    let mut session = Session::open_with(&[("Home.canvas", br#"{"nodes":[],"edges":[]}"#)]);
+    session.settle();
+    session.settle();
+    let rect = explorer_rows(&session)
+        .into_iter()
+        .find(|(name, _)| name == "Quadro")
+        .expect("item do quadro")
+        .1;
+    secondary_click(&mut session, rect.center());
+    session.harness.get_by_label("Renomear…").click();
+    session.settle();
+    session.settle();
+    assert!(session.app().dialog == Some(Dialog::RenameNote));
+    assert_eq!(
+        session.app().dialog_path.as_deref(),
+        Some(Path::new("Home.canvas"))
+    );
+}
