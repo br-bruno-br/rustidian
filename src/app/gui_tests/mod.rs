@@ -18,6 +18,7 @@ mod navegacao;
 mod nota_quadro;
 mod onde_aparece;
 mod prints;
+mod quadro_h2h3;
 mod quadro_vivo;
 mod tabela;
 

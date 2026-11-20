@@ -411,3 +411,87 @@ fn ux_fluxo() {
     click_segment(&mut s, "Lista");
     save(&mut s, &dir, "20-lista-ideias.png");
 }
+
+/// H2/H3 do quadro: cartão de seção (com o aviso de seção sumida), quadro dentro de quadro,
+/// mapa mental e o filtro por etiqueta. Grava os PNGs em `RUSTIDIAN_PRINTS_DIR`.
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_do_quadro_h2h3() {
+    use super::canvas::{click, rect_of, state};
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    let guia = "# Guia da vitrine\n\nComo montamos a vitrine nova.\n\n## Prazos\n- Layout: segunda\n- Fotos: quarta\n- Publicar: *sexta*\n\n## Responsáveis\nMaria revisa o texto; Bruno aprova o preço.\n\n## Fornecedores\nTrês fornecedores cotados.\n";
+    let mut session = open_with(&[("Guia da vitrine", guia), ("Ideias", "# Ideias\n")]);
+    std::fs::write(
+        session.path("Mapa.canvas"),
+        r##"{"nodes":[
+		{"id":"a","type":"text","x":0,"y":0,"width":240,"height":80,"text":"# Lançamento"},
+		{"id":"b","type":"text","x":300,"y":0,"width":240,"height":80,"text":"Fotos"},
+		{"id":"c","type":"file","x":0,"y":160,"width":300,"height":200,"file":"Ideias.md"}],"edges":[{"id":"e","fromNode":"a","toNode":"b"}]}"##,
+    )
+    .expect("quadro menor");
+    // 1. Seção, nota inteira, seção sumida e quadro dentro de quadro.
+    let board = r##"{"nodes":[
+		{"id":"prazos","type":"file","x":0,"y":0,"width":360,"height":240,"file":"Guia da vitrine.md","subpath":"#Prazos","color":"4"},
+		{"id":"resp","type":"file","x":400,"y":0,"width":360,"height":240,"file":"Guia da vitrine.md","subpath":"#Responsáveis"},
+		{"id":"sumida","type":"file","x":800,"y":0,"width":360,"height":240,"file":"Guia da vitrine.md","subpath":"#Orçamento antigo"},
+		{"id":"mapa","type":"file","x":0,"y":300,"width":560,"height":300,"file":"Mapa.canvas"}],
+		"edges":[{"id":"e","fromNode":"prazos","toNode":"resp"}]}"##;
+    std::fs::write(session.path("Quadro.canvas"), board).expect("quadro");
+    session.settle();
+    session
+        .app_mut()
+        .open_note(std::path::Path::new("Quadro.canvas"));
+    session.app_mut().show_left = false;
+    session.settle();
+    save(
+        &mut session,
+        &dir,
+        "h2-secoes-e-quadro-dentro-de-quadro.png",
+    );
+
+    // 2. Mapa mental a partir de um cartão e, por cima, a seleção por retângulo.
+    let tree = r##"{"nodes":[
+		{"id":"r","type":"text","x":0,"y":300,"width":220,"height":90,"text":"# Lançamento da vitrine","color":"5"},
+		{"id":"a","type":"text","x":700,"y":40,"width":200,"height":80,"text":"Fotos"},
+		{"id":"b","type":"text","x":40,"y":700,"width":200,"height":80,"text":"Preços"},
+		{"id":"a1","type":"text","x":400,"y":900,"width":200,"height":80,"text":"Fotógrafo"},
+		{"id":"a2","type":"text","x":600,"y":650,"width":200,"height":80,"text":"Cenário"},
+		{"id":"b1","type":"text","x":100,"y":-300,"width":200,"height":80,"text":"Tabela do fornecedor"},
+		{"id":"c","type":"text","x":900,"y":400,"width":200,"height":80,"text":"Divulgação"}],
+		"edges":[{"id":"e1","fromNode":"r","toNode":"a"},{"id":"e2","fromNode":"r","toNode":"b"},{"id":"e3","fromNode":"a","toNode":"a1"},{"id":"e4","fromNode":"a","toNode":"a2"},{"id":"e5","fromNode":"b","toNode":"b1"},{"id":"e6","fromNode":"r","toNode":"c"}]}"##;
+    std::fs::write(session.path("Arvore.canvas"), tree).expect("quadro da árvore");
+    session.settle();
+    session
+        .app_mut()
+        .open_note(std::path::Path::new("Arvore.canvas"));
+    session.settle();
+    save(&mut session, &dir, "h3-mapa-mental-antes.png");
+    let at = rect_of(&session, "r").center();
+    click(&mut session, at);
+    session.command("Quadro: Mapa mental a partir do cartão selecionado");
+    session.settle();
+    state(&session);
+    save(&mut session, &dir, "h3-mapa-mental-depois.png");
+
+    // 3. Etiquetas, cores e o filtro.
+    let tagged = r##"{"nodes":[
+		{"id":"a","type":"file","x":0,"y":0,"width":320,"height":220,"file":"Guia da vitrine.md","subpath":"#Prazos","color":"1","rustidianTags":["urgente","vitrine"]},
+		{"id":"b","type":"text","x":380,"y":0,"width":240,"height":100,"text":"Ligar para o fornecedor","color":"1","rustidianTags":["urgente"]},
+		{"id":"c","type":"text","x":380,"y":140,"width":240,"height":100,"text":"Revisar a lista de preços","color":"4","rustidianTags":["vitrine"]},
+		{"id":"d","type":"text","x":0,"y":280,"width":320,"height":100,"text":"Ideia solta sem etiqueta"},
+		{"id":"e","type":"text","x":380,"y":280,"width":240,"height":100,"text":"Comprar as caixas","color":"6","rustidianTags":["compras"]}],"edges":[]}"##;
+    std::fs::write(session.path("Filtro.canvas"), tagged).expect("quadro do filtro");
+    session.settle();
+    session
+        .app_mut()
+        .open_note(std::path::Path::new("Filtro.canvas"));
+    session.settle();
+    session.command("Quadro: Mostrar ou esconder o filtro");
+    session.settle();
+    session.harness.get_by_label("#urgente").click();
+    session.settle();
+    save(&mut session, &dir, "h3-filtro-por-etiqueta.png");
+}

@@ -34,6 +34,48 @@ pub const GO_TO_NOTE: &str = "Board: Go to the note";
 pub const GO_TO_BOARD: &str = "Board: Go to the board";
 pub const GO_TO_LIST: &str = "Board: Go to the list";
 pub const EXPORT_BOARD_AS_NOTE: &str = "Board: Export the list as a note (copy)";
+// Quadro H2/H3: organizar os cartões, seções e filtro. Só valem numa aba de quadro.
+pub const BOARD_ALIGN_LEFT: &str = "Board: Align left";
+pub const BOARD_ALIGN_CENTER: &str = "Board: Align horizontal centers";
+pub const BOARD_ALIGN_RIGHT: &str = "Board: Align right";
+pub const BOARD_ALIGN_TOP: &str = "Board: Align top";
+pub const BOARD_ALIGN_MIDDLE: &str = "Board: Align vertical middles";
+pub const BOARD_ALIGN_BOTTOM: &str = "Board: Align bottom";
+pub const BOARD_DISTRIBUTE_H: &str = "Board: Spread horizontally";
+pub const BOARD_DISTRIBUTE_V: &str = "Board: Spread vertically";
+pub const BOARD_EQUAL_SPACING: &str = "Board: Equal spacing";
+pub const BOARD_ARRANGE_GRID: &str = "Board: Arrange in a grid";
+pub const BOARD_MIND_MAP: &str = "Board: Mind map from the selected card";
+pub const BOARD_TOGGLE_FILTER: &str = "Board: Show or hide the filter";
+pub const BOARD_CLEAR_FILTER: &str = "Board: Clear the filter";
+pub const BOARD_PICK_SECTION: &str = "Board: Show only one section of the selected note";
+pub const BOARD_WHOLE_NOTE: &str = "Board: Show the whole note in the selected card";
+pub const BOARD_TAG_CARD: &str = "Board: Tag the selected card";
+/// Os comandos do bloco acima, na ordem em que a paleta os lista.
+pub const BOARD_COMMANDS: [&str; 16] = [
+    BOARD_ALIGN_LEFT,
+    BOARD_ALIGN_CENTER,
+    BOARD_ALIGN_RIGHT,
+    BOARD_ALIGN_TOP,
+    BOARD_ALIGN_MIDDLE,
+    BOARD_ALIGN_BOTTOM,
+    BOARD_DISTRIBUTE_H,
+    BOARD_DISTRIBUTE_V,
+    BOARD_EQUAL_SPACING,
+    BOARD_ARRANGE_GRID,
+    BOARD_MIND_MAP,
+    BOARD_TOGGLE_FILTER,
+    BOARD_CLEAR_FILTER,
+    BOARD_PICK_SECTION,
+    BOARD_WHOLE_NOTE,
+    BOARD_TAG_CARD,
+];
+
+/// Se o comando é um dos de organizar o quadro (só aparece e só roda numa aba de quadro).
+pub fn is_board_command(name: &str) -> bool {
+    BOARD_COMMANDS.contains(&name)
+}
+
 pub const CLOSE_OTHER_TABS: &str = "Close all other tabs";
 pub const OPEN_FILE: &str = "Open file…";
 pub const OPEN_FOLDER: &str = "Open folder…";
@@ -156,6 +198,87 @@ pub const ALL: &[Command] = &[
     },
     Command {
         name: EXPORT_BOARD_AS_NOTE,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    // Quadro H2/H3
+    Command {
+        name: BOARD_ALIGN_LEFT,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ALIGN_CENTER,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ALIGN_RIGHT,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ALIGN_TOP,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ALIGN_MIDDLE,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ALIGN_BOTTOM,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_DISTRIBUTE_H,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_DISTRIBUTE_V,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_EQUAL_SPACING,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_ARRANGE_GRID,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_MIND_MAP,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_TOGGLE_FILTER,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_CLEAR_FILTER,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_PICK_SECTION,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_WHOLE_NOTE,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: BOARD_TAG_CARD,
         shortcut: "",
         scope: Scope::Document,
     },
@@ -469,6 +592,23 @@ pub fn label(name: &str) -> &str {
         GO_TO_BOARD => "Ir para o quadro",
         GO_TO_LIST => "Ir para a lista",
         EXPORT_BOARD_AS_NOTE => "Quadro: Exportar a lista como nota (cópia)",
+        // Quadro H2/H3
+        BOARD_ALIGN_LEFT => "Quadro: Alinhar à esquerda",
+        BOARD_ALIGN_CENTER => "Quadro: Alinhar pelo centro (na horizontal)",
+        BOARD_ALIGN_RIGHT => "Quadro: Alinhar à direita",
+        BOARD_ALIGN_TOP => "Quadro: Alinhar pelo topo",
+        BOARD_ALIGN_MIDDLE => "Quadro: Alinhar pelo meio (na vertical)",
+        BOARD_ALIGN_BOTTOM => "Quadro: Alinhar pela base",
+        BOARD_DISTRIBUTE_H => "Quadro: Distribuir na horizontal",
+        BOARD_DISTRIBUTE_V => "Quadro: Distribuir na vertical",
+        BOARD_EQUAL_SPACING => "Quadro: Espaçamento igual",
+        BOARD_ARRANGE_GRID => "Quadro: Arrumar em grade",
+        BOARD_MIND_MAP => "Quadro: Mapa mental a partir do cartão selecionado",
+        BOARD_TOGGLE_FILTER => "Quadro: Mostrar ou esconder o filtro",
+        BOARD_CLEAR_FILTER => "Quadro: Limpar o filtro",
+        BOARD_PICK_SECTION => "Quadro: Mostrar só uma seção da nota selecionada",
+        BOARD_WHOLE_NOTE => "Quadro: Mostrar a nota inteira no cartão selecionado",
+        BOARD_TAG_CARD => "Quadro: Etiquetar o cartão selecionado",
         CLOSE_OTHER_TABS => "Fechar todas as outras abas",
         OPEN_FILE => "Abrir arquivo…",
         OPEN_FOLDER => "Abrir pasta…",
@@ -759,6 +899,26 @@ mod tests {
             assert_eq!(label(wanted).to_lowercase(), query);
         }
         assert!(ranked(EXPORT_BOARD_AS_NOTE, Scope::Global).is_empty());
+    }
+
+    #[test]
+    fn os_comandos_de_organizar_o_quadro_estao_na_paleta_com_nome_em_portugues() {
+        assert_eq!(BOARD_COMMANDS.len(), 16);
+        for name in BOARD_COMMANDS {
+            assert!(is_board_command(name));
+            assert!(ALL.iter().any(|command| command.name == name), "{name}");
+            let shown = label(name);
+            assert!(shown.starts_with("Quadro: "), "{name} -> {shown}");
+            // A paleta acha pelo nome mostrado e só onde há um documento.
+            assert_eq!(ranked(shown, Scope::Document)[0].name, name, "{shown}");
+            assert!(ranked(shown, Scope::Global).is_empty(), "{shown}");
+        }
+        assert!(!is_board_command(EXPORT_BOARD_AS_NOTE));
+        assert_eq!(
+            ranked("alinhar esquerda", Scope::Document)[0].name,
+            BOARD_ALIGN_LEFT
+        );
+        assert_eq!(ranked("grade", Scope::Document)[0].name, BOARD_ARRANGE_GRID);
     }
 
     #[test]

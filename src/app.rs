@@ -3428,15 +3428,7 @@ impl NotesApp {
                             );
                             ui.add_space(theme::space::S);
                             for occurrence in &on_boards {
-                                let name = occurrence
-                                    .board
-                                    .file_stem()
-                                    .map(|stem| stem.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                let text = match &occurrence.group {
-                                    Some(group) => format!("{name} · {group}"),
-                                    None => name,
-                                };
+                                let text = occurrence.label();
                                 let row = ui
                                     .add(
                                         egui::Button::new(RichText::new(text).size(12.0))
@@ -3636,6 +3628,27 @@ impl NotesApp {
         if let Err(error) = vault.save(&mut document) {
             self.error = Some(error.to_string());
         }
+    }
+
+    /// Roda um comando de organizar o quadro (H2/H3) na aba ativa, se for um quadro.
+    fn run_board_command(&mut self, name: &str) {
+        if self.active >= self.tabs.len() {
+            return;
+        }
+        let (before, after) = self.tabs.split_at_mut(self.active);
+        let Some((tab, after)) = after.split_first_mut() else {
+            return;
+        };
+        if !crate::canvas_ui::is_canvas_tab(tab) {
+            return;
+        }
+        let notes = crate::canvas_notes::Notes::new(
+            self.vault.as_ref(),
+            before,
+            after,
+            &mut self.card_tabs,
+        );
+        self.canvases.run_command(tab, name, &notes);
     }
 
     /// Abre o quadro onde a nota aparece e centraliza o cartão dela.
@@ -5858,7 +5871,7 @@ impl NotesApp {
                                 command.name,
                                 rustidian::commands::TOGGLE_CANVAS_LIBRARY
                                     | rustidian::commands::EXPORT_BOARD_AS_NOTE
-                            )
+                            ) && !rustidian::commands::is_board_command(command.name)
                         });
                     }
                     // Nota, quadro e Lista: só onde há o que alternar, e sem o comando que leva
@@ -6800,6 +6813,7 @@ impl NotesApp {
             rustidian::commands::GO_TO_BOARD => self.go_to_mode(BoardMode::Board),
             rustidian::commands::GO_TO_LIST => self.go_to_mode(BoardMode::List),
             rustidian::commands::EXPORT_BOARD_AS_NOTE => self.export_board_list(),
+            name if rustidian::commands::is_board_command(name) => self.run_board_command(name),
             rustidian::commands::FOCUS_OTHER_PANE => {
                 if let Some(other) = self.panes.other() {
                     self.focus_pane(other);

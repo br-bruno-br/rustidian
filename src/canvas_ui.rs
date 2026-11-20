@@ -19,8 +19,12 @@ use eframe::egui::{
 use rustidian::{
     board_list::{self, ItemKind},
     canvas::{
-        self, BlockKind, Canvas, GROUP_LABEL_HEIGHT, Handle, Node, NodeKind, Side, color_rgb,
+        self, BlockKind, Canvas, Filter, GROUP_LABEL_HEIGHT, Handle, Node, NodeKind, Side,
+        color_rgb,
     },
+    canvas_layout::{self, Align, Axis},
+    canvas_mini,
+    canvas_section::{self, Section},
     graph_layout::Camera,
     tab::{Tab, View},
 };
@@ -80,6 +84,12 @@ enum Drag {
         side: Side,
         pointer: Pos2,
     },
+    /// Retângulo de seleção (H3a): Shift+arrastar no fundo. `base` é o que já estava selecionado.
+    Marquee {
+        start: Pos2,
+        current: Pos2,
+        base: Vec<String>,
+    },
 }
 
 enum Action {
@@ -96,6 +106,57 @@ enum Action {
     Collapse,
     /// Transformar o cartão de texto numa nota do cofre (H2b).
     ToNote,
+    /// Escolher a seção da nota que o cartão mostra (H2a).
+    PickSection,
+    /// Voltar a mostrar a nota inteira no cartão (H2a).
+    WholeNote,
+    /// Editar as etiquetas dos cartões selecionados (H3c).
+    Tags,
+    /// Organizar os cartões selecionados (H3a e H3b).
+    Layout(LayoutCmd),
+}
+
+/// Um comando de organizar o quadro (H3): o menu, a barra e a paleta chamam o mesmo código.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LayoutCmd {
+    Align(Align),
+    Distribute(Axis),
+    EqualSpacing,
+    Grid,
+    MindMap,
+}
+
+/// A edição de uma seção no cartão (H2a): onde o trecho está na nota inteira e o que o cartão
+/// gravou da última vez. Se o trecho da nota deixar de ser igual ao gravado (a nota mudou por
+/// fora), a edição termina sem escrever nada por cima.
+struct SectionEdit {
+    range: std::ops::Range<usize>,
+    applied: String,
+}
+
+/// A janela "Mostrar só uma seção" (H2a).
+struct SectionPicker {
+    node_id: String,
+    file: String,
+    headings: Vec<canvas_section::Heading>,
+    /// Em vez de trocar a seção deste cartão, criar um cartão novo para ela.
+    new_card: bool,
+}
+
+/// A janela de etiquetas (H3c).
+struct TagEditor {
+    ids: Vec<String>,
+    buffer: String,
+    focused: bool,
+}
+
+/// O quadro menor de um cartão de quadro, guardado entre os desenhos (H2b).
+struct MiniEntry {
+    checked: f64,
+    stamp: u64,
+    /// O texto do quadro existia (e foi lido) quando a miniatura foi feita.
+    has_text: bool,
+    mini: Result<Arc<canvas_mini::Mini>, &'static str>,
 }
 
 /// A rolagem de um cartão de nota (H1): onde está e até onde vai (medido ao desenhar).
@@ -129,6 +190,21 @@ pub struct CanvasState {
     card_view: RefCell<HashMap<String, CardView>>,
     /// A biblioteca de notas, quando aberta.
     library: Option<Library>,
+    /// O filtro por cor e etiqueta (H3c): estado da tela, nunca vai para o arquivo.
+    filter: Filter,
+    filter_open: bool,
+    /// O caminho deste quadro em forma de chave (para a guarda de ciclo do quadro dentro de quadro).
+    board_key: String,
+    section_edit: Option<SectionEdit>,
+    section_picker: Option<SectionPicker>,
+    tag_editor: Option<TagEditor>,
+    /// As miniaturas dos cartões de quadro, por caminho.
+    minis: RefCell<HashMap<String, MiniEntry>>,
+    /// Um aviso curto de comando que não pôde agir (por exemplo "selecione dois cartões").
+    notice: Option<String>,
+    /// O que o último desenho escolheu mostrar em cada cartão (só para os testes de GUI).
+    #[cfg(test)]
+    shown: RefCell<HashMap<String, String>>,
 }
 
 impl CanvasState {
@@ -156,6 +232,16 @@ impl CanvasState {
             area: egui::Rect::NOTHING,
             card_view: RefCell::default(),
             library: None,
+            filter: Filter::default(),
+            filter_open: false,
+            board_key: String::new(),
+            section_edit: None,
+            section_picker: None,
+            tag_editor: None,
+            minis: RefCell::default(),
+            notice: None,
+            #[cfg(test)]
+            shown: RefCell::default(),
         }
     }
 
@@ -168,7 +254,17 @@ impl CanvasState {
         let selected = std::mem::take(&mut self.selected);
         let card_view = std::mem::take(&mut self.card_view);
         let library = self.library.take();
+        let filter = std::mem::take(&mut self.filter);
+        let filter_open = self.filter_open;
+        let board_key = std::mem::take(&mut self.board_key);
+        let minis = std::mem::take(&mut self.minis);
+        let notice = self.notice.take();
         *self = Self::load(text);
+        self.filter = filter;
+        self.filter_open = filter_open;
+        self.board_key = board_key;
+        self.minis = minis;
+        self.notice = notice;
         self.camera = camera;
         self.fitted = fitted;
         self.focus = focus;
@@ -252,6 +348,62 @@ impl CanvasState {
         let rect = self.node_screen_rect(id)?;
         let buttons = header_buttons(rect, self.camera.zoom);
         Some((buttons.collapse, buttons.aside))
+    }
+
+    /// Guarda o que o desenho escolheu mostrar (só nos testes; fora deles não faz nada).
+    fn note_shown(&self, _key: String, _value: impl FnOnce() -> String) {
+        #[cfg(test)]
+        self.shown.borrow_mut().insert(_key, _value());
+    }
+
+    /// O que o último desenho mostrou para `key` (`body:<id>`, `title:<id>`, `mini:<id>`).
+    #[cfg(test)]
+    pub fn shown(&self, key: &str) -> Option<String> {
+        self.shown.borrow().get(key).cloned()
+    }
+
+    #[cfg(test)]
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    #[cfg(test)]
+    pub fn filter(&self) -> &Filter {
+        &self.filter
+    }
+
+    #[cfg(test)]
+    pub fn filter_open(&self) -> bool {
+        self.filter_open
+    }
+
+    /// Liga o filtro direto (só nos testes; a tela usa a faixa do filtro).
+    #[cfg(test)]
+    pub fn set_filter(&mut self, color: Option<&str>, tag: Option<&str>) {
+        self.filter = Filter {
+            color: color.map(str::to_owned),
+            tag: tag.map(str::to_owned),
+        };
+    }
+
+    #[cfg(test)]
+    pub fn picker_open(&self) -> bool {
+        self.section_picker.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn tag_editor_open(&self) -> bool {
+        self.tag_editor.is_some()
+    }
+
+    /// Onde fica o botão "Mostrar a nota inteira" do cartão de seção sumida.
+    #[cfg(test)]
+    pub fn fix_button(&self, id: &str) -> Option<egui::Rect> {
+        let rect = self.node_screen_rect(id)?;
+        Some(section_fix_button(
+            note_body_rect(rect, self.camera.zoom),
+            self.camera.zoom,
+        ))
     }
 
     #[cfg(test)]
@@ -456,6 +608,11 @@ impl Manager {
         self.states.get(&tab_id)
     }
 
+    #[cfg(test)]
+    pub fn state_mut_for_tests(&mut self, tab_id: u64) -> Option<&mut CanvasState> {
+        self.states.get_mut(&tab_id)
+    }
+
     /// Pede que o quadro da aba centralize e selecione o cartão `node_id` quando for desenhado.
     pub fn focar_no(&mut self, tab: &Tab, node_id: &str) {
         let state = self
@@ -507,6 +664,46 @@ impl Manager {
             show_canvas(ui, state, tab, notes, &mut outcome);
         }
         outcome
+    }
+
+    /// Roda um comando do bloco "Quadro H2/H3" da paleta (alinhar, distribuir, grade, mapa mental,
+    /// filtro, seção e etiquetas) no quadro desta aba. Sem o que fazer, deixa um aviso na tela.
+    pub fn run_command(&mut self, tab: &mut Tab, name: &str, notes: &Notes) {
+        use rustidian::commands as c;
+        let Some(state) = self.states.get_mut(&tab.id()) else {
+            return;
+        };
+        if state.error.is_some() || tab.board_list {
+            return;
+        }
+        state.notice = None;
+        if let Some(cmd) = layout_for_command(name) {
+            run_layout(state, cmd, tab);
+            return;
+        }
+        let single = (state.selected.len() == 1 && state.selected_edge.is_none())
+            .then(|| state.selected[0].clone());
+        match name {
+            c::BOARD_TOGGLE_FILTER => state.filter_open = !state.filter_open,
+            c::BOARD_CLEAR_FILTER => state.filter = Filter::default(),
+            c::BOARD_PICK_SECTION => match single {
+                Some(id) => open_section_picker(state, notes, &id),
+                None => state.notice = Some("Selecione um cartão de nota.".to_owned()),
+            },
+            c::BOARD_WHOLE_NOTE => {
+                let done = single.as_deref().is_some_and(|id| {
+                    state.card_view.borrow_mut().remove(id);
+                    state.canvas.set_subpath(id, None)
+                });
+                if done {
+                    state.commit(tab);
+                } else {
+                    state.notice = Some("Selecione um cartão de seção.".to_owned());
+                }
+            }
+            c::BOARD_TAG_CARD => open_tag_editor(state, state.selected.clone()),
+            _ => {}
+        }
     }
 
     /// Troca o cartão de texto `node_id` pelo cartão vivo da nota `path` (que o app acabou de
@@ -753,6 +950,7 @@ fn show_canvas(
 ) {
     let rect = ui.available_rect_before_wrap();
     state.area = rect;
+    state.board_key = rustidian::canvas_index::key_of(&tab.document.path);
     if !state.fitted && rect.width() > 1.0 {
         state.fit();
         state.fitted = true;
@@ -874,7 +1072,9 @@ fn show_canvas(
     let keyboard_free = !ui.ctx().egui_wants_keyboard_input()
         && (response.hovered() || ui.rect_contains_pointer(rect))
         && state.add_note.is_none()
-        && state.add_link.is_none();
+        && state.add_link.is_none()
+        && state.section_picker.is_none()
+        && state.tag_editor.is_none();
     if keyboard_free {
         changed_text |= handle_keys(ui, state, tab, notes);
     }
@@ -884,6 +1084,7 @@ fn show_canvas(
     paint_groups_and_nodes(ui, &painter, state, notes);
     paint_edges(ui, &painter, state);
     paint_selection_tools(&painter, state, ui);
+    paint_marquee(&painter, state, ui);
     if let Some(Drag::Link {
         from,
         side,
@@ -898,10 +1099,13 @@ fn show_canvas(
 
     // --- Edição de texto no lugar -----------------------------------------------------------
     changed_text |= show_editor(ui, state, tab, notes, outcome);
+    if state.editing.is_none() {
+        state.section_edit = None;
+    }
 
     // --- Menu de contexto --------------------------------------------------------------------
     if let Some(action) = show_context_menu(&response, state) {
-        changed_text |= apply_action(state, action, tab, outcome);
+        changed_text |= apply_action(state, action, tab, notes, outcome);
     }
 
     // --- Botão do cartão de texto selecionado -------------------------------------------------
@@ -910,6 +1114,10 @@ fn show_canvas(
     // --- Barra de ferramentas e janelas -----------------------------------------------------
     changed_text |= show_toolbar(ui, state, tab, rect);
     changed_text |= show_dialogs(ui, state, tab, notes.vault);
+    changed_text |= show_section_picker(ui, state, tab);
+    changed_text |= show_tag_editor(ui, state, tab);
+    show_filter_bar(ui, state, rect);
+    show_notice(ui, state, rect);
     changed_text |= show_library(ui, state, tab, notes, rect);
     changed_text |= take_drops(ui, state, tab, notes, rect);
 
@@ -1153,6 +1361,14 @@ fn begin_drag(state: &mut CanvasState, origin: Pos2, shift: bool) {
         });
         return;
     }
+    if shift {
+        state.drag = Some(Drag::Marquee {
+            start: origin,
+            current: origin,
+            base: state.selected.clone(),
+        });
+        return;
+    }
     state.drag = Some(Drag::Pan {
         start: state.camera.pan,
     });
@@ -1220,6 +1436,22 @@ fn continue_drag(
                 .input(|input| input.pointer.hover_pos())
                 .unwrap_or(pointer),
         },
+        Drag::Marquee {
+            start,
+            current,
+            base,
+        } => {
+            let current = ui
+                .input(|input| input.pointer.hover_pos())
+                .unwrap_or(current);
+            state.selected = marquee_selection(state, start, current, &base);
+            state.selected_edge = None;
+            Drag::Marquee {
+                start,
+                current,
+                base,
+            }
+        }
     }
 }
 
@@ -1230,7 +1462,7 @@ fn finish_drag(
     tab: &mut Tab,
 ) -> bool {
     match drag {
-        Drag::Pan { .. } => false,
+        Drag::Pan { .. } | Drag::Marquee { .. } => false,
         Drag::Move { .. } | Drag::Resize { .. } => state.commit(tab),
         Drag::Link {
             from,
@@ -1280,6 +1512,7 @@ fn handle_click(
         shift,
         aside,
     } = click;
+    state.notice = None;
     let world = state.to_world(position);
     let tolerance = f64::from(GRAB / state.camera.zoom);
     if let Some(node) = state.canvas.node_at(world, tolerance).cloned() {
@@ -1309,6 +1542,14 @@ fn handle_click(
                     return false;
                 }
             }
+            if !node.is_collapsed()
+                && section_missing(notes, &node)
+                && section_fix_button(note_body_rect(rect, zoom), zoom).contains(position)
+            {
+                // A seção sumiu: "Mostrar a nota inteira" devolve o cartão ao normal.
+                state.canvas.set_subpath(&node.id, None);
+                return state.commit(tab);
+            }
             if aside {
                 outcome.aside = Some(file);
                 return false;
@@ -1317,7 +1558,7 @@ fn handle_click(
             if in_header {
                 // O título abre a nota (como no R14).
                 outcome.follow = Some(file);
-            } else if double && notes.exists(Path::new(&file)) {
+            } else if double && notes.exists(Path::new(&file)) && !section_missing(notes, &node) {
                 state.editing = Some(Editing {
                     what: Edit::Note(node.id.clone()),
                     buffer: String::new(),
@@ -1427,6 +1668,7 @@ fn handle_keys(ui: &egui::Ui, state: &mut CanvasState, tab: &mut Tab, notes: &No
             });
         } else if node.is_note_card()
             && !node.is_collapsed()
+            && !section_missing(notes, &node)
             && node
                 .file
                 .as_deref()
@@ -1488,8 +1730,7 @@ fn show_editor(
         state.editing.as_ref().map(|editing| &editing.what),
         Some(Edit::Note(_))
     ) {
-        show_note_editor(ui, state, notes, outcome);
-        return false;
+        return show_note_editor(ui, state, tab, notes, outcome);
     }
     let Some(mut editing) = state.editing.take() else {
         return false;
@@ -1590,34 +1831,62 @@ fn show_editor(
 fn show_note_editor(
     ui: &mut egui::Ui,
     state: &mut CanvasState,
+    board_tab: &mut Tab,
     notes: &mut Notes,
     outcome: &mut Outcome,
-) {
+) -> bool {
     let Some(mut editing) = state.editing.take() else {
-        return;
+        return false;
     };
     let Edit::Note(node_id) = &editing.what else {
-        return;
+        return false;
     };
     let Some(node) = state.canvas.node(node_id).cloned() else {
-        return;
+        return false;
     };
     let Some(file) = node.file.clone() else {
-        return;
+        return false;
     };
     let rect = state.screen_rect(node.rect());
     let zoom = state.camera.zoom;
     let body = note_body_rect(rect, zoom);
     if body.width() < 20.0 || body.height() < 20.0 || node.is_collapsed() {
-        return;
+        return false;
     }
     let tab = match notes.edit_target(Path::new(&file)) {
         Ok(tab) => tab,
         Err(message) => {
             outcome.error = Some(message);
-            return;
+            return false;
         }
     };
+    // Cartão de seção: o editor mostra só o trecho e escreve de volta no mesmo lugar da nota.
+    let section = node
+        .subpath
+        .as_deref()
+        .filter(|subpath| canvas_section::parse_subpath(subpath).is_some())
+        .map(str::to_owned);
+    if let Some(subpath) = &section
+        && state.section_edit.is_none()
+    {
+        match canvas_section::find_section(&tab.document.text, subpath) {
+            Section::Found(range) => {
+                // O que separa a seção da próxima (linhas em branco no fim) fica de fora da
+                // edição: digitar no fim do cartão nunca cola o texto no cabeçalho seguinte.
+                let kept = tab.document.text[range.clone()].trim_end().len();
+                let range = range.start..range.start + kept;
+                editing.buffer = tab.document.text[range.clone()].to_owned();
+                state.section_edit = Some(SectionEdit {
+                    applied: editing.buffer.clone(),
+                    range,
+                });
+            }
+            _ => {
+                outcome.error = Some("A seção não existe mais na nota.".into());
+                return false;
+            }
+        }
+    }
     let had_focus_before = editing.focused;
     let size = (14.0 * zoom).clamp(11.0, 40.0);
     let id = ui.scope_id().with(("canvas-note-edit", &node.id));
@@ -1630,7 +1899,12 @@ fn show_note_editor(
                 .id_salt(("canvas-note-scroll", &node.id))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    egui::TextEdit::multiline(&mut tab.document.text)
+                    let text: &mut String = if section.is_some() {
+                        &mut editing.buffer
+                    } else {
+                        &mut tab.document.text
+                    };
+                    egui::TextEdit::multiline(text)
                         .id(id)
                         .font(FontId::new(size, theme::fonts::text("regular")))
                         .desired_width(body.width())
@@ -1644,8 +1918,29 @@ fn show_note_editor(
         .inner;
     ui.painter()
         .rect_stroke(body, 2.0, Stroke::new(1.5, accent), StrokeKind::Inside);
+    let mut ended = false;
     if changed {
-        tab.edited();
+        match state.section_edit.as_mut() {
+            Some(edit) if section.is_some() => {
+                // Só escreve se o trecho da nota ainda é o que o cartão gravou da última vez;
+                // se a nota mudou por fora, a edição termina e nada é pisado.
+                if tab.document.text.get(edit.range.clone()) == Some(edit.applied.as_str()) {
+                    tab.document.text = canvas_section::replace_range(
+                        &tab.document.text,
+                        edit.range.clone(),
+                        &editing.buffer,
+                    );
+                    edit.range = edit.range.start..edit.range.start + editing.buffer.len();
+                    edit.applied = editing.buffer.clone();
+                    tab.edited();
+                } else {
+                    outcome.error =
+                        Some("A nota mudou por fora; a edição da seção terminou.".into());
+                    ended = true;
+                }
+            }
+            _ => tab.edited(),
+        }
     }
     if !editing.focused {
         response.request_focus();
@@ -1655,11 +1950,32 @@ fn show_note_editor(
         escape = input.key_pressed(Key::Escape);
     });
     // Sair: Esc, clicar fora (o foco vai embora) ou o texto perder o foco depois de tê-lo.
-    let finished = escape || (had_focus_before && !response.has_focus());
+    let finished = ended || escape || (had_focus_before && !response.has_focus());
     ui.ctx().request_repaint();
     if !finished {
         state.editing = Some(editing);
+        return false;
     }
+    // Se o cabeçalho foi renomeado dentro do cartão, o `subpath` acompanha o nome novo.
+    let mut changed_board = false;
+    if let (Some(subpath), Some(title)) = (
+        &section,
+        canvas_section::first_heading_title(&editing.buffer),
+    ) {
+        let current =
+            canvas_section::parse_subpath(subpath).and_then(|parts| parts.last().cloned());
+        let same = current.is_some_and(|last| {
+            last.split_whitespace().collect::<Vec<_>>()
+                == title.split_whitespace().collect::<Vec<_>>()
+        });
+        if !same {
+            let renamed = canvas_section::renamed(subpath, &title);
+            state.canvas.set_subpath(&node.id, Some(&renamed));
+            changed_board = state.commit(board_tab);
+        }
+    }
+    state.section_edit = None;
+    changed_board
 }
 
 /// A área do corpo de um cartão de nota (abaixo do cabeçalho), na tela.
@@ -1743,6 +2059,14 @@ fn show_context_menu(response: &egui::Response, state: &mut CanvasState) -> Opti
                         action = Some(Action::Collapse);
                         ui.close();
                     }
+                    if ui.button("Mostrar só uma seção…").clicked() {
+                        action = Some(Action::PickSection);
+                        ui.close();
+                    }
+                    if node.subpath.is_some() && ui.button("Mostrar a nota inteira").clicked() {
+                        action = Some(Action::WholeNote);
+                        ui.close();
+                    }
                 }
                 if let Some(node) = state.canvas.node(id)
                     && node.node_kind() == NodeKind::Text
@@ -1764,6 +2088,16 @@ fn show_context_menu(response: &egui::Response, state: &mut CanvasState) -> Opti
                     action = Some(Action::EditLabel);
                     ui.close();
                 }
+                if ui.button("Etiquetas…").clicked() {
+                    action = Some(Action::Tags);
+                    ui.close();
+                }
+                ui.menu_button("Organizar", |ui| {
+                    if let Some(cmd) = layout_menu(ui, state) {
+                        action = Some(Action::Layout(cmd));
+                        ui.close();
+                    }
+                });
             }
             Target::Edge(id) => {
                 if ui.button("Editar rótulo").clicked() {
@@ -1830,6 +2164,7 @@ fn apply_action(
     state: &mut CanvasState,
     action: Action,
     tab: &mut Tab,
+    notes: &Notes,
     outcome: &mut Outcome,
 ) -> bool {
     let Some(target) = state.menu.clone() else {
@@ -1927,6 +2262,38 @@ fn apply_action(
             }
             false
         }
+        Action::PickSection => {
+            if let Target::Node(id) = target {
+                open_section_picker(state, notes, &id);
+            }
+            false
+        }
+        Action::WholeNote => {
+            let Target::Node(id) = target else {
+                return false;
+            };
+            state.card_view.borrow_mut().remove(&id);
+            state.canvas.set_subpath(&id, None) && state.commit(tab)
+        }
+        Action::Tags => {
+            if let Target::Node(id) = target {
+                let ids = if state.selected.contains(&id) {
+                    state.selected.clone()
+                } else {
+                    vec![id]
+                };
+                open_tag_editor(state, ids);
+            }
+            false
+        }
+        Action::Layout(cmd) => {
+            if let Target::Node(id) = target
+                && !state.selected.contains(&id)
+            {
+                state.select_only(&id);
+            }
+            run_layout(state, cmd, tab)
+        }
     }
 }
 
@@ -2009,6 +2376,21 @@ fn show_toolbar(
                             state.selected_edge = Some(edge);
                             changed |= state.commit(tab);
                         }
+                    }
+                    let mut layout = None;
+                    let organize = ui.menu_button("Organizar", |ui| {
+                        layout = layout_menu(ui, state);
+                    });
+                    crate::ui_probe::record(ui.ctx(), "canvas-organize", organize.response.rect);
+                    if let Some(cmd) = layout {
+                        changed |= run_layout(state, cmd, tab);
+                    }
+                    let filter = ui
+                        .selectable_label(state.filter_open || state.filter.is_active(), "Filtro")
+                        .on_hover_text("Mostrar só os cartões de uma cor ou etiqueta");
+                    crate::ui_probe::record(ui.ctx(), "canvas-filter", filter.rect);
+                    if filter.clicked() {
+                        state.filter_open = !state.filter_open;
                     }
                     ui.separator();
                     if ui.button("−").on_hover_text("Diminuir o zoom").clicked() {
@@ -2368,6 +2750,8 @@ fn paint_groups_and_nodes(
             painter.rect_stroke(rect, rounding, stroke, StrokeKind::Inside);
             let editing_this = editing_id.as_deref() == Some(node.id.as_str());
             paint_content(ui, painter, state, node, rect, notes, editing_this);
+            paint_filter_veil(ui, painter, state, node, rect);
+            paint_tags(ui, painter, state, node, rect);
         }
     }
 }
@@ -2438,6 +2822,10 @@ fn paint_content(
                 rect.max - Vec2::splat(pad),
             );
             if body.height() < 8.0 || zoom < 0.3 {
+                return;
+            }
+            if node.is_board_card() {
+                paint_board_card(ui, &clip, state, node, body, notes);
                 return;
             }
             if rustidian::assets::is_image(std::path::Path::new(file)) {
@@ -2626,6 +3014,7 @@ fn paint_note_card(
         rect.max.x - pad
     };
     let title_size = (15.0 * zoom).clamp(8.0, 36.0);
+    state.note_shown(format!("title:{}", node.id), || card_title(node));
     painter
         .with_clip_rect(
             egui::Rect::from_min_max(rect.min, Pos2::new(title_right, rect.max.y))
@@ -2634,7 +3023,7 @@ fn paint_note_card(
         .text(
             rect.min + Vec2::new(pad, ((header_height - title_size) / 2.0).max(2.0)),
             Align2::LEFT_TOP,
-            node.file_title(),
+            card_title(node),
             FontId::new(title_size, theme::fonts::text("semibold")),
             accent,
         );
@@ -2732,7 +3121,20 @@ fn paint_note_card(
             );
         }
         Content::Text(text) => {
-            let text = canvas::card_body(text);
+            let text = match node
+                .subpath
+                .as_deref()
+                .map(|subpath| canvas_section::find_section(text, subpath))
+            {
+                Some(Section::Found(range)) => canvas::card_body(&text[range]),
+                Some(Section::Missing) => {
+                    state.note_shown(format!("body:{}", node.id), || "SECAO-SUMIDA".to_owned());
+                    paint_missing_section(ui, &clip, node, body, zoom);
+                    return;
+                }
+                _ => canvas::card_body(text),
+            };
+            state.note_shown(format!("body:{}", node.id), || text.to_owned());
             if text.trim().is_empty() {
                 clip.text(
                     body.min,
@@ -2790,6 +3192,20 @@ fn paint_edges(ui: &egui::Ui, painter: &egui::Painter, state: &CanvasState) {
         } else {
             rgb.map_or(weak, |rgb| Color32::from_rgb(rgb[0], rgb[1], rgb[2]))
         };
+        let dim = state.filter.is_active()
+            && !(state
+                .canvas
+                .node(&edge.from_node)
+                .is_some_and(|node| state.filter.matches(node))
+                && state
+                    .canvas
+                    .node(&edge.to_node)
+                    .is_some_and(|node| state.filter.matches(node)));
+        let color = if dim {
+            color.gamma_multiply(0.22)
+        } else {
+            color
+        };
         let width = ((if selected { 3.0 } else { 2.0 }) * zoom).clamp(1.0, 5.0);
         let stroke = Stroke::new(width, color);
         let points = curve.points.map(|point| state.to_screen(point));
@@ -2809,6 +3225,7 @@ fn paint_edges(ui: &egui::Ui, painter: &egui::Painter, state: &CanvasState) {
         }
         if let Some(label) = edge.label.as_deref().filter(|label| !label.is_empty())
             && zoom >= 0.3
+            && !dim
             && state
                 .editing
                 .as_ref()
@@ -2869,5 +3286,727 @@ fn paint_selection_tools(painter: &egui::Painter, state: &CanvasState, ui: &egui
     for (_, position) in link_dots(rect) {
         painter.circle_filled(position, 5.0, accent);
         painter.circle_stroke(position, 5.0, Stroke::new(1.5, fill));
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// H2 e H3: seleção por retângulo, organizar, filtro, etiquetas, seções e quadro dentro de quadro
+// ---------------------------------------------------------------------------------------------
+
+/// O que o retângulo de seleção pega: o que já estava selecionado (`base`) mais os cartões que
+/// o retângulo toca; um grupo só entra quando cabe inteiro nele.
+fn marquee_selection(
+    state: &CanvasState,
+    start: Pos2,
+    current: Pos2,
+    base: &[String],
+) -> Vec<String> {
+    let (a, b) = (state.to_world(start), state.to_world(current));
+    let area = canvas::Rect {
+        x: a.0.min(b.0),
+        y: a.1.min(b.1),
+        w: (a.0 - b.0).abs(),
+        h: (a.1 - b.1).abs(),
+    };
+    let mut selected = base.to_vec();
+    for node in &state.canvas.nodes {
+        let hit = if node.node_kind() == NodeKind::Group {
+            area.w > 0.0 && area.contains_rect(&node.rect())
+        } else {
+            area.intersects(&node.rect())
+        };
+        if hit && !selected.contains(&node.id) {
+            selected.push(node.id.clone());
+        }
+    }
+    selected
+}
+
+fn paint_marquee(painter: &egui::Painter, state: &CanvasState, ui: &egui::Ui) {
+    if let Some(Drag::Marquee { start, current, .. }) = &state.drag {
+        let area = egui::Rect::from_two_pos(*start, *current);
+        let accent = theme::accent(ui);
+        painter.rect_filled(area, 2.0, accent.gamma_multiply(0.14));
+        painter.rect_stroke(area, 2.0, Stroke::new(1.2, accent), StrokeKind::Inside);
+    }
+}
+
+/// O comando de organizar que a paleta pediu, se for um deles.
+fn layout_for_command(name: &str) -> Option<LayoutCmd> {
+    use rustidian::commands as c;
+    Some(match name {
+        c::BOARD_ALIGN_LEFT => LayoutCmd::Align(Align::Left),
+        c::BOARD_ALIGN_CENTER => LayoutCmd::Align(Align::CenterH),
+        c::BOARD_ALIGN_RIGHT => LayoutCmd::Align(Align::Right),
+        c::BOARD_ALIGN_TOP => LayoutCmd::Align(Align::Top),
+        c::BOARD_ALIGN_MIDDLE => LayoutCmd::Align(Align::MiddleV),
+        c::BOARD_ALIGN_BOTTOM => LayoutCmd::Align(Align::Bottom),
+        c::BOARD_DISTRIBUTE_H => LayoutCmd::Distribute(Axis::Horizontal),
+        c::BOARD_DISTRIBUTE_V => LayoutCmd::Distribute(Axis::Vertical),
+        c::BOARD_EQUAL_SPACING => LayoutCmd::EqualSpacing,
+        c::BOARD_ARRANGE_GRID => LayoutCmd::Grid,
+        c::BOARD_MIND_MAP => LayoutCmd::MindMap,
+        _ => return None,
+    })
+}
+
+/// Organiza os cartões selecionados. Um comando, uma gravação, um passo de desfazer. Sem cartões
+/// suficientes (ou sem o que fazer) deixa um aviso e não grava nada.
+fn run_layout(state: &mut CanvasState, cmd: LayoutCmd, tab: &mut Tab) -> bool {
+    let ids = state.selected.clone();
+    let (needed, hint) = match cmd {
+        LayoutCmd::Distribute(_) => (3, "Selecione três ou mais cartões para distribuir."),
+        LayoutCmd::MindMap => (1, "Selecione o cartão de onde o mapa mental começa."),
+        _ => (
+            2,
+            "Selecione dois ou mais cartões (Shift+clique ou Shift+arrastar).",
+        ),
+    };
+    if ids.len() < needed || (cmd == LayoutCmd::MindMap && ids.len() != 1) {
+        state.notice = Some(hint.to_owned());
+        return false;
+    }
+    let changed = match cmd {
+        LayoutCmd::Align(how) => canvas_layout::align(&mut state.canvas, &ids, how),
+        LayoutCmd::Distribute(axis) => canvas_layout::distribute(&mut state.canvas, &ids, axis),
+        LayoutCmd::EqualSpacing => {
+            canvas_layout::equal_spacing(&mut state.canvas, &ids, canvas_layout::GAP)
+        }
+        LayoutCmd::Grid => canvas_layout::arrange_grid(&mut state.canvas, &ids, canvas_layout::GAP),
+        LayoutCmd::MindMap => {
+            if canvas_layout::mind_map(&mut state.canvas, &ids[0]) == 0 {
+                state.notice = Some(
+                    "Este cartão não tem ligações. Ligue cartões com as bolinhas ao lado dele."
+                        .to_owned(),
+                );
+                return false;
+            }
+            true
+        }
+    };
+    if !changed {
+        state.notice = Some("Os cartões já estão assim.".to_owned());
+        return false;
+    }
+    state.notice = None;
+    state.commit(tab)
+}
+
+/// O menu "Organizar" (barra e menu do cartão): devolve o comando escolhido.
+fn layout_menu(ui: &mut egui::Ui, state: &CanvasState) -> Option<LayoutCmd> {
+    let count = state.selected.len();
+    let mut chosen = None;
+    let mut item = |ui: &mut egui::Ui, label: &str, enabled: bool, cmd: LayoutCmd| {
+        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+            chosen = Some(cmd);
+            ui.close();
+        }
+    };
+    for (label, how) in [
+        ("Alinhar à esquerda", Align::Left),
+        ("Alinhar pelo centro", Align::CenterH),
+        ("Alinhar à direita", Align::Right),
+        ("Alinhar pelo topo", Align::Top),
+        ("Alinhar pelo meio", Align::MiddleV),
+        ("Alinhar pela base", Align::Bottom),
+    ] {
+        item(ui, label, count >= 2, LayoutCmd::Align(how));
+    }
+    ui.separator();
+    item(
+        ui,
+        "Distribuir na horizontal",
+        count >= 3,
+        LayoutCmd::Distribute(Axis::Horizontal),
+    );
+    item(
+        ui,
+        "Distribuir na vertical",
+        count >= 3,
+        LayoutCmd::Distribute(Axis::Vertical),
+    );
+    item(ui, "Espaçamento igual", count >= 2, LayoutCmd::EqualSpacing);
+    item(ui, "Arrumar em grade", count >= 2, LayoutCmd::Grid);
+    ui.separator();
+    item(
+        ui,
+        "Mapa mental a partir do cartão",
+        count == 1,
+        LayoutCmd::MindMap,
+    );
+    chosen
+}
+
+/// O aviso curto de um comando que não pôde agir, embaixo do quadro.
+fn show_notice(ui: &egui::Ui, state: &CanvasState, rect: egui::Rect) {
+    let Some(text) = state.notice.as_deref() else {
+        return;
+    };
+    if !rect.is_finite() || rect.width() < 1.0 {
+        return;
+    }
+    let fill = ui.visuals().extreme_bg_color.gamma_multiply(0.95);
+    let width = (rect.width() - 48.0).clamp(80.0, 560.0);
+    egui::Area::new(egui::Id::unique("canvas-notice"))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .pivot(Align2::CENTER_BOTTOM)
+        .fixed_pos(Pos2::new(rect.center().x, rect.bottom() - 16.0))
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(fill)
+                .stroke(Stroke::new(1.0, theme::accent(ui)))
+                .corner_radius(8)
+                .inner_margin(theme::space::margin(theme::space::M, theme::space::S))
+                .show(ui, |ui| {
+                    ui.set_max_width(width);
+                    ui.add(egui::Label::new(egui::RichText::new(text).size(13.0)).wrap());
+                });
+        });
+}
+
+/// O nome de uma cor do quadro para mostrar ao usuário.
+fn color_name(color: &str) -> String {
+    COLOR_NAMES
+        .iter()
+        .find(|(key, _)| *key == color)
+        .map_or_else(|| color.to_owned(), |(_, name)| (*name).to_owned())
+}
+
+/// A faixa do filtro (H3c): as cores em uso e as etiquetas do quadro. Escolher uma deixa em
+/// destaque só os cartões que casam; o resto esmaece. Nada disso vai para o arquivo.
+fn show_filter_bar(ui: &mut egui::Ui, state: &mut CanvasState, rect: egui::Rect) {
+    if !state.filter_open || !rect.is_finite() {
+        return;
+    }
+    let bar = egui::Rect::from_min_size(
+        rect.min + Vec2::new(10.0, 52.0),
+        Vec2::new((rect.width() - 20.0).max(100.0), 30.0),
+    );
+    let colors = state.canvas.colors_in_use();
+    let tags = state.canvas.all_tags();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(bar), |ui| {
+        egui::Frame::popup(ui.style())
+            .inner_margin(theme::space::margin(theme::space::S, theme::space::XS))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Filtro:");
+                    if colors.is_empty() && tags.is_empty() {
+                        ui.weak("Dê cor ou etiqueta aos cartões (botão direito) para filtrar.");
+                    }
+                    for color in &colors {
+                        let active = state.filter.color.as_deref() == Some(color.as_str());
+                        let (area, response) =
+                            ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+                        let rgb = color_rgb(color).unwrap_or([128; 3]);
+                        ui.painter().circle_filled(
+                            area.center(),
+                            7.0,
+                            Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
+                        );
+                        if active {
+                            ui.painter().circle_stroke(
+                                area.center(),
+                                9.5,
+                                Stroke::new(2.0, theme::accent(ui)),
+                            );
+                        }
+                        crate::ui_probe::record(
+                            ui.ctx(),
+                            format!("canvas-filter-color:{color}"),
+                            area,
+                        );
+                        if response.on_hover_text(color_name(color)).clicked() {
+                            state.filter.color = (!active).then(|| color.clone());
+                        }
+                    }
+                    for tag in &tags {
+                        let active = state
+                            .filter
+                            .tag
+                            .as_deref()
+                            .is_some_and(|wanted| wanted.eq_ignore_ascii_case(tag));
+                        let response = ui.selectable_label(active, format!("#{tag}"));
+                        crate::ui_probe::record(
+                            ui.ctx(),
+                            format!("canvas-filter-tag:{tag}"),
+                            response.rect,
+                        );
+                        if response.clicked() {
+                            state.filter.tag = (!active).then(|| tag.clone());
+                        }
+                    }
+                    if state.filter.is_active() {
+                        let shown = state
+                            .canvas
+                            .nodes
+                            .iter()
+                            .filter(|node| state.filter.matches(node))
+                            .count();
+                        ui.label(format!(
+                            "{shown} de {} em destaque",
+                            state.canvas.nodes.len()
+                        ));
+                        if ui.button("Limpar").clicked() {
+                            state.filter = Filter::default();
+                        }
+                    }
+                });
+            });
+    });
+}
+
+/// Esmaece o cartão que o filtro não pega: por cima do cartão, na cor do fundo.
+fn paint_filter_veil(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    state: &CanvasState,
+    node: &Node,
+    rect: egui::Rect,
+) {
+    let dimmed = state.filter.is_active() && !state.filter.matches(node);
+    state.note_shown(format!("veil:{}", node.id), || {
+        if dimmed { "1" } else { "0" }.to_owned()
+    });
+    if dimmed {
+        let rounding = (8.0 * state.camera.zoom).clamp(2.0, 12.0);
+        painter.rect_filled(
+            rect,
+            rounding,
+            ui.visuals().extreme_bg_color.gamma_multiply(0.78),
+        );
+    }
+}
+
+/// As etiquetas do cartão, numa linha logo abaixo dele.
+fn paint_tags(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    state: &CanvasState,
+    node: &Node,
+    rect: egui::Rect,
+) {
+    let zoom = state.camera.zoom;
+    if zoom < 0.4 {
+        return;
+    }
+    let tags = node.tags();
+    if tags.is_empty() {
+        return;
+    }
+    let text = tags
+        .iter()
+        .map(|tag| format!("#{tag}"))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let mut color = theme::accent(ui);
+    if state.filter.is_active() && !state.filter.matches(node) {
+        color = color.gamma_multiply(0.3);
+    }
+    painter.text(
+        Pos2::new(rect.min.x + 4.0, rect.max.y + 3.0),
+        Align2::LEFT_TOP,
+        text,
+        FontId::proportional((11.5 * zoom).clamp(9.0, 16.0)),
+        color,
+    );
+}
+
+/// A janela de etiquetas: uma linha com as etiquetas separadas por vírgula ou espaço.
+fn show_tag_editor(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> bool {
+    let Some(mut editor) = state.tag_editor.take() else {
+        return false;
+    };
+    let mut keep = true;
+    let mut done = false;
+    egui::Window::new("Etiquetas do cartão")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ui.ctx(), |ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut editor.buffer)
+                    .hint_text("ideia, urgente, projeto-x")
+                    .desired_width(320.0),
+            );
+            if !editor.focused {
+                edit.request_focus();
+                editor.focused = true;
+            }
+            let enter = edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+            ui.weak("Separe por vírgula ou espaço. Vazio tira as etiquetas.");
+            ui.horizontal(|ui| {
+                let ok = ui.button("Salvar");
+                crate::ui_probe::record(ui.ctx(), "canvas-tags-save", ok.rect);
+                if ok.clicked() || enter {
+                    done = true;
+                }
+                if ui.button("Cancelar").clicked() {
+                    keep = false;
+                }
+            });
+        });
+    if ui.input(|input| input.key_pressed(Key::Escape)) {
+        keep = false;
+    }
+    let mut changed = false;
+    if done {
+        let tags = canvas::parse_tags(&editor.buffer);
+        let mut any = false;
+        for id in &editor.ids {
+            any |= state.canvas.set_tags(id, &tags);
+        }
+        changed = any && state.commit(tab);
+    } else if keep {
+        state.tag_editor = Some(editor);
+    }
+    changed
+}
+
+fn open_tag_editor(state: &mut CanvasState, ids: Vec<String>) {
+    if ids.is_empty() {
+        state.notice = Some("Selecione um cartão para etiquetar.".to_owned());
+        return;
+    }
+    let buffer = if ids.len() == 1 {
+        state
+            .canvas
+            .node(&ids[0])
+            .map(|node| node.tags().join(", "))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    state.tag_editor = Some(TagEditor {
+        ids,
+        buffer,
+        focused: false,
+    });
+}
+
+// --- H2a: cartão de seção ---------------------------------------------------------------------
+
+/// O título do cartão de nota: o nome da nota e, se mostra só uma seção, `Nota › Seção`.
+fn card_title(node: &Node) -> String {
+    let title = node.file_title();
+    match node
+        .subpath
+        .as_deref()
+        .and_then(canvas_section::parse_subpath)
+    {
+        Some(parts) => format!("{title} › {}", parts.join(" › ")),
+        None => title,
+    }
+}
+
+/// O cartão mostra uma seção que a nota não tem mais (renomeada ou apagada).
+fn section_missing(notes: &Notes, node: &Node) -> bool {
+    let (Some(subpath), Some(file)) = (node.subpath.as_deref(), node.file.as_deref()) else {
+        return false;
+    };
+    matches!(
+        notes.content(Path::new(file)),
+        Content::Text(text) if canvas_section::find_section(text, subpath) == Section::Missing
+    )
+}
+
+/// O aviso de seção sumida: o que aconteceu e o botão "Mostrar a nota inteira".
+fn paint_missing_section(
+    ui: &egui::Ui,
+    clip: &egui::Painter,
+    node: &Node,
+    body: egui::Rect,
+    zoom: f32,
+) {
+    let title = node
+        .subpath
+        .as_deref()
+        .and_then(canvas_section::parse_subpath)
+        .map(|parts| parts.join(" › "))
+        .unwrap_or_default();
+    clip.text(
+        body.min,
+        Align2::LEFT_TOP,
+        format!("A seção “{title}” não existe mais na nota."),
+        FontId::proportional((13.0 * zoom).clamp(8.0, 28.0)),
+        ui.visuals().warn_fg_color,
+    );
+    let button = section_fix_button(body, zoom);
+    let accent = theme::accent(ui);
+    clip.rect_filled(button, 4.0, accent.gamma_multiply(0.2));
+    clip.rect_stroke(button, 4.0, Stroke::new(1.2, accent), StrokeKind::Inside);
+    clip.text(
+        button.center(),
+        Align2::CENTER_CENTER,
+        "Mostrar a nota inteira",
+        FontId::proportional((12.5 * zoom).clamp(9.0, 22.0)),
+        ui.visuals().text_color(),
+    );
+}
+
+/// O botão "Mostrar a nota inteira" do aviso de seção sumida, na tela.
+fn section_fix_button(body: egui::Rect, zoom: f32) -> egui::Rect {
+    let size = Vec2::new(
+        (190.0 * zoom).clamp(130.0, 280.0),
+        (24.0 * zoom).clamp(20.0, 36.0),
+    );
+    egui::Rect::from_min_size(
+        body.min + Vec2::new(0.0, (30.0 * zoom).clamp(22.0, 44.0)),
+        size,
+    )
+}
+
+fn open_section_picker(state: &mut CanvasState, notes: &Notes, id: &str) {
+    let Some(node) = state.canvas.node(id).filter(|node| node.is_note_card()) else {
+        state.notice = Some("Selecione um cartão de nota.".to_owned());
+        return;
+    };
+    let file = node.file.clone().unwrap_or_default();
+    let headings = match notes.content(Path::new(&file)) {
+        Content::Text(text) => canvas_section::headings(text),
+        Content::Missing => Vec::new(),
+    };
+    if headings.is_empty() {
+        state.notice = Some("Esta nota não tem cabeçalhos para mostrar só uma seção.".to_owned());
+        return;
+    }
+    state.section_picker = Some(SectionPicker {
+        node_id: id.to_owned(),
+        file,
+        headings,
+        new_card: false,
+    });
+}
+
+/// A janela "Mostrar só uma seção": a lista de cabeçalhos da nota, "Nota inteira" e a caixa
+/// "Em um cartão novo".
+fn show_section_picker(ui: &mut egui::Ui, state: &mut CanvasState, tab: &mut Tab) -> bool {
+    let Some(mut picker) = state.section_picker.take() else {
+        return false;
+    };
+    let mut keep = true;
+    let mut chosen: Option<Option<usize>> = None;
+    egui::Window::new("Mostrar só uma seção")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .show(ui.ctx(), |ui| {
+            ui.checkbox(&mut picker.new_card, "Em um cartão novo");
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| {
+                    for (index, heading) in picker.headings.iter().enumerate() {
+                        let indent = "    ".repeat(usize::from(heading.level.saturating_sub(1)));
+                        let label = format!("{indent}{}", heading.title);
+                        let button = ui.add(egui::Button::new(label).frame_when_inactive(false));
+                        crate::ui_probe::record(
+                            ui.ctx(),
+                            format!("canvas-section-pick:{}", heading.title),
+                            button.rect,
+                        );
+                        if button.clicked() {
+                            chosen = Some(Some(index));
+                        }
+                    }
+                });
+            ui.separator();
+            ui.horizontal(|ui| {
+                let whole = ui.button("Nota inteira");
+                crate::ui_probe::record(ui.ctx(), "canvas-section-whole", whole.rect);
+                if whole.clicked() {
+                    chosen = Some(None);
+                }
+                if ui.button("Cancelar").clicked() {
+                    keep = false;
+                }
+            });
+        });
+    if ui.input(|input| input.key_pressed(Key::Escape)) {
+        keep = false;
+    }
+    let Some(choice) = chosen else {
+        if keep {
+            state.section_picker = Some(picker);
+        }
+        return false;
+    };
+    let subpath = choice.map(|index| canvas_section::subpath_at(&picker.headings, index));
+    let changed = match (subpath, picker.new_card) {
+        (Some(subpath), true) => {
+            let at = state.canvas.node(&picker.node_id).map_or_else(
+                || state.free_spot(canvas::BOX_SIZE),
+                |node| (node.x + node.width + 40.0, node.y),
+            );
+            let id = state.canvas.add_section(&picker.file, &subpath, at.0, at.1);
+            state.select_only(&id);
+            true
+        }
+        (None, true) => false,
+        (subpath, false) => {
+            let changed = state
+                .canvas
+                .set_subpath(&picker.node_id, subpath.as_deref());
+            state.card_view.borrow_mut().remove(&picker.node_id);
+            changed
+        }
+    };
+    changed && state.commit(tab)
+}
+
+// --- H2b: quadro dentro de quadro -----------------------------------------------------------------
+
+fn text_stamp(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// A miniatura do quadro `file`, relida no máximo uma vez por segundo (e só refeita quando o
+/// texto do quadro mudou). `Err` é a frase que o cartão mostra no lugar.
+fn mini_for(
+    state: &CanvasState,
+    notes: &Notes,
+    file: &str,
+    now: f64,
+) -> Result<Arc<canvas_mini::Mini>, &'static str> {
+    let mut cache = state.minis.borrow_mut();
+    let fresh = cache
+        .get(file)
+        .is_some_and(|entry| (now - entry.checked).abs() < 1.0);
+    if !fresh {
+        let text = notes.board_text(Path::new(file));
+        let stamp = text.as_deref().map_or(0, text_stamp);
+        let unchanged = cache
+            .get(file)
+            .is_some_and(|entry| entry.stamp == stamp && text.is_some() == entry.has_text);
+        if unchanged {
+            if let Some(entry) = cache.get_mut(file) {
+                entry.checked = now;
+            }
+        } else {
+            let has_text = text.is_some();
+            let mini = match text {
+                None => Err("Quadro não encontrado no cofre"),
+                Some(text) => match Canvas::parse(&text) {
+                    Err(_) => Err("Quadro inválido"),
+                    Ok(canvas) => canvas_mini::summarize(&canvas, &state.board_key)
+                        .map(Arc::new)
+                        .ok_or("Quadro vazio"),
+                },
+            };
+            cache.insert(
+                file.to_owned(),
+                MiniEntry {
+                    checked: now,
+                    stamp,
+                    has_text,
+                    mini,
+                },
+            );
+        }
+    }
+    cache
+        .get(file)
+        .map_or(Err("Quadro não encontrado no cofre"), |entry| {
+            entry.mini.clone()
+        })
+}
+
+/// O corpo de um cartão de quadro: a miniatura do quadro menor (profundidade 1) ou o aviso.
+fn paint_board_card(
+    ui: &egui::Ui,
+    clip: &egui::Painter,
+    state: &CanvasState,
+    node: &Node,
+    body: egui::Rect,
+    notes: &Notes,
+) {
+    let zoom = state.camera.zoom;
+    let weak = ui.visuals().weak_text_color();
+    let file = node.file.as_deref().unwrap_or("");
+    let note_size = FontId::proportional((13.0 * zoom).clamp(8.0, 28.0));
+    if !state.board_key.is_empty() && rustidian::canvas_index::key(file) == state.board_key {
+        state.note_shown(format!("mini:{}", node.id), || "CICLO".to_owned());
+        clip.text(
+            body.min,
+            Align2::LEFT_TOP,
+            "Quadro já aberto acima",
+            note_size,
+            ui.visuals().warn_fg_color,
+        );
+        return;
+    }
+    let now = ui.input(|input| input.time);
+    let mini = match mini_for(state, notes, file, now) {
+        Ok(mini) => mini,
+        Err(message) => {
+            state.note_shown(format!("mini:{}", node.id), || message.to_owned());
+            clip.text(body.min, Align2::LEFT_TOP, message, note_size, weak);
+            return;
+        }
+    };
+    state.note_shown(format!("mini:{}", node.id), || {
+        mini.items
+            .iter()
+            .map(|item| item.title.as_str())
+            .collect::<Vec<_>>()
+            .join("|")
+    });
+    let (scale, offset) = canvas_mini::fit(
+        &mini.bounds,
+        f64::from(body.width()),
+        f64::from(body.height()),
+    );
+    let to_screen = |x: f64, y: f64| {
+        Pos2::new(
+            body.min.x + (x * scale + offset.0) as f32,
+            body.min.y + (y * scale + offset.1) as f32,
+        )
+    };
+    let outline = weak.gamma_multiply(0.7);
+    for (from, to) in &mini.links {
+        clip.line_segment(
+            [to_screen(from.0, from.1), to_screen(to.0, to.1)],
+            Stroke::new(1.0, outline.gamma_multiply(0.8)),
+        );
+    }
+    let text_color = ui.visuals().text_color();
+    for item in &mini.items {
+        let area = egui::Rect::from_min_max(
+            to_screen(item.rect.x, item.rect.y),
+            to_screen(item.rect.x + item.rect.w, item.rect.y + item.rect.h),
+        );
+        if area.width() < 1.5 || area.height() < 1.5 {
+            continue;
+        }
+        let rgb = item.color.as_deref().and_then(color_rgb);
+        let (fill, line) = match rgb {
+            Some(rgb) => (tint(rgb, 60), Color32::from_rgb(rgb[0], rgb[1], rgb[2])),
+            None => (ui.visuals().faint_bg_color, outline),
+        };
+        if item.kind != NodeKind::Group {
+            // Base opaca: a linha da ligação passa por trás do cartão, não por cima do título.
+            clip.rect_filled(area, 2.0, ui.visuals().extreme_bg_color);
+            clip.rect_filled(area, 2.0, fill);
+        }
+        clip.rect_stroke(area, 2.0, Stroke::new(1.0, line), StrokeKind::Inside);
+        let label = if item.cycle {
+            format!("{} (já aberto acima)", item.title)
+        } else {
+            item.title.clone()
+        };
+        let size = (area.height() * 0.32).clamp(6.0, 12.0);
+        if area.width() > 24.0 && area.height() > 9.0 && !label.is_empty() {
+            clip.with_clip_rect(area.shrink(1.0).intersect(clip.clip_rect()))
+                .text(
+                    area.min + Vec2::new(3.0, 2.0),
+                    Align2::LEFT_TOP,
+                    label,
+                    FontId::proportional(size),
+                    text_color,
+                );
+        }
     }
 }
