@@ -73,6 +73,21 @@ impl<'a> Notes<'a> {
         }
     }
 
+    /// O texto de um quadro `.canvas` para a miniatura (H2b): o da aba aberta (com a edição ainda
+    /// não salva) ou, senão, o do arquivo no cofre. `None` se não existe ou não dá para ler.
+    pub fn board_text(&self, path: &Path) -> Option<String> {
+        if let Some(tab) = self.find(path) {
+            return Some(tab.document.text.clone());
+        }
+        let vault = self.vault?;
+        let absolute = vault.root.join(path);
+        let metadata = std::fs::metadata(&absolute).ok()?;
+        if metadata.len() > 16 * 1024 * 1024 {
+            return None;
+        }
+        std::fs::read_to_string(absolute).ok()
+    }
+
     /// Se a nota existe (numa aba ou no cofre).
     pub fn exists(&self, path: &Path) -> bool {
         matches!(self.content(path), Content::Text(_))
