@@ -37,7 +37,7 @@ This repository is a fork of [Rustidian by Masih Moafi](https://github.com/Masih
 - **Tables**: insert, paste from a spreadsheet, convert a selection, align.
 - **Unlinked mentions**: the backlinks panel lists notes that mention the open note's title, and a **Link** button turns the mention into a `[[link]]`.
 - **Large vaults and a reliable file watcher**: incremental index, tens of thousands of notes, and no note lost to sync or external editors.
-- **Signed updates**: the app only installs what matches the embedded public key. The owner's signing key has not been generated yet.
+- **Signed updates**: the app only installs what matches the embedded public key. The owner's public key is already in the app; the first signed release ships with the Windows installer.
 
 **Heptabase-style board** (`.canvas` files, the same open format Obsidian uses)
 - Each note becomes a **live card** that shows formatted text and edits the note in place.
@@ -70,7 +70,7 @@ Guarantees that exist in the code, with the number of `#[test]` functions in eac
 | Notes that could be damaged are not opened | A note that is too large or not UTF-8 is not opened, so the file is not corrupted. Limits: 8 MB for the desktop index (a bigger `.md` stays out of the index, with a warning) and 2 MB on Android | `src/app/gui_tests` 270; `android/` 51 |
 | The file watcher does not drop notes | A note the scan did not find leaves the index only after it is checked twice | `src/app/gui_tests` 270 |
 | Note history | Automatic diff-based versions, configurable retention (default: keep everything for 1 day), restore, named versions (never pruned), and "Delete from history" removes a snippet from every version, with no undo | `crates/nota-historico` 65 |
-| Updates are the ones the owner signed | The app only installs what matches the embedded public key (ed25519 and SHA256SUMS). The owner still has to generate the key | `src/atualizacao.rs` 13 |
+| Updates are the ones the owner signed | The app only installs what matches the embedded public key (ed25519 and SHA256SUMS). The owner's key is generated and the public half is in the repository | `src/atualizacao.rs` 13 |
 | Undo that survives closing the app | **In progress** (history, phases H3/H4) | not yet |
 | Encrypted sync on Android and the Google Drive backup | **In progress**, see the roadmap | not yet |
 

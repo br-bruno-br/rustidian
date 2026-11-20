@@ -37,7 +37,7 @@ Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/Ma
 - **Tabelas**: inserir, colar da planilha, converter seleção e alinhar.
 - **Menções sem link**: o painel de backlinks lista as notas que citam o título da nota aberta, e o botão **Link** transforma a menção em `[[link]]`.
 - **Cofre grande e vigia confiável**: índice incremental, abre cofres de dezenas de milhares de notas e não perde nota por causa de sync ou de editor externo.
-- **Atualizações assinadas**: o app só instala o que bate com a chave pública embutida. A chave do dono ainda não foi gerada.
+- **Atualizações assinadas**: o app só instala o que bate com a chave pública embutida. A chave pública do dono já está no app; o primeiro release assinado sai com o instalador do Windows.
 
 **Quadro estilo Heptabase** (arquivos `.canvas`, o mesmo formato aberto do Obsidian)
 - Cada nota vira um **cartão vivo**: mostra o texto formatado e edita a nota no lugar.
@@ -70,7 +70,7 @@ Garantias que existem no código, com a contagem de testes marcados com `#[test]
 | Nota que pode ser estragada não abre | Nota grande ou que não está em UTF-8 não é aberta, para não estragar o arquivo. Limites: 8 MB no índice do desktop (`.md` maior fica fora do índice, com aviso) e 2 MB no Android | `src/app/gui_tests` 270; `android/` 51 |
 | Vigia não perde nota | Uma nota que a varredura não achou só sai do índice depois de conferida duas vezes | `src/app/gui_tests` 270 |
 | Histórico das notas | Versões automáticas por diferença, retenção configurável (padrão: todas por 1 dia), restaurar, versões com nome (nunca saem) e "Apagar do histórico" tira um trecho de todas as versões, sem desfazer | `crates/nota-historico` 65 |
-| Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). Falta o dono gerar a chave | `src/atualizacao.rs` 13 |
+| Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). A chave do dono já foi gerada e a pública está no repositório | `src/atualizacao.rs` 13 |
 | Desfazer que continua depois de fechar | **Em andamento** (histórico, fase H3/H4) | ainda não |
 | Sync cifrado no Android e backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
 
