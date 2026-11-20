@@ -454,8 +454,9 @@ fn sincronizar_com_conflitos_lista_as_copias() {
     for esperado in [
         "2 conflitos",
         "Conflitos (2)",
-        "Reunião de sexta (conflito Pixel do Bruno 2026-11-20 1432)",
-        "Projeto Alfa (conflito Pixel do Bruno 2026-11-20 1432)",
+        "Reunião de sexta",
+        "Projeto Alfa",
+        "conflito Pixel do Bruno 2026-11-20 1432",
         "As duas versões foram guardadas",
     ] {
         assert!(html.contains(esperado), "faltou {esperado:?} em {html}");

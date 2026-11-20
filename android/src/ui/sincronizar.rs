@@ -293,7 +293,16 @@ fn tom_css(tom: Tom) -> &'static str {
 #[component]
 fn LinhaConflito(caminho: String) -> Element {
     let nav = use_context::<Navegacao>();
-    let nome = titulo_da_nota(ultimo_componente(&caminho)).to_string();
+    let titulo = titulo_da_nota(ultimo_componente(&caminho)).to_string();
+    // "Reunião (conflito Pixel 2026-11-20 1432)": o nome em cima e o carimbo embaixo, para o
+    // que importa não ficar cortado no fim da linha.
+    let (nome, carimbo) = match titulo.find(" (conflito ") {
+        Some(i) => (
+            titulo[..i].to_string(),
+            titulo[i + 2..].trim_end_matches(')').to_string(),
+        ),
+        None => (titulo, String::new()),
+    };
     let pasta = pasta_de(&caminho).to_string();
     rsx! {
         li { class: "linha",
@@ -306,6 +315,9 @@ fn LinhaConflito(caminho: String) -> Element {
                 span { class: "tipo", aria_hidden: "true", "⚠" }
                 span { class: "textos",
                     span { class: "nome", "{nome}" }
+                    if !carimbo.is_empty() {
+                        span { class: "sub", "{carimbo}" }
+                    }
                     if !pasta.is_empty() {
                         span { class: "sub", "{pasta}" }
                     }
