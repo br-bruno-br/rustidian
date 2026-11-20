@@ -48,6 +48,7 @@ This repository is a fork of [Rustidian by Masih Moafi](https://github.com/Masih
 **Note history**
 - Every note keeps its versions, stored as diffs (small on disk), with restore and a diff view.
 - **Timeline** with a slider, **named versions** and **delete from history**.
+- **Undo that survives** closing the note or the app, with branches; **find what I deleted** and **history of a passage**.
 - Retention is configurable in settings.
 
 **Encrypted sync**
@@ -71,7 +72,7 @@ Guarantees that exist in the code, with the number of `#[test]` functions in eac
 | The file watcher does not drop notes | A note the scan did not find leaves the index only after it is checked twice | `src/app/gui_tests` 270 |
 | Note history | Automatic diff-based versions, configurable retention (default: keep everything for 1 day), restore, named versions (never pruned), and "Delete from history" removes a snippet from every version, with no undo | `crates/nota-historico` 65 |
 | Updates are the ones the owner signed | The app only installs what matches the embedded public key (ed25519 and SHA256SUMS). The owner's key is generated and the public half is in the repository | `src/atualizacao.rs` 13 |
-| Undo that survives closing the app | **In progress** (history, phases H3/H4) | not yet |
+| Undo that survives closing the app | The undo tree is stored in the history and comes back when the note reopens, with branches; if the file changed outside the app it is not applied. "Find what I deleted" lists vanished passages and lets you put them back | `crates/nota-historico` and `historico_h3h4` UI tests |
 | Encrypted sync on Android and the Google Drive backup | **In progress**, see the roadmap | not yet |
 
 ## Roadmap
@@ -80,7 +81,7 @@ The queue moves **one track at a time**: parallel Rust builds freeze the owner's
 
 | Now | Next | Later |
 | --- | --- | --- |
-| **History:** an undo that survives closing the app, and a way to find what I deleted | **Formatted Markdown on Android** (read notes like on desktop, with tables and tasks) | **Windows release** with an installer (coming soon) |
+| **Formatted Markdown on Android** (read notes like on desktop, with tables and tasks) | | **Windows release** with an installer (coming soon) |
 | | **Encrypted sync on Android** (address, token and passphrase, status and conflicts) | **Portable Linux** package signed by the owner |
 | | **Our own sync server** (a home server, reachable only over Tailscale) **and an encrypted Google Drive backup** | Finish replacing the Python scripts with Rust (`cargo xtask` and `egui_kittest` tests) |
 

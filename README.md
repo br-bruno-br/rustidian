@@ -48,6 +48,7 @@ Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/Ma
 **Histórico das notas**
 - Versões de cada nota, guardadas pela diferença (ocupa pouco espaço), com restaurar e ver a diferença.
 - **Linha do tempo** com barra deslizante, **versões com nome** e **apagar do histórico**.
+- **Desfazer que continua** depois de fechar a nota ou o app, com galhos; **achar o que apaguei** e **histórico de um trecho**.
 - Retenção configurável nas configurações.
 
 **Sincronização cifrada**
@@ -71,7 +72,7 @@ Garantias que existem no código, com a contagem de testes marcados com `#[test]
 | Vigia não perde nota | Uma nota que a varredura não achou só sai do índice depois de conferida duas vezes | `src/app/gui_tests` 270 |
 | Histórico das notas | Versões automáticas por diferença, retenção configurável (padrão: todas por 1 dia), restaurar, versões com nome (nunca saem) e "Apagar do histórico" tira um trecho de todas as versões, sem desfazer | `crates/nota-historico` 65 |
 | Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). A chave do dono já foi gerada e a pública está no repositório | `src/atualizacao.rs` 13 |
-| Desfazer que continua depois de fechar | **Em andamento** (histórico, fase H3/H4) | ainda não |
+| Desfazer que continua depois de fechar | A árvore do desfazer é gravada no histórico e volta ao reabrir a nota, com galhos; se o arquivo mudou por fora, ela não é aplicada. "Achar o que apaguei" lista os trechos que sumiram e deixa reinserir | `crates/nota-historico` e telas `historico_h3h4` |
 | Sync cifrado no Android e backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
 
 ## Roadmap
@@ -80,7 +81,7 @@ A fila anda **uma frente por vez**: compilar em paralelo trava o PC do dono (2 n
 
 | Agora | Próximo | Depois |
 | --- | --- | --- |
-| **Histórico:** desfazer que continua depois de fechar o app e achar o que eu apaguei | **Markdown formatado no Android** (ler a nota como no PC, com tabelas e tarefas) | **Release para Windows** com instalador (em breve) |
+| **Markdown formatado no Android** (ler a nota como no PC, com tabelas e tarefas) | | **Release para Windows** com instalador (em breve) |
 | | **Sync cifrado no Android** (endereço, token e frase, estado e conflitos) | **Linux portátil** com pacote assinado pelo dono |
 | | **Servidor de sync próprio** (no servidor de casa, só pela Tailscale) **e backup cifrado no Google Drive** | Terminar de trocar os scripts Python por Rust (`cargo xtask` e testes `egui_kittest`) |
 
