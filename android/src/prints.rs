@@ -3,7 +3,7 @@
 //! Chrome headless fotografar (390x844, claro e escuro). Nunca abre janela.
 //!
 //!   cargo test gravar_html_das_telas -- --ignored
-//! (a pasta sai de `RUSTIDIAN_PRINTS`, ou `C:\dev\_wt\prints-r7b1\html`)
+//! (a pasta sai de `RUSTIDIAN_PRINTS`, ou `C:\dev\_wt\prints-r7b2\html`)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,6 +19,12 @@ use crate::ui::{CSS, Raiz, RaizProps};
 
 const NOTA_DE_EXEMPLO: &str = "# Ideias de app\n\nUm caderno que abre rápido e nunca perde o que escrevi.\n\n- sincronizar com o servidor de casa\n- pastas e busca\n- funcionar sem internet\n\nAção, pão, açúcar e café: os acentos vêm do teclado do celular, como numa página qualquer.\n\n## Para testar\n\nEscrever uma nota grande, girar a tela e ver se o teclado não cobre a última linha.\n";
 
+/// Nota de exemplo da Leitura: título, texto com links, tarefas, tabela.
+const NOTA_REUNIAO: &str = "# Reunião de sexta\n\nPauta da **reunião** com o *time*. Veja o [[Projeto Alfa]] (ou [[Projeto Alfa|o projeto]]) e o [site da loja](https://exemplo.com/docs).\n\n## Tarefas\n\n- [x] Mandar a ata\n- [ ] Ligar para o fornecedor\n- [ ] Revisar o orçamento\n  - [x] Conferir os cabos\n\n## Orçamento\n\n| Item | Qtd | Valor |\n|:--|:-:|--:|\n| Cabos | 4 | R$ 80,00 |\n| Placa | 1 | R$ 240,00 |\n\n1. Aprovar\n2. Comprar\n3. Entregar\n";
+
+/// Segunda nota de exemplo: código, citação, rodapé e o que NÃO pode rodar.
+const NOTA_CODIGO: &str = "# Código e segurança\n\nUm trecho em `Rust`:\n\n```rust\nfn soma(a: i32, b: i32) -> i32 {\n    a + b\n}\n```\n\n> Tachado fica ~~assim~~ e a citação, assim.\n\nTexto com nota de rodapé[^1].\n\n## O que não pode rodar\n\n<script>alert(1)</script>\n\nNo meio da frase <img src=x onerror=alert(1)> aparece como texto. [Este link](javascript:alert(1)) não é link. ![foto](https://exemplo.com/foto.png)\n\n[^1]: Veja a ata de sexta.\n";
+
 fn cofre_de_exemplo(raiz: &Path) -> Servicos {
     let c = Cofre::abrir(raiz.to_path_buf()).unwrap();
     for pasta in ["Diário", "Projetos", "Receitas"] {
@@ -28,6 +34,10 @@ fn cofre_de_exemplo(raiz: &Path) -> Servicos {
         .unwrap();
     c.salvar_nota("Ideias de app.md", NOTA_DE_EXEMPLO).unwrap();
     c.salvar_nota("Lista de leitura.md", "Livros para ler em 2027.\n")
+        .unwrap();
+    c.salvar_nota("Reunião de sexta.md", NOTA_REUNIAO).unwrap();
+    c.salvar_nota("Código e segurança.md", NOTA_CODIGO).unwrap();
+    c.salvar_nota("Projetos/Projeto Alfa.md", "# Projeto Alfa\n")
         .unwrap();
     c.salvar_nota("Sem título.md", "").unwrap();
     c.salvar_nota("Diário/2026-11-18.md", "Hoje testei o app no celular.\n")
@@ -155,6 +165,88 @@ fn nota_abre_com_o_texto_e_indicador_salvo() {
     assert!(html.contains("Ideias de app"));
     assert!(html.contains(">Salvo<"));
     assert!(html.contains("Renomear a nota"));
+    // O botão que leva para a leitura formatada.
+    assert!(html.contains("aria-label=\"Ler a nota formatada\""));
+}
+
+fn leitura(servicos: Servicos, caminho: &str) -> String {
+    renderizar(
+        servicos,
+        Some(Rota::Leitura {
+            caminho: caminho.into(),
+        }),
+    )
+}
+
+#[test]
+fn leitura_mostra_a_nota_formatada() {
+    let t = tempfile::tempdir().unwrap();
+    let html = leitura(
+        cofre_de_exemplo(&t.path().join("Cofre")),
+        "Reunião de sexta.md",
+    );
+    for esperado in [
+        "<h1>Reunião de sexta</h1>",
+        "<strong>reunião</strong>",
+        "<h2>Tarefas</h2>",
+        "aria-checked=\"true\" data-t=\"0\"",
+        "aria-checked=\"false\" data-t=\"1\"",
+        "<table>",
+        "<th class=\"a-d\">Valor</th>",
+        "<ol>",
+        // Link para outra nota do cofre e link da web: sem href, só o índice.
+        "class=\"link-nota\"",
+        "class=\"link-web\"",
+        "(exemplo.com)",
+        // Cabeçalho da tela: voltar, título, alternar para o editor.
+        "aria-label=\"Voltar\"",
+        "aria-label=\"Editar a nota\"",
+    ] {
+        assert!(html.contains(esperado), "faltou {esperado:?} em {html}");
+    }
+    assert!(
+        !html.contains("href"),
+        "a Leitura não tem endereços: {html}"
+    );
+    assert!(!html.contains("<textarea"));
+}
+
+#[test]
+fn leitura_mostra_html_cru_como_texto_e_nunca_executa() {
+    let t = tempfile::tempdir().unwrap();
+    let html = leitura(
+        cofre_de_exemplo(&t.path().join("Cofre")),
+        "Código e segurança.md",
+    );
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"),
+        "{html}"
+    );
+    assert!(
+        html.contains("&lt;img src=x onerror=alert(1)&gt;"),
+        "{html}"
+    );
+    assert!(html.contains("imagem: foto.png"));
+    assert!(html.contains("Este link"));
+    for perigoso in ["<script", "<img", "javascript:", "href"] {
+        assert!(!html.contains(perigoso), "{perigoso:?} em {html}");
+    }
+    // Código, citação e rodapé.
+    assert!(html.contains("class=\"lang-rust\""));
+    assert!(html.contains("<blockquote>"));
+    assert!(html.contains("<del>assim</del>"));
+    assert!(html.contains("rodape-notas"));
+}
+
+#[test]
+fn leitura_de_nota_vazia_e_de_nota_que_sumiu() {
+    let t = tempfile::tempdir().unwrap();
+    let servicos = cofre_de_exemplo(&t.path().join("Cofre"));
+    let html = leitura(servicos.clone(), "Sem título.md");
+    assert!(html.contains("Esta nota está vazia"));
+    let html = leitura(servicos, "nao-existe.md");
+    assert!(html.contains("Não encontrei o arquivo"));
+    assert!(!html.contains("class=\"leitura\""));
 }
 
 #[test]
@@ -176,7 +268,7 @@ fn nota_que_sumiu_mostra_o_erro_sem_campo() {
 fn gravar_html_das_telas() {
     let pasta = std::env::var_os("RUSTIDIAN_PRINTS")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\dev\_wt\prints-r7b1\html"));
+        .unwrap_or_else(|| PathBuf::from(r"C:\dev\_wt\prints-r7b2\html"));
     fs::create_dir_all(&pasta).unwrap();
     let t = tempfile::tempdir().unwrap();
     let servicos = cofre_de_exemplo(&t.path().join("Cofre"));
@@ -194,12 +286,14 @@ fn gravar_html_das_telas() {
         (
             "nota",
             renderizar(
-                servicos,
+                servicos.clone(),
                 Some(Rota::Nota {
                     caminho: "Ideias de app.md".into(),
                 }),
             ),
         ),
+        ("leitura", leitura(servicos.clone(), "Reunião de sexta.md")),
+        ("leitura-codigo", leitura(servicos, "Código e segurança.md")),
         (
             "dialogo-pasta",
             format!(

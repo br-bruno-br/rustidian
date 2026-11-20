@@ -266,3 +266,148 @@ button:active { background: var(--pressionado); }
 .dialogo .mensagem { margin: 0 0 16px 0; color: var(--suave); font-size: 15px; }
 .dialogo .campo { margin-bottom: 16px; }
 .botoes { display: flex; gap: 10px; }
+
+/* Botão de alternar Editar/Ler no topo */
+.alterna {
+  flex: none;
+  min-width: 56px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 24px;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--acento);
+}
+.leitura-titulo { cursor: default; }
+
+/* Leitura (R7b-2): a nota formatada. O HTML vem de logica::markdown (lista fixa de tags). */
+.leitura {
+  padding: 14px 16px max(28px, env(safe-area-inset-bottom)) 16px;
+  font-size: 18px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  background: var(--superficie);
+  min-height: 100%;
+}
+.leitura > :first-child { margin-top: 0; }
+.leitura h1, .leitura h2, .leitura h3, .leitura h4, .leitura h5, .leitura h6 {
+  line-height: 1.25;
+  margin: 1.2em 0 0.4em 0;
+}
+.leitura h1 { font-size: 1.55em; }
+.leitura h2 { font-size: 1.32em; }
+.leitura h3 { font-size: 1.16em; }
+.leitura h4, .leitura h5, .leitura h6 { font-size: 1em; color: var(--suave); }
+.leitura p { margin: 0.6em 0; }
+.leitura ul, .leitura ol { margin: 0.5em 0; padding-left: 1.5em; }
+.leitura li { margin: 0.2em 0; }
+.leitura li > p { margin: 0.2em 0; }
+.leitura blockquote {
+  margin: 0.7em 0;
+  padding: 2px 14px;
+  border-left: 4px solid var(--linha);
+  color: var(--suave);
+}
+.leitura hr { border: 0; border-top: 1px solid var(--linha); margin: 1.2em 0; }
+.leitura code {
+  font-family: ui-monospace, "Roboto Mono", monospace;
+  font-size: 0.88em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--fundo);
+}
+.leitura pre {
+  margin: 0.7em 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--fundo);
+  overflow-x: auto;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: normal;
+}
+.leitura pre code { padding: 0; background: none; font-size: 1em; }
+.leitura pre.html-cru {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--suave);
+  font-family: ui-monospace, "Roboto Mono", monospace;
+  border: 1px dashed var(--linha);
+}
+.leitura .tabela { margin: 0.8em 0; overflow-x: auto; }
+.leitura table { border-collapse: collapse; font-size: 16px; min-width: 100%; }
+.leitura th, .leitura td {
+  border: 1px solid var(--linha);
+  padding: 6px 10px;
+  text-align: left;
+  overflow-wrap: normal;
+}
+.leitura th { background: var(--fundo); font-weight: 650; }
+.leitura .a-c { text-align: center; }
+.leitura .a-d { text-align: right; }
+.leitura del { color: var(--suave); }
+.leitura img.imagem { max-width: 100%; height: auto; border-radius: 8px; }
+.leitura .imagem-fora {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--fundo);
+  color: var(--suave);
+  font-size: 15px;
+}
+.leitura .link-nota, .leitura .link-web {
+  color: var(--acento);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.leitura .link-quebrado {
+  color: var(--suave);
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+}
+.leitura .host { color: var(--suave); font-size: 0.8em; }
+.leitura .propriedades {
+  margin: 0 0 1em 0;
+  font-size: 15px;
+  color: var(--suave);
+}
+.leitura .propriedades summary { min-height: 32px; }
+.leitura .nota-rodape { color: var(--acento); font-weight: 650; }
+.leitura .rodape-notas { font-size: 15px; color: var(--suave); }
+.leitura .rodape-notas p { margin: 0; }
+
+/* Caixa de tarefa: área de toque de 44 px, desenho de 22 px. */
+.leitura .caixa {
+  display: inline-block;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  margin: -12px 2px -12px -12px;
+  vertical-align: middle;
+}
+.leitura .caixa::before {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border: 2px solid var(--suave);
+  border-radius: 6px;
+}
+.leitura .caixa[aria-checked="true"]::before {
+  background: var(--acento);
+  border-color: var(--acento);
+}
+.leitura .caixa[aria-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 13px;
+  width: 7px;
+  height: 13px;
+  border: solid var(--acento-texto);
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg);
+}
+.leitura li:has(> .caixa, > p > .caixa) { list-style: none; margin-left: -1.3em; }
+.leitura li:has(> .caixa[aria-checked="true"], > p > .caixa[aria-checked="true"]) {
+  color: var(--suave);
+}

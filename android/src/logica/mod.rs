@@ -3,7 +3,9 @@
 
 pub mod busca;
 pub mod cofre;
+pub mod leitura;
 pub mod local;
+pub mod markdown;
 pub mod nomes;
 pub mod ordem;
 pub mod rascunho;

@@ -5,9 +5,7 @@
 //! que tira a tela do topo. Assim o Voltar do Android volta da nota para a lista, e só fecha o
 //! app na tela inicial.
 //!
-//! ENCAIXES das próximas fatias (cada uma acrescenta uma variante aqui e um braço em
-//! `ui::tela`):
-//! - R7b-2: `Leitura { caminho }`, a nota renderizada em Markdown;
+//! ENCAIXE da próxima fatia (acrescenta uma variante aqui e um braço em `ui::tela`):
 //! - R7b-3: `Sincronizacao`, a tela de configurar e acompanhar o sync.
 
 use dioxus::prelude::*;
@@ -20,6 +18,9 @@ pub enum Rota {
     Lista { pasta: String },
     /// O editor de uma nota (caminho relativo, com `.md`).
     Nota { caminho: String },
+    /// A mesma nota lida em Markdown formatado (R7b-2). Editar/Ler troca uma pela outra sem
+    /// empilhar histórico; abrir um link de nota empilha.
+    Leitura { caminho: String },
 }
 
 impl Rota {
