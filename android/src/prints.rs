@@ -72,7 +72,7 @@ fn servicos_com_sync(
 
 fn ajustes_conectado() -> Ajustes {
     Ajustes {
-        servidor: "http://100.88.231.30:8443".into(),
+        servidor: "http://100.64.0.10:8443".into(),
         aparelho: "Pixel do Bruno".into(),
         token: "nst_exemplo".into(),
         conectado: true,
@@ -383,7 +383,7 @@ fn sincronizar_configurada_mostra_estado_e_botoes() {
     for esperado in [
         "Sincronizado 14:32",
         "Última sincronização: hoje 14:32",
-        "http://100.88.231.30:8443",
+        "http://100.64.0.10:8443",
         "Pixel do Bruno",
         "Sincronizar agora",
         "Desconectar",
@@ -435,7 +435,7 @@ fn sincronizar_pede_a_frase_depois_de_reabrir_e_mostra_o_erro_da_frase() {
         "Frase-senha incorreta",
         "Entrar",
         "Desconectar",
-        "Conectado a http://100.88.231.30:8443",
+        "Conectado a http://100.64.0.10:8443",
     ] {
         assert!(html.contains(esperado), "faltou {esperado:?} em {html}");
     }
