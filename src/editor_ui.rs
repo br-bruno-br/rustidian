@@ -216,6 +216,8 @@ pub struct Editor {
     menu_release: bool,
     /// Text the note menu asked the sidebar search to find.
     pub search_request: Option<String>,
+    /// H4: o item do menu da nota que o app deve atender (comando da paleta).
+    pub history_request: Option<&'static str>,
     deferred_input: Option<(u64, Vec<egui::Event>)>,
     /// R10: o corretor ortografico (dicionario, lista pessoal e as palavras da nota aberta).
     pub spelling: rustidian::spell::SpellService,
@@ -368,6 +370,49 @@ pub fn record_document_edit(
     undoer.feed_state(ctx.input(|input| input.time), &(range, after.text.clone()));
     undoer.add_undo(&(range, after.text.clone()));
     state.set_undoer(undoer);
+}
+
+/// H3: semeia o Ctrl+Z de uma nota que acabou de abrir com os textos que a árvore de desfazer
+/// guardou da sessão anterior (`ancestrais`, do mais antigo ao mais novo) mais o texto de agora.
+/// Só vale se o desfazer da nota ainda está vazio: se o usuário já digitou, o que ele fez
+/// nesta sessão não é trocado. Devolve se semeou.
+pub fn seed_undoer(
+    ctx: &egui::Context,
+    root: &std::path::Path,
+    path: &std::path::Path,
+    ancestors: &[String],
+    current: &str,
+) -> bool {
+    let mut state = document_history(ctx, root, path);
+    let probe = (CCursorRange::one(CCursor::new(0)), current.to_owned());
+    if ancestors.is_empty() || state.undoer().has_undo(&probe) {
+        return false;
+    }
+    state.clear_undoer();
+    let mut undoer = state.undoer();
+    let prefix = |a: &str, b: &str| a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count();
+    for (i, text) in ancestors.iter().enumerate() {
+        let next = ancestors.get(i + 1).map_or(current, String::as_str);
+        let at = CCursor::new(prefix(text, next));
+        undoer.add_undo(&(CCursorRange::one(at), text.clone()));
+    }
+    let last = ancestors.last().map_or("", String::as_str);
+    let end = current.chars().count()
+        - current
+            .chars()
+            .rev()
+            .zip(last.chars().rev())
+            .take_while(|(x, y)| x == y)
+            .count()
+            .min(
+                current
+                    .chars()
+                    .count()
+                    .saturating_sub(prefix(current, last)),
+            );
+    undoer.add_undo(&(CCursorRange::one(CCursor::new(end)), current.to_owned()));
+    state.set_undoer(undoer);
+    true
 }
 
 pub fn relocate_histories(
@@ -1305,6 +1350,21 @@ impl Editor {
         );
     }
 
+    /// H4: a faixa selecionada na nota, em caracteres (ordenada). `None` se não há seleção.
+    pub fn selected_chars(&self, tab: &Tab) -> Option<Range<usize>> {
+        let (id, range) = self.selection?;
+        if id != tab.id() || range.primary.index == range.secondary.index {
+            return None;
+        }
+        let sorted = range.as_sorted_char_range();
+        Some(sorted.start.0..sorted.end.0)
+    }
+
+    /// H4: troca os caracteres `range` por `text` pelo caminho da edição normal (o Ctrl+Z desfaz).
+    pub fn replace_chars(&mut self, tab: &Tab, range: Range<usize>, text: String) {
+        self.replace_chars_with(tab, range, text);
+    }
+
     pub fn insert_wiki_link(&mut self, tab: &Tab, text: String) {
         self.edit(
             tab,
@@ -1567,6 +1627,16 @@ impl Editor {
                 self.search_request = Some(text.split_whitespace().collect::<Vec<_>>().join(" "));
                 done = true;
             }
+        }
+        // Histórico H3/H4
+        ui.separator();
+        if item(ui, "Achar o que apaguei", "", true) {
+            self.history_request = Some(rustidian::commands::FIND_ERASED);
+            done = true;
+        }
+        if item(ui, "Histórico deste trecho", "", selected.is_some()) {
+            self.history_request = Some(rustidian::commands::PASSAGE_HISTORY);
+            done = true;
         }
         if done {
             ui.close();

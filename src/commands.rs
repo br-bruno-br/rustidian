@@ -22,6 +22,10 @@ impl Scope {
 pub const ADD_UNIQUE_LINK: &str = "Unique note creator: Add unique internal link";
 pub const DUPLICATE_FILE: &str = "Make a copy of the current file";
 pub const MOVE_FILE: &str = "Move current file to another folder";
+// Histórico H3/H4
+pub const UNDO_BRANCHES: &str = "History: Undo branches";
+pub const FIND_ERASED: &str = "History: Find what I erased";
+pub const PASSAGE_HISTORY: &str = "History: History of this passage";
 pub const UNDO_CLOSE_TAB: &str = "Undo close tab";
 pub const SPLIT_RIGHT: &str = "Split right";
 pub const SPLIT_DOWN: &str = "Split down";
@@ -233,6 +237,22 @@ pub const ALL: &[Command] = &[
         name: "File recovery: Open local history",
         shortcut: "",
         scope: Scope::Global,
+    },
+    // Histórico H3/H4
+    Command {
+        name: UNDO_BRANCHES,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: FIND_ERASED,
+        shortcut: "",
+        scope: Scope::Document,
+    },
+    Command {
+        name: PASSAGE_HISTORY,
+        shortcut: "",
+        scope: Scope::Document,
     },
     Command {
         name: "Workspaces: Manage workspace layouts",
@@ -489,6 +509,10 @@ pub fn label(name: &str) -> &str {
         "Unique note creator: Create new unique note" => "Criador de nota única: Criar nota única",
         "Random note: Open random note" => "Nota aleatória: Abrir nota aleatória",
         "File recovery: Open local history" => "Recuperação de arquivo: Abrir histórico local",
+        // Histórico H3/H4
+        UNDO_BRANCHES => "Histórico: Galhos do desfazer",
+        FIND_ERASED => "Histórico: Achar o que apaguei",
+        PASSAGE_HISTORY => "Histórico: Histórico deste trecho",
         "Workspaces: Manage workspace layouts" => {
             "Espaços de trabalho: Gerenciar layouts de espaço de trabalho"
         }

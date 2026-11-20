@@ -55,6 +55,17 @@ impl NotesApp {
         };
         historico.configurar(self.recovery_config.enabled);
         historico.ajustar_politica(self.recovery_config.politica());
+        historico.ajustar_limites_desfazer(self.recovery_config.limites_desfazer());
+        // H3: o desfazer que ficou da sessão anterior volta para o Ctrl+Z da nota que abriu.
+        while let Ok(semente) = historico.sementes.try_recv() {
+            crate::editor_ui::seed_undoer(
+                ctx,
+                &vault.root,
+                &semente.nota,
+                &semente.ancestrais,
+                &semente.texto,
+            );
+        }
         while let Ok(aviso) = historico.avisos.try_recv() {
             self.error = Some(aviso);
         }

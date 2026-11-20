@@ -674,6 +674,50 @@ impl NotesApp {
                                     },
                                 );
                                 ui.separator();
+                                changed |= row(
+                                    ui,
+                                    "Passos do desfazer por nota",
+                                    "O Ctrl+Z que fica depois de fechar a nota: quantos passos guardar. Passando, os mais antigos saem. Ver os galhos: Ctrl+P, \"Galhos do desfazer\".",
+                                    |ui| {
+                                        let response = ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.recovery_config.undo_max_steps,
+                                            )
+                                            .range(100..=1_000_000)
+                                            .speed(50.0)
+                                            .suffix(" passos"),
+                                        );
+                                        crate::ui_probe::record(
+                                            ctx,
+                                            "settings-recovery-undo-steps",
+                                            response.rect,
+                                        );
+                                        response.changed()
+                                    },
+                                );
+                                ui.separator();
+                                changed |= row(
+                                    ui,
+                                    "Espaço do desfazer por nota",
+                                    "Teto de espaço do desfazer guardado de cada nota (o que bater primeiro, passos ou espaço).",
+                                    |ui| {
+                                        let response = ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.recovery_config.undo_max_kb,
+                                            )
+                                            .range(64..=524_288)
+                                            .speed(16.0)
+                                            .suffix(" KB"),
+                                        );
+                                        crate::ui_probe::record(
+                                            ctx,
+                                            "settings-recovery-undo-kb",
+                                            response.rect,
+                                        );
+                                        response.changed()
+                                    },
+                                );
+                                ui.separator();
                                 {
                                     let ligado = self.recovery_config.enabled;
                                     self.espaco.quadro(

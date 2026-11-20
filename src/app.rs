@@ -1,3 +1,5 @@
+#[path = "escritor_ui.rs"]
+pub(crate) mod escritor_ui;
 #[path = "historico_ui.rs"]
 pub(crate) mod historico_ui;
 #[path = "settings_ui.rs"]
@@ -249,6 +251,8 @@ pub struct NotesApp {
     recovery_index_paths: std::collections::HashSet<PathBuf>,
     recovery_saved: std::collections::HashMap<PathBuf, String>,
     recovery_manager: crate::recovery_ui::Manager,
+    /// H3/H4: galhos do desfazer, achar o que apaguei, histórico do trecho.
+    escritor: escritor_ui::Manager,
     file_move: crate::file_move_ui::Manager,
     page_preview: crate::page_preview::Manager,
     pub(crate) graph: crate::graph_ui::Manager,
@@ -373,6 +377,7 @@ impl NotesApp {
             recovery_index_paths: Default::default(),
             recovery_saved: Default::default(),
             recovery_manager: Default::default(),
+            escritor: Default::default(),
             file_move: Default::default(),
             page_preview: Default::default(),
             graph: Default::default(),
@@ -847,6 +852,7 @@ impl NotesApp {
                         .unwrap_or(false);
                         self.workspace_manager.open = false;
                         self.recovery_manager = Default::default();
+                        self.escritor = Default::default();
                         self.historico = None;
                         self.historico_ui = Default::default();
                         self.recovery_changed_paths.clear();
@@ -1166,6 +1172,124 @@ impl NotesApp {
             self.recovery_manager
                 .open(historico.leitor(), vault, path, &self.ctx);
         }
+    }
+
+    /// H3/H4: a nota aberta (caminho no cofre e texto de agora), se der para usar o histórico.
+    fn escritor_alvo(&mut self) -> Option<(PathBuf, String)> {
+        let tab = self.tabs.get(self.active).filter(|tab| {
+            tab.view != View::Graph
+                && tab.document.path.is_relative()
+                && rustidian::vault::is_markdown(&tab.document.path)
+        });
+        let alvo = tab.map(|tab| (tab.document.path.clone(), tab.document.text.clone()));
+        if alvo.is_none() || self.historico.is_none() {
+            self.error = Some("Abra primeiro uma nota Markdown de um cofre.".into());
+            return None;
+        }
+        alvo
+    }
+
+    fn open_undo_branches(&mut self) {
+        let Some((nota, _)) = self.escritor_alvo() else {
+            return;
+        };
+        if let Some(historico) = &self.historico {
+            self.dialog = None;
+            self.editor.focus = false;
+            self.escritor.abrir_galhos(historico, nota);
+        }
+    }
+
+    fn open_find_erased(&mut self) {
+        let Some((nota, texto)) = self.escritor_alvo() else {
+            return;
+        };
+        if let Some(historico) = &self.historico {
+            self.dialog = None;
+            self.editor.focus = false;
+            self.escritor.abrir_apagados(historico, nota, &texto);
+        }
+    }
+
+    fn open_passage_history(&mut self) {
+        let Some((nota, texto)) = self.escritor_alvo() else {
+            return;
+        };
+        let faixa = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| self.editor.selected_chars(tab));
+        let Some(faixa) = faixa else {
+            self.error =
+                Some("Selecione primeiro o trecho da nota que você quer investigar.".into());
+            return;
+        };
+        if let Some(historico) = &self.historico {
+            self.dialog = None;
+            self.editor.focus = false;
+            self.escritor.abrir_trecho(historico, nota, &texto, faixa);
+        }
+    }
+
+    /// O diálogo de H3/H4 e o que ele pediu ao editor. Tudo entra como edição normal da nota:
+    /// o Ctrl+Z desfaz, o autosave grava e a árvore do desfazer registra.
+    fn show_escritor(&mut self, ctx: &egui::Context) {
+        let acao = self.escritor.show(ctx);
+        if let Some((nota, no)) = self.escritor.galho_pedido()
+            && let Some(historico) = &self.historico
+        {
+            match historico.ir_para_galho(&nota, no) {
+                Ok(rx) => self.escritor.esperar_galho(rx),
+                Err(erro) => self.escritor.erro(erro),
+            }
+        }
+        let Some(acao) = acao else {
+            if !self.escritor.open {
+                self.focus_editor();
+            }
+            return;
+        };
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
+        match acao {
+            escritor_ui::Acao::IrPara { nota, texto } => {
+                if tab.document.path != nota {
+                    self.error = Some("A nota mudou: abra os galhos de novo.".into());
+                } else {
+                    let atual = tab.document.text.clone();
+                    let (comeco, fim_antigo, meio) = menor_troca(&atual, &texto);
+                    if fim_antigo > comeco || !meio.is_empty() {
+                        self.editor.replace_chars(tab, comeco..fim_antigo, meio);
+                    }
+                    self.status = "Nota levada ao galho escolhido (Ctrl+Z desfaz)".into();
+                }
+            }
+            escritor_ui::Acao::Reinserir(texto) => {
+                self.editor.insert_text(tab, texto);
+                self.status = "Trecho reinserido".into();
+            }
+            escritor_ui::Acao::TrocarSelecao {
+                faixa,
+                esperado,
+                texto,
+            } => {
+                let igual = tab
+                    .document
+                    .text
+                    .chars()
+                    .skip(faixa.start)
+                    .take(faixa.len());
+                if igual.eq(esperado.chars()) {
+                    self.editor.replace_chars(tab, faixa, texto);
+                    self.status = "Seleção trocada pela versão escolhida".into();
+                } else {
+                    self.error =
+                        Some("A seleção mudou: abra o histórico do trecho de novo.".into());
+                }
+            }
+        }
+        self.focus_editor();
     }
 
     fn restore_snapshot(&mut self, request: crate::recovery_ui::Restore) {
@@ -2037,6 +2161,7 @@ impl NotesApp {
             || self.vault_manager.open
             || self.workspace_manager.open
             || self.recovery_manager.active()
+            || self.escritor.active()
             || self.file_move.active()
         {
             return;
@@ -3716,6 +3841,7 @@ impl NotesApp {
             || self.vault_manager.open
             || self.workspace_manager.open
             || self.recovery_manager.active()
+            || self.escritor.active()
             || self.file_move.active()
     }
 
@@ -4472,6 +4598,7 @@ impl NotesApp {
                 && !self.vault_manager.open
                 && !self.workspace_manager.open
                 && !self.recovery_manager.active()
+                && !self.escritor.active()
                 && !self.file_move.active()
                 && ui.is_enabled()
                 && ui.memory(|memory| memory.allows_interaction(ui.layer_id()))
@@ -5508,6 +5635,10 @@ impl NotesApp {
             } else if !self.workspace_manager.open {
                 self.focus_editor();
             }
+            return;
+        }
+        if self.escritor.open {
+            self.show_escritor(ctx);
             return;
         }
         if self.recovery_manager.open {
@@ -6808,6 +6939,10 @@ impl NotesApp {
             "Go to next tab" => self.step_tab(false),
             "Go to previous tab" => self.step_tab(true),
             "File recovery: Open local history" => self.open_recovery(true),
+            // Histórico H3/H4
+            rustidian::commands::UNDO_BRANCHES => self.open_undo_branches(),
+            rustidian::commands::FIND_ERASED => self.open_find_erased(),
+            rustidian::commands::PASSAGE_HISTORY => self.open_passage_history(),
             "Workspaces: Manage workspace layouts" => self.show_workspaces(false),
             "Workspaces: Load workspace layout" => self.show_workspaces(true),
             "Workspaces: Save layout" | "Workspaces: Save and load another layout" => {
@@ -7888,6 +8023,7 @@ impl NotesApp {
             && !self.vault_manager.open
             && !self.workspace_manager.open
             && !self.recovery_manager.active()
+            && !self.escritor.active()
             && !self.file_move.active();
         if let Some(kind) = crate::window::title_bar(ui, &self.window_title, file_actions_enabled) {
             self.start_open_picker(kind);
@@ -7994,6 +8130,9 @@ impl NotesApp {
         self.sidebar(ui);
         self.details(ui);
         self.content(ui);
+        if let Some(comando) = self.editor.history_request.take() {
+            self.command(comando, &ctx);
+        }
         if let Some(query) = self.editor.search_request.take() {
             self.search = query;
             self.show_left = true;
@@ -8024,6 +8163,7 @@ impl NotesApp {
             && !self.vault_manager.open
             && !self.workspace_manager.open
             && !self.recovery_manager.active()
+            && !self.escritor.active()
             && !self.file_move.active()
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, Key::S))
         {
@@ -8116,3 +8256,24 @@ fn write_new_note(
 /// Fluxos de GUI sem janela (R8a), no módulo-filho para enxergar os campos privados do app.
 #[cfg(test)]
 mod gui_tests;
+
+/// A menor troca que leva `antes` a `depois`: onde começa (em caracteres), onde termina em `antes`
+/// e o texto novo daquele miolo. Mexer só no que mudou preserva o cursor e o resto da nota.
+fn menor_troca(antes: &str, depois: &str) -> (usize, usize, String) {
+    let a: Vec<char> = antes.chars().collect();
+    let d: Vec<char> = depois.chars().collect();
+    let comeco = a.iter().zip(&d).take_while(|(x, y)| x == y).count();
+    let max_fim = a.len().min(d.len()) - comeco;
+    let fim = a
+        .iter()
+        .rev()
+        .zip(d.iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count()
+        .min(max_fim);
+    (
+        comeco,
+        a.len() - fim,
+        d[comeco..d.len() - fim].iter().collect(),
+    )
+}
