@@ -24,6 +24,9 @@ nota-sync = { path = "../crates/nota-sync" }
 nota-cripto = { path = "../crates/nota-cripto" }
 # Data da nota nova e carimbo da lixeira (mesma versão e features do app e do nota-sync).
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# Markdown -> HTML seguro na tela de Leitura (mesma versão do app de mesa; sem o gerador de HTML
+# da crate: o HTML sai do nosso código, que nunca repassa HTML cru da nota).
+pulldown-cmark = { version = "0.13.4", default-features = false }
 
 [dev-dependencies]
 # Só nos testes: renderiza as telas em HTML para conferir e tirar print sem celular.
