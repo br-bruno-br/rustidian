@@ -4,8 +4,8 @@ Uma frente por vez: compilar Rust em paralelo trava o PC de 2 núcleos. Cada fat
 
 | ordem | fatia | quem | estado |
 |---|---|---|---|
-| 0 | Histórico H3/H4 (desktop) | s-h | em verificação |
-| 1 | **R7b-2** Markdown no Android | s-h | esperando |
+| 0 | Histórico H3/H4 (desktop) | s-h | juntado em 20/11 (353 testes do app, 224 da lib, 159 dos crates) |
+| 1 | **R7b-2** Markdown no Android | s-h | próxima |
 | 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | esperando |
 | 3 | **R6** Servidor no re-servidor + backup rustic → Drive | eu, com o dono | esperando o dono |
 
@@ -85,3 +85,7 @@ Fica comigo e com o dono, não com um executor. Mexe numa máquina de verdade, p
 - Teste de restauração.
 
 **Pronto quando:** o serviço volta sozinho depois de reiniciar o re-servidor, e o backup e a restauração foram testados.
+
+## Pendências conhecidas
+
+- Teste `navegacao::copiar_pasta_leva_notas_binarios_ocultos_e_vazias_e_so_salva_o_rascunho_da_origem` é instável sob carga: o salvamento automático dos rascunhos digitados no teste roda `after_note_saved`, que limpa `app.error` antes da conferência do aviso "só está disponível no Linux". Passou na rodada final; conserto = o teste esperar os salvamentos (`settle_saves`) antes de copiar a pasta.
