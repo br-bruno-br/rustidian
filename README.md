@@ -57,6 +57,23 @@ Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/Ma
 **Android (fase inicial)**
 - App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Ainda mostra o texto cru e ainda não sincroniza.
 
+## Seus dados estão seguros
+
+Garantias que existem no código, com a contagem de testes marcados com `#[test]` na área (contagem por `grep`, sem compilar; não é cobertura).
+
+| Garantia | Como | Testes |
+| --- | --- | --- |
+| Nota nunca é apagada de vez | O que some vai para `.trash/` do cofre (é um `rename`, nunca `rm`), e o app pede confirmação antes de mandar a nota para a lixeira (dá para desligar o aviso) | `crates/nota-sync` 62; telas em `src/app/gui_tests` 270 |
+| Conflito não perde nada | Se a nota mudou nos dois lados, uma versão vira o arquivo principal e a outra é salva como `nome (conflito aparelho data).md` | `crates/nota-sync` 62 |
+| Servidor não lê as notas | Cifra de ponta a ponta: o servidor guarda só conteúdo cifrado. Cada aparelho tem a cópia completa e funciona sem rede | `crates/nota-cripto` 19, `crates/nota-servidor` 20 |
+| Gravação sem arquivo pela metade | Escrita atômica: arquivo temporário na mesma pasta, `sync_all` e `rename` por cima | `crates/nota-sync` 62 |
+| Nota que pode ser estragada não abre | Nota grande ou que não está em UTF-8 não é aberta, para não estragar o arquivo. Limites: 8 MB no índice do desktop (`.md` maior fica fora do índice, com aviso) e 2 MB no Android | `src/app/gui_tests` 270; `android/` 51 |
+| Vigia não perde nota | Uma nota que a varredura não achou só sai do índice depois de conferida duas vezes | `src/app/gui_tests` 270 |
+| Histórico das notas | Versões automáticas por diferença, retenção configurável (padrão: todas por 1 dia), restaurar, versões com nome (nunca saem) e "Apagar do histórico" tira um trecho de todas as versões, sem desfazer | `crates/nota-historico` 65 |
+| Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). Falta o dono gerar a chave | `src/atualizacao.rs` 13 |
+| Desfazer que continua depois de fechar | **Em andamento** (histórico, fase H3/H4) | ainda não |
+| Sync cifrado no Android e backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
+
 ## Roadmap
 
 A fila anda **uma frente por vez**: compilar em paralelo trava o PC do dono (2 núcleos), e cada fatia só começa depois que a anterior foi verificada e juntada. Sem datas.
