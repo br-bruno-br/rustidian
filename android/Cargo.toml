@@ -27,11 +27,16 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 # Markdown -> HTML seguro na tela de Leitura (mesma versão do app de mesa; sem o gerador de HTML
 # da crate: o HTML sai do nosso código, que nunca repassa HTML cru da nota).
 pulldown-cmark = { version = "0.13.4", default-features = false }
+# Configuração da sincronização (R7b-3): endereço, nome do aparelho e token em JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 # Só nos testes: renderiza as telas em HTML para conferir e tirar print sem celular.
 dioxus-ssr = { version = "=0.7.10", default-features = false }
 tempfile = "3.27"
+# Só nos testes da R7b-3: o servidor de verdade numa porta local (dois cofres convergem).
+nota-servidor = { path = "../crates/nota-servidor" }
 
 [features]
 default = []

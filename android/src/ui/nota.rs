@@ -31,7 +31,7 @@ pub fn Nota(caminho: String) -> Element {
 
     // Lê a nota uma vez, ao abrir. O texto digitado vive no `Edicao`; o <textarea> não é
     // reescrito a cada tecla.
-    let aberta = use_hook({
+    let primeira = use_hook({
         let cofre = servicos.cofre.clone();
         let caminho = caminho.clone();
         move || match cofre.ler_nota(&caminho) {
@@ -40,6 +40,37 @@ pub fn Nota(caminho: String) -> Element {
                 Ok(texto)
             }
             Err(e) => Err(explicar(&e)),
+        }
+    });
+
+    let mut aberta = use_signal({
+        let primeira = primeira.clone();
+        move || primeira
+    });
+
+    // A sincronização trouxe uma versão nova desta nota e o dono não tinha digitado nada:
+    // relê (o campo de texto é refeito, pela `key`). Com texto digitado e não gravado nada
+    // muda aqui: o conflito é resolvido na hora de gravar (ver `Cofre::salvar_nota_conferindo`).
+    let mut recarga_vista = use_signal(|| nav.recarga_guardada());
+    use_effect({
+        let cofre = servicos.cofre.clone();
+        let caminho = caminho.clone();
+        move || {
+            let r = nav.recarga();
+            if r == *recarga_vista.peek() {
+                return;
+            }
+            recarga_vista.set(r);
+            if edicao.desviou() {
+                return;
+            }
+            match cofre.ler_nota(&caminho) {
+                Ok(texto) => {
+                    edicao.abrir(&caminho, texto.clone());
+                    aberta.set(Ok(texto));
+                }
+                Err(e) => aberta.set(Err(explicar(&e))),
+            }
         }
     });
 
@@ -70,6 +101,9 @@ pub fn Nota(caminho: String) -> Element {
                     move |novo: String| {
                         pedido.set(None);
                         edicao.salvar(&cofre);
+                        if edicao.desviou() {
+                            return;
+                        }
                         match cofre.renomear_nota(&caminho, &novo) {
                             Ok(novo_caminho) => {
                                 if novo_caminho != caminho {
@@ -102,6 +136,9 @@ pub fn Nota(caminho: String) -> Element {
                             aviso.set(Some(
                                 "Não consegui salvar o texto, então não mexi na nota.".into(),
                             ));
+                            return;
+                        }
+                        if edicao.desviou() {
                             return;
                         }
                         match cofre.para_a_lixeira(&caminho) {
@@ -152,6 +189,9 @@ pub fn Nota(caminho: String) -> Element {
                                 ));
                                 return;
                             }
+                            if edicao.desviou() {
+                                return;
+                            }
                             nav.substituir(Rota::Leitura {
                                 caminho: caminho.clone(),
                             });
@@ -172,7 +212,22 @@ pub fn Nota(caminho: String) -> Element {
                     button { class: "botao", onclick: move |_| aviso.set(None), "OK" }
                 }
             }
-            {editor(aberta, servicos.cofre.clone(), edicao)}
+            if let Some(copia) = edicao.desvio() {
+                div { class: "aviso", role: "alert",
+                    span {
+                        "Esta nota mudou em outro aparelho enquanto você escrevia. Seu texto está guardado em “{titulo_da_nota(ultimo_componente(&copia))}”; a versão nova continua na nota original."
+                    }
+                    button {
+                        class: "botao",
+                        onclick: {
+                            let copia = copia.clone();
+                            move |_| nav.substituir(Rota::Nota { caminho: copia.clone() })
+                        },
+                        "Abrir a cópia"
+                    }
+                }
+            }
+            {editor(aberta.read().clone(), servicos.cofre.clone(), edicao, nav.recarga())}
             {dialogo}
         }
     }
@@ -183,6 +238,7 @@ fn editor(
     aberta: Result<String, String>,
     cofre: crate::logica::cofre::Cofre,
     edicao: Edicao,
+    recarga: u32,
 ) -> Element {
     match aberta {
         Err(msg) => rsx! { p { class: "vazio erro", "{msg}" } },
@@ -191,7 +247,9 @@ fn editor(
             rsx! {
                 // O texto inicial entra uma vez como conteúdo do campo. Nada reescreve o valor
                 // depois: o Gboard e o cursor ficam com a WebView, como numa página comum.
+                // A `key` muda quando a sincronização trouxe um texto novo: o campo é refeito.
                 textarea {
+                    key: "{recarga}",
                     class: "editor",
                     placeholder: "Escreva aqui…",
                     spellcheck: true,

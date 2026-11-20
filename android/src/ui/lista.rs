@@ -5,8 +5,10 @@ use dioxus::prelude::*;
 use crate::logica::busca::{MAX_ACHADOS, buscar};
 use crate::logica::cofre::{Item, Tipo, explicar};
 use crate::logica::nomes::{PASTA_NOVA, pasta_de, ultimo_componente};
+use crate::logica::sincronia::Tom;
 use crate::rota::{Navegacao, Rota};
 use crate::servicos::Servicos;
+use crate::vista::VistaSync;
 
 use super::dialogo::{DialogoConfirmar, DialogoTexto};
 
@@ -21,8 +23,19 @@ enum Pedido {
 pub fn Lista(pasta: String) -> Element {
     let servicos = use_context::<Servicos>();
     let nav = use_context::<Navegacao>();
+    let vista = use_context::<VistaSync>();
     let mut pedido = use_signal(|| None::<Pedido>);
     let mut aviso = use_signal(|| None::<String>);
+    // O rótulo da sincronização se refaz quando o estado dela muda.
+    let _ = vista.versao();
+    let rotulo = servicos.sync.estado().rotulo();
+    let tom = match rotulo.tom {
+        Tom::Neutro => "tom-neutro",
+        Tom::Bom => "tom-bom",
+        Tom::Ocupado => "tom-ocupado",
+        Tom::Atencao => "tom-atencao",
+        Tom::Ruim => "tom-ruim",
+    };
 
     // As duas listas só são refeitas quando muda a pasta, a busca ou o disco (não a cada
     // diálogo aberto).
@@ -203,6 +216,15 @@ pub fn Lista(pasta: String) -> Element {
                     h1 { "{titulo}" }
                     if !caminho_da_pasta.is_empty() {
                         span { class: "sub", "{caminho_da_pasta}" }
+                    }
+                }
+                if na_raiz {
+                    button {
+                        class: "chip {tom}",
+                        aria_label: "Sincronizar: {rotulo.texto}",
+                        onclick: move |_| nav.ir(Rota::Sincronizar),
+                        span { class: "chip-icone", aria_hidden: "true", "⟳" }
+                        span { class: "chip-texto", "{rotulo.texto}" }
                     }
                 }
             }

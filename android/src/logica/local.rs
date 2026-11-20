@@ -44,6 +44,20 @@ pub fn reserva_interna(pacote: &str) -> PathBuf {
     PathBuf::from(format!("/data/data/{pacote}/files/Cofre"))
 }
 
+/// Onde ficam a configuração e o estado da sincronização: a pasta **interna** do app
+/// (`/data/data/<pacote>/files/sync`), que só o app enxerga e que o gerenciador de arquivos e o
+/// Syncthing não alcançam. Fora do Android (testes e prints): `RUSTIDIAN_ESTADO` ou uma pasta
+/// temporária.
+pub fn pasta_de_estado() -> PathBuf {
+    if cfg!(target_os = "android") {
+        PathBuf::from(format!("/data/data/{PACOTE}/files/sync"))
+    } else {
+        std::env::var_os("RUSTIDIAN_ESTADO")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("rustidian-android-estado"))
+    }
+}
+
 /// A pasta existe (ou foi criada) e o app consegue gravar nela?
 pub fn utilizavel(pasta: &Path) -> bool {
     if fs::create_dir_all(pasta).is_err() {

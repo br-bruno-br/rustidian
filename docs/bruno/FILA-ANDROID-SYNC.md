@@ -5,8 +5,8 @@ Uma frente por vez: compilar Rust em paralelo trava o PC de 2 núcleos. Cada fat
 | ordem | fatia | quem | estado |
 |---|---|---|---|
 | 0 | Histórico H3/H4 (desktop) | s-h | juntado em 20/11 (353 testes do app, 224 da lib, 159 dos crates) |
-| 1 | **R7b-2** Markdown no Android | s-h | pronta na branch `r7b2-markdown` (20/11), esperando verificação, juntada e o teste do APK pelo dono |
-| 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | esperando |
+| 1 | **R7b-2** Markdown no Android | s-h | juntada na main (20/11); falta o dono passar `R7B2-TESTE.md` no celular |
+| 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | **pronta no código** na branch `r7b3-sync` (20/11), esperando verificação e juntada; APK em `C:/dev/_wt/rustidian-r7b3-sync.apk`; o teste no celular (`R7B3-TESTE.md`) depende da R6 |
 | 3 | **R6** Servidor no re-servidor + backup rustic → Drive | eu, com o dono | esperando o dono |
 
 Por que essa ordem: o código da R7b-3 é testado contra um `nota-servidor` local, então não depende da R6. A R6 mexe numa máquina de verdade e precisa do dono (login do Google, senhas), por isso vai por último e com ok.
@@ -72,6 +72,14 @@ Por que essa ordem: o código da R7b-3 é testado contra um `nota-servidor` loca
 - uma nota apagada vai para a lixeira nos dois lados.
 
 **Pronto quando:** o gate do Android passa, esses testes de integração passam, os prints foram olhados e o APK foi gerado.
+
+**Estado (20/11):** feito. Branch `r7b3-sync`, 6 commits em cima da main. Gate do Android: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` e `cargo test` (145 passam, 1 ignorado: o que grava os HTML dos prints). Os testes de integração estão em `android/src/testes_sync.rs`: convergência, conflito com as duas cópias, lixeira nos dois lados, renomear esperando o ciclo, frase errada sem gravar nada (mais token errado e endereço ruim), reabrir o app pede a frase de novo, servidor fora do ar e o editor contra o sync. Prints em `C:/dev/_wt/prints-r7b3`. Desenho e a **decisão da frase** (chave só na memória, frase pedida a cada abertura do app, token na pasta interna do app) em "Desenho (R7b-3: Sync)" do PLANO. Roteiro: `R7B3-TESTE.md`.
+
+**Para a R6 e o teste no celular:**
+- O servidor do re-servidor tem de aceitar um **token novo só para o celular** (`nota-servidor token novo celular`) e escutar no IP da Tailscale; o celular precisa da Tailscale ligada e do endereço `http://100.x.y.z:porta`.
+- A primeira sincronização de um cofre grande no celular pode demorar (o ciclo hasheia e envia tudo uma vez); o teste diz para medir.
+- Decidir depois do teste: se pedir a frase a cada abertura do app incomoda, guardar K na pasta interna do app ou fazer a ponte com o Keystore (JNI).
+- O ciclo só roda com o app vivo (não há serviço em segundo plano nem ciclo periódico).
 
 ## 3. R6: servidor no re-servidor e backup
 
