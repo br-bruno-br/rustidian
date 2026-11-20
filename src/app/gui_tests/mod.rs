@@ -14,6 +14,7 @@ mod dividir;
 mod edicao;
 mod historico;
 mod historico_config;
+mod migrados_janela;
 mod navegacao;
 mod nota_quadro;
 mod onde_aparece;
