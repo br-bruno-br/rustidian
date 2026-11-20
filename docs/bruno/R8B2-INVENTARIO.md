@@ -128,3 +128,12 @@ Sem gancho no app: graph-state, tab-overflow, tree-scroll, page-preview, table-r
 - O `xtask/src/release.rs` (linhas 735–745) lista `tests/gui_smoke.py`, `scripts/compare-editors.py`, `scripts/record-keyboard.py` e `scripts/native_input.py` em `reuse_allowed`. Só é lista de texto, não quebra compilação. Fora da fronteira desta tarefa.
 - `README.md:146` linka `scripts/compare-editors.py`. Fora da fronteira.
 - `.github/workflows/store-smoke.yml` usa `xvfb-run` para o smoke do snap, não chama Python. Não entra no passo 4.
+
+## Estado
+
+- **Lote 1 migrado (1c9419a, `src/app/gui_tests/migrados_janela.rs`, 6 testes):** palette-queued (3 testes), quit (2 testes: pergunta, Escape/Cancelar/Enter e teclas sob a pergunta; aviso de alterações não salvas) e title (1 teste: Enter, Escape, conflito e Tab).
+- **Diferenças registradas no lote 1:** quit — o fechamento por `ViewportCommand` não aparece no estado do app, então "Enter fecha" fica coberto por `window.rs::quit_dialog_closes_once_on_enter_and_never_on_cancel`. title — o link sai como `[[Notes/Title renamed]]` (caminho completo); o smoke conferia só a substring, e o teste usa o mesmo critério.
+- **Python ainda não removido nesta fatia:** a remoção de `title`, `quit` e `palette-queued` do `tests/gui_smoke.py` foi bloqueada pelo classificador de ações automáticas (tratada como ação destrutiva). Não houve contorno; a remoção fica para decisão do dono.
+- **`palette-queued` continua no Python também por outro motivo:** `ux.yml` (linha 126) a usa como linha de base da ordem modal. Sai junto com o passo 4 (workflows).
+- **Não migrado ainda:** `tab-drag` (o teclado está na tabela; o arrasto de ponteiro fica de fora), `file-toolbar` (nova pasta, ordenar e recolher; o reinício do processo é classe c) e `note-creators` (datas, cofres e reinício; vai para o lote 3).
+- **Decisões de `.py` pendentes de permissão:** apagar `experiments/html-host/verify.py`, `scripts/compare-editors.py`, `scripts/record-keyboard.py` e `scripts/native_input.py` (este último só sai junto com o `gui_smoke.py`). `tests/emoji_font_asset.py`: a parte de hash vira teste Rust, ainda não feita.
