@@ -23,6 +23,10 @@ pub struct Config {
     /// on disk is deleted (security review of 15 Nov 2026: history keeps text the reader
     /// deleted from a note).
     pub enabled: bool,
+    /// H3: quantos passos do desfazer ficam guardados por nota (os mais antigos saem primeiro).
+    pub undo_max_steps: u32,
+    /// H3: espaço máximo do desfazer guardado por nota, em KB.
+    pub undo_max_kb: u32,
 }
 
 impl Default for Config {
@@ -32,6 +36,8 @@ impl Default for Config {
             // One day, not a week: old text a note no longer holds should not linger.
             keep_days: 1.0,
             enabled: true,
+            undo_max_steps: 5_000,
+            undo_max_kb: 2_048,
         }
     }
 }
@@ -55,6 +61,15 @@ impl Config {
             )
         } else {
             Ok(())
+        }
+    }
+
+    /// O limite da árvore de desfazer de cada nota (H3), com números absurdos trazidos para uma
+    /// faixa que funciona.
+    pub fn limites_desfazer(&self) -> nota_historico::LimitesDesfazer {
+        nota_historico::LimitesDesfazer {
+            max_passos: self.undo_max_steps.clamp(100, 1_000_000) as usize,
+            max_bytes: self.undo_max_kb.clamp(64, 512 * 1024) as usize * 1024,
         }
     }
 
@@ -523,6 +538,7 @@ mod politica_testes {
             keep_days: f64::NAN,
             interval_minutes: -3.0,
             enabled: true,
+            ..Config::default()
         }
         .politica();
         assert_eq!(ruim.tudo_ate, dias(1));
@@ -531,6 +547,7 @@ mod politica_testes {
             keep_days: 0.2,
             interval_minutes: f64::INFINITY,
             enabled: true,
+            ..Config::default()
         }
         .politica();
         assert_eq!(curto.tudo_ate, dias(1));
@@ -546,8 +563,24 @@ mod politica_testes {
             keep_days: 1e300,
             interval_minutes: 1e300,
             enabled: true,
+            ..Config::default()
         }
         .politica();
         assert!(enorme.tudo_ate >= dias(36_000));
+    }
+
+    #[test]
+    fn limites_do_desfazer_ficam_numa_faixa_que_funciona() {
+        let padrao = Config::default().limites_desfazer();
+        assert_eq!(padrao.max_passos, 5_000);
+        assert_eq!(padrao.max_bytes, 2 * 1024 * 1024);
+        let absurdo = Config {
+            undo_max_steps: 0,
+            undo_max_kb: 0,
+            ..Config::default()
+        }
+        .limites_desfazer();
+        assert_eq!(absurdo.max_passos, 100);
+        assert_eq!(absurdo.max_bytes, 64 * 1024);
     }
 }

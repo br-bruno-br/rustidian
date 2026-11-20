@@ -30,14 +30,18 @@ use crate::{
     recovery::History as Legado,
     vault::{Document, Vault},
 };
-use nota_historico::{Agrupador, Evento, Historico as Banco, NotaId, impressao_do_texto};
 pub use nota_historico::{
-    ApagadoEmTodas, Estatisticas, Origem, PoliticaRetencao, RelatorioCompactacao, RelatorioPoda,
-    Ritmo, Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras,
+    AberturaDesfazer, Apagado, ApagadoEmTodas, Estatisticas, Galho, Galhos, LimitesDesfazer,
+    MudancaDoTrecho, NoId, Origem, PoliticaRetencao, RelatorioCompactacao, RelatorioPoda, Ritmo,
+    Tipo, Trecho, VersaoId, VersaoInfo, diff_palavras, filtrar_apagados,
+};
+use nota_historico::{
+    Agrupador, Evento, Historico as Banco, Impressao, NotaId, Registrado, impressao_do_texto,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
+    ops::Range,
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, RecvTimeoutError, Sender},
     thread::JoinHandle,
@@ -62,6 +66,12 @@ const NOME_MAXIMO: usize = 80;
 /// O arquivo só é compactado por tamanho (sem a poda ter removido nada) quando passa de 1 MiB e de
 /// duas vezes o que tinha logo depois da última compactação.
 const COMPACTAR_ACIMA_DE: u64 = 1024 * 1024;
+/// H3: depois de tanto tempo sem digitar vira um passo da árvore de desfazer...
+const ARVORE_PAUSA: Duration = Duration::from_millis(800);
+/// ...e digitando sem parar, no máximo a cada tanto.
+const ARVORE_TETO: Duration = Duration::from_secs(3);
+/// Quantos passos anteriores o editor recebe para semear o Ctrl+Z (o desfazer dele guarda 100).
+const SEMENTE_MAXIMA: usize = 99;
 
 /// O id estável de uma nota no histórico: o caminho relativo, com `/`.
 pub fn id_da_nota(relativo: &Path) -> NotaId {
@@ -110,7 +120,29 @@ enum Pedido {
     Versoes(PathBuf, Sender<Resultado<Vec<VersaoInfo>>>),
     Ler(PathBuf, VersaoId, Sender<Resultado<String>>),
     Notas(Sender<Resultado<Vec<PathBuf>>>),
+    /// H3: o limite da árvore de desfazer de cada nota.
+    Limites(LimitesDesfazer),
+    Galhos(PathBuf, Sender<Resultado<Galhos>>),
+    IrParaGalho(PathBuf, NoId, Sender<Resultado<(String, AberturaDesfazer)>>),
+    /// H4: achar o que apaguei (o texto de agora, que ainda pode não ser versão).
+    AcharApagados(PathBuf, String, Sender<Resultado<Vec<Apagado>>>),
+    HistoricoDoTrecho(
+        PathBuf,
+        String,
+        Range<usize>,
+        Sender<Resultado<Vec<MudancaDoTrecho>>>,
+    ),
     Fechar,
+}
+
+/// O que o editor precisa para semear o Ctrl+Z de uma nota que acabou de abrir (H3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Semente {
+    pub nota: PathBuf,
+    /// O texto que a nota tinha ao abrir: a semente só vale sobre ele.
+    pub texto: String,
+    /// Os textos anteriores no caminho da árvore, do mais antigo ao mais novo.
+    pub ancestrais: Vec<String>,
 }
 
 /// A mão do app no histórico. Só a thread de fundo toca o banco; os métodos daqui não esperam.
@@ -125,6 +157,10 @@ pub struct Historico {
     pub avisos: Receiver<String>,
     /// Um caminho a cada versão gravada: a tela de versões se atualiza.
     pub gravou: Receiver<PathBuf>,
+    /// H3: o que o editor precisa para semear o Ctrl+Z de uma nota que acabou de abrir.
+    pub sementes: Receiver<Semente>,
+    /// O último limite da árvore de desfazer mandado à linha de fundo.
+    limites: LimitesDesfazer,
 }
 
 /// Uma cópia barata do canal de pedidos, para as threads de fundo da tela de versões. Os métodos
@@ -146,6 +182,7 @@ impl Historico {
         let (tx, rx) = mpsc::channel();
         let (avisos_tx, avisos) = mpsc::channel();
         let (gravou_tx, gravou) = mpsc::channel();
+        let (sementes_tx, sementes) = mpsc::channel();
         let (pronto_tx, pronto) = mpsc::channel();
         let mut fundo = Fundo {
             rx,
@@ -165,6 +202,7 @@ impl Historico {
             avisos: avisos_tx,
             ultimo_aviso: None,
             gravou: gravou_tx,
+            sementes: sementes_tx,
             acordar: Box::new(acordar),
         };
         let juntar = std::thread::Builder::new()
@@ -182,7 +220,76 @@ impl Historico {
             politica,
             avisos,
             gravou,
+            sementes,
+            limites: LimitesDesfazer::default(),
         }
+    }
+
+    /// H3: muda o limite da árvore de desfazer de cada nota (só manda se mudou).
+    pub fn ajustar_limites_desfazer(&mut self, limites: LimitesDesfazer) {
+        if self.limites != limites {
+            self.limites = limites;
+            let _ = self.tx.send(Pedido::Limites(limites));
+        }
+    }
+
+    /// H3: as pontas da árvore de desfazer da nota (e as árvores arquivadas). A resposta chega
+    /// quando o fundo puder; o que estava por registrar entra antes.
+    pub fn galhos(&self, nota: &Path) -> Resultado<Receiver<Resultado<Galhos>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::Galhos(nota.to_owned(), resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// H3: põe a nota no passo `no` da árvore; a resposta traz o texto dele.
+    pub fn ir_para_galho(
+        &self,
+        nota: &Path,
+        no: NoId,
+    ) -> Resultado<Receiver<Resultado<(String, AberturaDesfazer)>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::IrParaGalho(nota.to_owned(), no, resp))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// H4: os trechos que existiram em versões da nota e não estão em `atual`.
+    pub fn achar_apagados(
+        &self,
+        nota: &Path,
+        atual: &str,
+    ) -> Resultado<Receiver<Resultado<Vec<Apagado>>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::AcharApagados(
+                nota.to_owned(),
+                atual.to_owned(),
+                resp,
+            ))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
+    }
+
+    /// H4: as versões em que a faixa `selecao` (bytes) de `atual` mudou.
+    pub fn historico_do_trecho(
+        &self,
+        nota: &Path,
+        atual: &str,
+        selecao: Range<usize>,
+    ) -> Resultado<Receiver<Resultado<Vec<MudancaDoTrecho>>>> {
+        let (resp, rx) = mpsc::channel();
+        self.tx
+            .send(Pedido::HistoricoDoTrecho(
+                nota.to_owned(),
+                atual.to_owned(),
+                selecao,
+                resp,
+            ))
+            .map_err(|_| "O histórico local está fechado.".to_string())?;
+        Ok(rx)
     }
 
     pub fn leitor(&self) -> Leitor {
@@ -458,6 +565,33 @@ struct Nota {
     agrupador: Agrupador,
     /// O último texto que a tela mandou.
     texto: String,
+    /// H3: a árvore de desfazer desta nota abriu (só então os passos são registrados).
+    arvore: bool,
+    /// H3: desde quando há texto por registrar na árvore, e quando mudou pela última vez.
+    arvore_desde: Option<Duration>,
+    arvore_ultima: Duration,
+    /// H3: as impressões do texto de cada passo da árvore. Um texto que já é um passo é um
+    /// Ctrl+Z ou Ctrl+Y: entra na hora, para a próxima digitação nascer como galho.
+    conhecidos: HashSet<Impressao>,
+}
+
+impl Nota {
+    fn nova(agrupador: Agrupador, texto: String) -> Self {
+        Self {
+            agrupador,
+            texto,
+            arvore: false,
+            arvore_desde: None,
+            arvore_ultima: Duration::ZERO,
+            conhecidos: HashSet::new(),
+        }
+    }
+
+    /// Quando o passo pendente da árvore vence: a pausa na digitação ou o teto.
+    fn prazo_da_arvore(&self) -> Option<Duration> {
+        self.arvore_desde
+            .map(|desde| (self.arvore_ultima + ARVORE_PAUSA).min(desde + ARVORE_TETO))
+    }
 }
 
 /// Por quanto tempo um texto gravado pelo app ainda conta como "nosso" se voltar do disco.
@@ -499,6 +633,7 @@ struct Fundo {
     avisos: Sender<String>,
     ultimo_aviso: Option<String>,
     gravou: Sender<PathBuf>,
+    sementes: Sender<Semente>,
     acordar: Box<dyn Fn() + Send>,
 }
 
@@ -532,6 +667,9 @@ impl Fundo {
         let mut espera = Duration::from_secs(60);
         for nota in self.notas.values() {
             if let Some(prazo) = nota.agrupador.proximo_prazo() {
+                espera = espera.min(prazo.saturating_sub(agora));
+            }
+            if let Some(prazo) = nota.prazo_da_arvore() {
                 espera = espera.min(prazo.saturating_sub(agora));
             }
         }
@@ -575,6 +713,12 @@ impl Fundo {
             Pedido::GravarEm(n, t, o, q) => Pedido::GravarEm(self.resolver(n), t, o, q),
             Pedido::ApagarTexto(n, t, r) => Pedido::ApagarTexto(self.resolver(n), t, r),
             Pedido::Nomear(n, v, nome, r) => Pedido::Nomear(self.resolver(n), v, nome, r),
+            Pedido::Galhos(n, r) => Pedido::Galhos(self.resolver(n), r),
+            Pedido::IrParaGalho(n, no, r) => Pedido::IrParaGalho(self.resolver(n), no, r),
+            Pedido::AcharApagados(n, t, r) => Pedido::AcharApagados(self.resolver(n), t, r),
+            Pedido::HistoricoDoTrecho(n, t, f, r) => {
+                Pedido::HistoricoDoTrecho(self.resolver(n), t, f, r)
+            }
             outro => outro,
         };
         match pedido {
@@ -585,11 +729,15 @@ impl Fundo {
                 }
                 let quando = self.agora();
                 let ritmo = self.ritmo;
-                let n = self.notas.entry(nota.clone()).or_insert_with(|| Nota {
-                    agrupador: Agrupador::novo(ritmo),
-                    texto: String::new(),
-                });
+                let n = self
+                    .notas
+                    .entry(nota.clone())
+                    .or_insert_with(|| Nota::nova(Agrupador::novo(ritmo), String::new()));
                 n.texto = texto;
+                n.arvore_desde.get_or_insert(quando);
+                n.arvore_ultima = quando;
+                let desfez_ou_refez =
+                    n.arvore && n.conhecidos.contains(&impressao_do_texto(&n.texto));
                 let grava = n
                     .agrupador
                     .evento(Evento::Editou {
@@ -601,8 +749,12 @@ impl Fundo {
                 if grava {
                     self.gravar_texto_da_nota(&nota, Origem::Editor);
                 }
+                if desfez_ou_refez {
+                    self.registrar_arvore(&nota);
+                }
             }
             Pedido::Salvou(nota) => {
+                self.registrar_arvore(&nota);
                 self.evento_da_nota(&nota, |agora| Evento::Salvou { quando: agora });
             }
             Pedido::Carregou(nota, texto) => {
@@ -610,22 +762,28 @@ impl Fundo {
                     return;
                 }
                 // A digitação que sobrou é do usuário: vira versão antes de o texto de fora entrar.
+                self.registrar_arvore(&nota);
                 self.evento_da_nota(&nota, |_| Evento::TrocouDeNota);
                 let ritmo = self.ritmo;
-                let n = self.notas.entry(nota).or_insert_with(|| Nota {
-                    agrupador: Agrupador::novo(ritmo),
-                    texto: String::new(),
-                });
+                let n = self
+                    .notas
+                    .entry(nota.clone())
+                    .or_insert_with(|| Nota::nova(Agrupador::novo(ritmo), String::new()));
                 n.agrupador.iniciar(&texto);
-                n.texto = texto;
+                n.texto.clone_from(&texto);
+                // A árvore: o texto de fora continua nela se é o de algum passo; senão a antiga
+                // fica arquivada e esta começa nova. O editor já tem o Ctrl+Z dele: sem semente.
+                self.abrir_arvore(&nota, &texto, false);
             }
             Pedido::Saiu(nota) => {
+                self.registrar_arvore(&nota);
                 self.evento_da_nota(&nota, |_| Evento::TrocouDeNota);
                 if let Some(n) = self.notas.get_mut(&nota) {
                     n.agrupador.iniciar(&n.texto);
                 }
             }
             Pedido::Fechou(nota) => {
+                self.registrar_arvore(&nota);
                 self.evento_da_nota(&nota, |_| Evento::Fechou);
                 self.notas.remove(&nota);
             }
@@ -663,13 +821,20 @@ impl Fundo {
             Pedido::Limpar(resp) => {
                 let r = self.apagar_arquivos();
                 if r.is_ok() {
-                    // Pode gravar de novo, num arquivo novo.
+                    // Pode gravar de novo, num arquivo novo. As árvores de desfazer foram junto: a
+                    // próxima edição de cada nota abre uma nova.
                     self.indisponivel = None;
+                    for n in self.notas.values_mut() {
+                        n.arvore = false;
+                        n.arvore_desde = None;
+                    }
                 }
                 let _ = resp.send(r);
                 (self.acordar)();
             }
             Pedido::ApagarTexto(nota, trecho, resp) => {
+                // O que ainda esperava para entrar na árvore entra antes, para a limpeza pegar.
+                self.registrar_arvore(&nota);
                 let r = self.banco().and_then(|b| {
                     b.apagar_texto_do_historico(&id_da_nota(&nota), &trecho)
                         .map_err(|e| e.to_string())
@@ -678,6 +843,10 @@ impl Fundo {
                 (self.acordar)();
             }
             Pedido::ApagarTextoEmTodas(trecho, resp) => {
+                let todas: Vec<PathBuf> = self.notas.keys().cloned().collect();
+                for nota in todas {
+                    self.registrar_arvore(&nota);
+                }
                 let r = self
                     .banco()
                     .and_then(|b| b.apagar_texto_de_todas(&trecho).map_err(|e| e.to_string()));
@@ -741,7 +910,111 @@ impl Fundo {
                 });
                 let _ = resp.send(r);
             }
+            Pedido::Limites(limites) => {
+                if let Ok(banco) = self.banco() {
+                    banco.ajustar_limites_desfazer(limites);
+                }
+            }
+            Pedido::Galhos(nota, resp) => {
+                self.registrar_arvore(&nota);
+                let r = self.banco().and_then(|b| {
+                    b.desfazer_galhos(&id_da_nota(&nota))
+                        .map_err(|e| format!("Não foi possível ler os galhos do desfazer: {e}"))
+                });
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::IrParaGalho(nota, no, resp) => {
+                self.registrar_arvore(&nota);
+                let r = self.banco().and_then(|b| {
+                    b.desfazer_ir_para(&id_da_nota(&nota), no, SEMENTE_MAXIMA)
+                        .map_err(|e| format!("Não foi possível ir para este galho: {e}"))
+                });
+                if r.is_ok() {
+                    self.gravacao_pendente.get_or_insert_with(Instant::now);
+                }
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::AcharApagados(nota, atual, resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.achar_apagados(&id_da_nota(&nota), &atual)
+                        .map_err(|e| format!("Não foi possível procurar no histórico: {e}"))
+                });
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
+            Pedido::HistoricoDoTrecho(nota, atual, faixa, resp) => {
+                let r = self.banco().and_then(|b| {
+                    b.historico_do_trecho(&id_da_nota(&nota), &atual, faixa)
+                        .map_err(|e| format!("Não foi possível ler o histórico do trecho: {e}"))
+                });
+                let _ = resp.send(r);
+                (self.acordar)();
+            }
             Pedido::Fechar => {}
+        }
+    }
+
+    /// H3: abre a árvore de desfazer da nota com o texto que ela tem agora. Com `semente`, manda
+    /// ao editor os passos anteriores para semear o Ctrl+Z.
+    fn abrir_arvore(&mut self, nota: &Path, texto: &str, semente: bool) {
+        let id = id_da_nota(nota);
+        let aberta = self.banco().and_then(|b| {
+            b.desfazer_abrir(&id, texto, SystemTime::now(), SEMENTE_MAXIMA)
+                .map_err(|e| format!("Não foi possível abrir o desfazer da nota: {e}"))
+        });
+        match aberta {
+            Ok(abertura) => {
+                self.gravacao_pendente.get_or_insert_with(Instant::now);
+                if let Some(n) = self.notas.get_mut(nota) {
+                    n.arvore = true;
+                    n.arvore_desde = None;
+                    n.conhecidos = abertura.impressoes.iter().copied().collect();
+                }
+                if semente && !abertura.ancestrais.is_empty() {
+                    let _ = self.sementes.send(Semente {
+                        nota: nota.to_owned(),
+                        texto: texto.to_owned(),
+                        ancestrais: abertura.ancestrais,
+                    });
+                    (self.acordar)();
+                }
+            }
+            Err(erro) => self.avisar(erro),
+        }
+    }
+
+    /// H3: o texto que a nota tem agora vira um passo da árvore (se o texto é novo) ou só move o
+    /// ponteiro (se o usuário desfez ou refez).
+    fn registrar_arvore(&mut self, nota: &Path) {
+        let Some(n) = self.notas.get_mut(nota) else {
+            return;
+        };
+        if n.arvore_desde.take().is_none() {
+            return;
+        }
+        let texto = n.texto.clone();
+        if !n.arvore {
+            // Ainda sem árvore (o histórico foi limpo, ou não tinha aberto): abre com este texto.
+            self.abrir_arvore(nota, &texto, false);
+            return;
+        }
+        let id = id_da_nota(nota);
+        let r = self.banco().and_then(|b| {
+            b.desfazer_registrar(&id, &texto, SystemTime::now())
+                .map_err(|e| format!("Não foi possível guardar o desfazer da nota: {e}"))
+        });
+        match r {
+            Ok(registrado) => {
+                if matches!(registrado, Registrado::Novo(_))
+                    && let Some(n) = self.notas.get_mut(nota)
+                {
+                    n.conhecidos.insert(impressao_do_texto(&texto));
+                }
+                self.gravacao_pendente.get_or_insert_with(Instant::now);
+            }
+            Err(erro) => self.avisar(erro),
         }
     }
 
@@ -755,13 +1028,9 @@ impl Fundo {
         }
         let mut agrupador = Agrupador::novo(self.ritmo);
         agrupador.iniciar(&texto);
-        self.notas.insert(
-            nota.clone(),
-            Nota {
-                agrupador,
-                texto: texto.clone(),
-            },
-        );
+        self.notas
+            .insert(nota.clone(), Nota::nova(agrupador, texto.clone()));
+        self.abrir_arvore(&nota, &texto, true);
         let id = id_da_nota(&nota);
         let origem = match self
             .banco()
@@ -817,6 +1086,15 @@ impl Fundo {
         for nota in vencidas {
             self.evento_da_nota(&nota, |quando| Evento::Pausa { quando });
         }
+        let da_arvore: Vec<PathBuf> = self
+            .notas
+            .iter()
+            .filter(|(_, n)| n.prazo_da_arvore().is_some_and(|p| p <= agora))
+            .map(|(caminho, _)| caminho.clone())
+            .collect();
+        for nota in da_arvore {
+            self.registrar_arvore(&nota);
+        }
     }
 
     fn manutencao(&mut self) {
@@ -865,6 +1143,7 @@ impl Fundo {
         if self.habilitado {
             let caminhos: Vec<PathBuf> = self.notas.keys().cloned().collect();
             for nota in caminhos {
+                self.registrar_arvore(&nota);
                 self.evento_da_nota(&nota, |_| Evento::Fechou);
             }
         }
