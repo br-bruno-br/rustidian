@@ -5,7 +5,7 @@ Uma frente por vez: compilar Rust em paralelo trava o PC de 2 núcleos. Cada fat
 | ordem | fatia | quem | estado |
 |---|---|---|---|
 | 0 | Histórico H3/H4 (desktop) | s-h | juntado em 20/11 (353 testes do app, 224 da lib, 159 dos crates) |
-| 1 | **R7b-2** Markdown no Android | s-h | próxima |
+| 1 | **R7b-2** Markdown no Android | s-h | pronta na branch `r7b2-markdown` (20/11), esperando verificação, juntada e o teste do APK pelo dono |
 | 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | esperando |
 | 3 | **R6** Servidor no re-servidor + backup rustic → Drive | eu, com o dono | esperando o dono |
 
