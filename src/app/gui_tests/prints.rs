@@ -411,3 +411,55 @@ fn ux_fluxo() {
     click_segment(&mut s, "Lista");
     save(&mut s, &dir, "20-lista-ideias.png");
 }
+
+/// H4: "Achar o que apaguei" numa nota de receita que perdeu dois parágrafos. As versões velhas
+/// entram direto no arquivo do histórico, com datas de dias atrás, antes de o app abrir.
+/// Grava `achar-apagado.png` na pasta de `RUSTIDIAN_PRINTS_DIR` (ex.: `C:\dev\_wt\prints-hist`).
+#[test]
+#[ignore = "gera PNGs para o dono; precisa de RUSTIDIAN_PRINTS_DIR"]
+fn print_do_achar_apagado() {
+    use nota_historico::{Historico as Banco, NotaId, Origem};
+    use std::time::{Duration as Dur, SystemTime};
+    let dir = PathBuf::from(
+        std::env::var_os("RUSTIDIAN_PRINTS_DIR").expect("defina RUSTIDIAN_PRINTS_DIR"),
+    );
+    std::fs::create_dir_all(&dir).expect("pasta dos prints");
+    isolate_user_state();
+    let nome = "Receita de bolo";
+    let primeira = "# Receita de bolo\n\nMisture a farinha com os ovos e leve ao forno por quarenta minutos.\n\nA cobertura leva chocolate meio amargo derretido em banho-maria e uma colher de manteiga.\n\nNão abra o forno antes de trinta minutos, senão o bolo murcha.\n";
+    let segunda = "# Receita de bolo\n\nMisture a farinha com os ovos e leve ao forno por quarenta minutos.\n\nNão abra o forno antes de trinta minutos, senão o bolo murcha.\n\nSirva morno, com café.\n";
+    let atual = "# Receita de bolo\n\nMisture a farinha com os ovos e leve ao forno por quarenta minutos.\n\nSirva morno, com café.\n";
+    let folder = tempfile::tempdir().expect("cofre temporário");
+    std::fs::write(folder.path().join(format!("{nome}.md")), atual).expect("nota");
+    std::fs::create_dir_all(folder.path().join(".rustidian")).expect("pasta do histórico");
+    {
+        let mut banco =
+            Banco::abrir(&folder.path().join(".rustidian/historico.redb")).expect("histórico");
+        let id = NotaId::novo(format!("{nome}.md"));
+        let agora = SystemTime::now();
+        for (texto, atras) in [
+            (primeira, Dur::from_secs(3 * 86_400)),
+            (segunda, Dur::from_secs(26 * 3_600)),
+            (atual, Dur::from_secs(2 * 3_600)),
+        ] {
+            banco
+                .gravar(&id, texto, agora - atras, Origem::Editor)
+                .expect("versão");
+        }
+    }
+    let root = folder.path().to_path_buf();
+    let harness = Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .allow_missing_glyphs()
+        .with_accessibility_check(false)
+        .build_eframe(move |cc| NotesApp::new(cc, &root, Instant::now(), None));
+    let mut session = Session { folder, harness };
+    session.wait_for(|app| app.vault.is_some() && app.loading.is_none());
+    session.open_note(nome);
+    session.command("Source editing");
+    session.wait_for(|app| app.historico.is_some());
+    session.settle();
+    session.command("Achar o que apaguei");
+    session.wait_for(|app| app.escritor.carregou());
+    save(&mut session, &dir, "achar-apagado.png");
+}

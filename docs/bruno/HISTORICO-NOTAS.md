@@ -162,3 +162,20 @@ Tudo puro no crate (`escritor.rs`), sobre os textos das versões do H1 (leitura 
 ### Testes
 
 Crate: ida e volta da árvore, galhos depois de desfazer+digitar, reabrir o arquivo, mudança de fora (arquivar), limite descartando os antigos, árvore sobrevive a `podar`/`compactar`/`renomear_nota`, migração (banco só com as tabelas do formato atual abre, ganha as novas e as versões continuam lendo), apagar do histórico (versões, passos e arquivo bruto), proptest da árvore (cada passo reconstrói com o hash gravado), achar apagados e histórico do trecho com textos conhecidos. GUI (`gui_tests/historico_h3h4.rs`): Ctrl+Z depois de reabrir o app, galho depois de desfazer+digitar e o diálogo, achar o que apaguei com busca e reinserir, histórico do trecho, apagar do histórico fazendo o trecho sumir do "achar". Print: `print_do_achar_apagado`.
+
+### H3/H4: o que ficou pronto (20/11/2026)
+
+**Onde está cada coisa.** Crate `nota-historico`: `desfazer.rs` (árvore, galhos, limites, arquivar, apagar), `escritor.rs` (achar apagados e histórico do trecho), e em `historico.rs` o `reconstruir_arquivo`. App: `historico_fundo.rs` (a linha de fundo registra a árvore e atende os pedidos), `historico_ui.rs` (semeia o Ctrl+Z com o que a linha de fundo manda), `editor_ui.rs` (`seed_undoer`, seleção, troca de caracteres, itens do menu da nota), `escritor_ui.rs` (o diálogo único das três telas), `recovery.rs` e `settings_ui.rs` (passos e KB do desfazer por nota), `commands.rs` (bloco "Histórico H3/H4").
+
+**Como a pessoa usa.**
+- Fechar e abrir o app (ou a nota): o Ctrl+Z continua de onde parou, até 99 passos para trás. Só semeia se o desfazer da nota ainda está vazio: o que a pessoa já fez nesta sessão não é trocado.
+- Paleta (Ctrl+P) e menu de contexto da nota: "Galhos do desfazer", "Achar o que apaguei" e "Histórico deste trecho" (este precisa de uma seleção).
+- Ajustes, "File recovery": "Passos do desfazer por nota" (padrão 5000) e "Espaço do desfazer por nota" (padrão 2048 KB).
+
+**Decisões que mudaram em relação ao plano.**
+- "Ir para este galho" entra como uma **edição normal** (troca só o miolo que difere, para o cursor e o resto da nota ficarem). O Ctrl+Z volta para onde a pessoa estava, e a árvore anda o ponteiro. Os passos anteriores do galho já existem na árvore, mas o Ctrl+Z do egui só os conhece na próxima abertura da nota (a semente).
+- A árvore só registra depois da pausa na digitação (0,8 s; teto de 3 s) e ao salvar, trocar de nota, fechar e encerrar o app. Se o histórico é limpo ("Apagar todo o histórico"), as árvores vão junto e a próxima edição de cada nota abre outra.
+- Arquivo de fora: se o texto do arquivo não é o de nenhum passo, a árvore antiga é arquivada (máx. 2 por nota, só aparece como "Desfazer de antes de uma mudança de fora do aplicativo") e começa uma nova. Nada é aplicado sobre texto diferente.
+- **Apagar do histórico** vale para a árvore e para "Achar o que apaguei". Como o `redb` deixa bytes velhos nas páginas depois de reescrever, `reconstruir_arquivo` copia tudo para um arquivo novo e o troca pelo antigo (o teste confere os bytes brutos). Custa uma cópia do histórico inteiro, só ao apagar.
+
+**Limites conhecidos.** Os pontos de desfazer semeados não têm posição de cursor exata (usa o início da diferença). O diálogo mostra até 60 trechos apagados de uma vez (a busca estreita). O histórico continua sem cifra e fora do sync, como na H1.
