@@ -7,6 +7,7 @@ use crate::rota::{Navegacao, Rota};
 use crate::servicos::Servicos;
 
 pub mod dialogo;
+pub mod leitura;
 pub mod lista;
 pub mod nota;
 pub mod ponte;
@@ -72,10 +73,13 @@ pub fn Raiz(servicos: Servicos, inicial: Option<Rota>) -> Element {
     }
 }
 
-/// O único lugar que liga uma rota à sua tela. ENCAIXE R7b-2/R7b-3: um braço por tela nova.
+/// O único lugar que liga uma rota à sua tela. ENCAIXE R7b-3: um braço por tela nova.
 fn tela(rota: Rota) -> Element {
     match rota {
         Rota::Lista { pasta } => rsx! { lista::Lista { key: "lista-{pasta}", pasta } },
         Rota::Nota { caminho } => rsx! { nota::Nota { key: "nota-{caminho}", caminho } },
+        Rota::Leitura { caminho } => {
+            rsx! { leitura::Leitura { key: "leitura-{caminho}", caminho } }
+        }
     }
 }

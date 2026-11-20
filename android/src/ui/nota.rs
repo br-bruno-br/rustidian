@@ -1,9 +1,8 @@
 //! Tela Nota: o editor de uma nota. Título = nome do arquivo (tocar para renomear),
 //! salvamento automático e indicador "Salvo / Salvando…".
 //!
-//! ENCAIXE R7b-2: a visualização em Markdown entra aqui. O corpo da tela é a função
-//! `editor`; a fatia acrescenta um botão no topo e troca o corpo por uma `Leitura` (rota nova
-//! em `rota.rs`) sem mexer no salvamento, que é do `Edicao`.
+//! O botão "Ler" no topo troca esta tela pela `Leitura` da mesma nota (a nota formatada, em
+//! `ui/leitura.rs`); antes de trocar o texto digitado é gravado.
 
 use dioxus::prelude::*;
 
@@ -136,6 +135,29 @@ pub fn Nota(caminho: String) -> Element {
                     if !pasta.is_empty() {
                         span { class: "sub", "{pasta}" }
                     }
+                }
+                button {
+                    class: "alterna",
+                    aria_label: "Ler a nota formatada",
+                    onclick: {
+                        let cofre = servicos.cofre.clone();
+                        let caminho = caminho.clone();
+                        move |_| {
+                            // A Leitura relê o arquivo: o que foi digitado tem de estar no disco.
+                            edicao.salvar(&cofre);
+                            if edicao.pendente() {
+                                aviso.set(Some(
+                                    "Não consegui salvar o texto, então não troquei de tela."
+                                        .into(),
+                                ));
+                                return;
+                            }
+                            nav.substituir(Rota::Leitura {
+                                caminho: caminho.clone(),
+                            });
+                        }
+                    },
+                    "Ler"
                 }
                 button {
                     class: "icone apagar",

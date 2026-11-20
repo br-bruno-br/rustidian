@@ -19,6 +19,49 @@ setInterval(() => {
 }, 600);
 "#;
 
+/// Só enquanto a tela de Leitura está aberta: toques em link (`data-a`) e em caixa de tarefa
+/// (`data-t`) do HTML gerado por `logica::markdown`. O toque NUNCA segue o comportamento
+/// padrão do navegador (`preventDefault` na captura) e qualquer `<a href>` que escapasse
+/// também é barrado: a WebView não navega para fora. Ao sair da tela, `DESLIGAR_LEITURA`.
+pub const SCRIPT_LEITURA: &str = r#"
+if (window.__leituraOff) window.__leituraOff();
+const aoTocar = (e) => {
+  const alvo = e.target && e.target.closest ? e.target : null;
+  if (!alvo) return;
+  const caixa = alvo.closest('[data-t]');
+  const link = alvo.closest('[data-a]');
+  const ancora = alvo.closest('a');
+  if (caixa || link || ancora) e.preventDefault();
+  if (caixa) dioxus.send('t' + caixa.dataset.t);
+  else if (link) dioxus.send('a' + link.dataset.a);
+};
+document.addEventListener('click', aoTocar, true);
+window.__leituraOff = () => document.removeEventListener('click', aoTocar, true);
+"#;
+
+pub const DESLIGAR_LEITURA: &str = "if (window.__leituraOff) window.__leituraOff();";
+
+/// O que um toque na Leitura pediu (o número indexa `Pagina::alvos` ou `Pagina::tarefas`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toque {
+    Alvo(usize),
+    Tarefa(usize),
+}
+
+/// Lê a mensagem do `SCRIPT_LEITURA` (`a3`, `t0`). Qualquer outra coisa é ignorada.
+pub fn interpretar_toque(mensagem: &str) -> Option<Toque> {
+    let numero = |resto: &str| {
+        (!resto.is_empty() && resto.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| resto.parse().ok())
+            .flatten()
+    };
+    match mensagem.split_at_checked(1)? {
+        ("a", n) => numero(n).map(Toque::Alvo),
+        ("t", n) => numero(n).map(Toque::Tarefa),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Evento {
     /// O histórico voltou uma entrada.
@@ -65,5 +108,26 @@ mod testes {
         assert_eq!(interpretar("oculto"), Some(Evento::Oculto));
         assert_eq!(interpretar("tique"), Some(Evento::Tique));
         assert_eq!(interpretar("outra"), None);
+    }
+
+    #[test]
+    fn toques_da_leitura() {
+        assert_eq!(interpretar_toque("a0"), Some(Toque::Alvo(0)));
+        assert_eq!(interpretar_toque("a12"), Some(Toque::Alvo(12)));
+        assert_eq!(interpretar_toque("t3"), Some(Toque::Tarefa(3)));
+        for ruim in [
+            "",
+            "a",
+            "t",
+            "x1",
+            "a-1",
+            "a1x",
+            "a 1",
+            "voltar",
+            "ç1",
+            "a99999999999999999999",
+        ] {
+            assert_eq!(interpretar_toque(ruim), None, "{ruim:?}");
+        }
     }
 }
