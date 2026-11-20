@@ -123,3 +123,42 @@ Ramo `h2-maquina-tempo`, partindo da H1 (0ef6ed5). Tudo em pt-BR e sem gravar te
 - `.canvas` continua fora do histórico.
 - O histórico segue local, sem sync e sem cifra (fica para depois da H2, como já dizia o plano).
 - Detalhes de acabamento: "1 dias" no singular e "5.0 min" com ponto (o campo numérico do egui usa sufixo e ponto fixos); os botões alternáveis "Só com nome" e "Em todas as notas do cofre" desligados parecem texto comum.
+
+## H3/H4: plano (20/11/2026)
+
+Ramo `hist-h3h4`, partindo da H2 (main). Duas fatias, um commit de plano e um por fatia (ou mais, pequenos).
+
+### H3 Desfazer que fica
+
+**Ideia.** O Ctrl+Z do egui (`TextEditState::undoer`) continua sendo quem desfaz na tela. A H3 mantém, ao lado, uma **árvore de desfazer** por nota no cofre de versões. Ela é alimentada pelo mesmo `editou` que já alimenta o histórico: a linha de fundo junta as edições e, depois de ~0,8 s sem digitar (ou 3 s de digitação contínua, ao salvar, ao trocar de nota e ao fechar), registra um **passo**. Se o texto novo é igual ao de um passo que já existe (o usuário apertou Ctrl+Z ou Ctrl+Y), a árvore só anda o ponteiro `atual`; se é um texto novo, nasce um filho do `atual`. Desfazer e digitar outra coisa vira um galho novo e o caminho antigo continua na árvore.
+
+**Ao reabrir** (nota ou app), a linha de fundo confere o hash blake3 do texto do arquivo com o do passo `atual` (ou, se não bate, com qualquer passo da árvore) e devolve ao app os textos dos até 100 passos anteriores no caminho; o app semeia o `Undoer` do egui com eles (`add_undo`). Assim o Ctrl+Z comum, sem código novo de teclado, desfaz edições da sessão anterior. Se nenhum passo tem o texto do arquivo (o arquivo mudou fora do app ou pelo sync), a árvore **não se aplica**: ela é arquivada como "árvore antiga" (só histórico, até 2 por nota) e começa uma nova. Nunca se aplica passo sobre texto diferente.
+
+**Tabelas novas no `redb`** (criadas na abertura, sem tocar nas existentes; `FORMATO` continua 1, então o cofre real abre igual e as versões não são mexidas):
+
+| Tabela | Chave | Valor |
+|---|---|---|
+| `arvores` | (número da nota, geração) | cabeçalho: `atual`, próximo id, nº de passos, bytes, criada em, arquivada em (0 = ativa) |
+| `nos` | (número da nota, geração, passo) | registro: pai, quando, tamanho, blake3 de 128 bits, trecho curto, "cheia" ou diferença, zstd |
+
+O número da nota é o mesmo das versões (`notas`), então renomear a nota leva a árvore junto. Cada passo é uma **diferença zstd tendo o texto do pai como base** (um passo de ~50 caracteres custa ~100 bytes com o cabeçalho); a cada 32 passos de profundidade há uma cópia cheia, para reconstruir sem andar mais de 31 diferenças. A árvore é uma floresta: quando o limite descarta os passos mais antigos, os filhos deles viram raízes (regravados como cópia cheia).
+
+**Limite por nota** (`LimitesDesfazer`): padrão 5.000 passos ou 2 MiB, o que vier primeiro; ao passar, descarta os mais antigos até 90% do limite. Nunca descarta o passo `atual`. O app passa o limite ao crate (`ajustar_limites_desfazer`).
+
+**Galhos.** Um galho é uma folha da árvore (mais o passo `atual`, se não for folha). O diálogo "Galhos do desfazer" lista cada um com a hora, o trecho que aquele passo mudou ("+ texto novo" ou "apagou: ...") e quantos passos tem da raiz; marca o `atual` e, abaixo dele, os que dá para "refazer". Clicar em "Ir para este galho" põe o texto daquele passo na nota (como uma edição normal, que o Ctrl+Z desfaz) e refaz a semente do Ctrl+Z com o caminho dele.
+
+**Cifra.** Igual à H1: o histórico local continua sem cifra e fora do sync (`.rustidian/` é ignorado). A árvore mora **só** nesse arquivo; nada dela vai para outro lugar.
+
+**"Apagar do histórico" vale para a árvore.** `apagar_texto_do_historico` e `apagar_texto_de_todas` também reescrevem todos os passos (ativos e arquivados) da nota: o texto de cada passo perde o trecho, o hash, o resumo e a diferença são refeitos, e o arquivo é compactado. Teste: o trecho some dos bytes brutos do arquivo e dos textos dos passos.
+
+### H4 Escritor (achar o que apaguei e histórico do trecho)
+
+Tudo puro no crate (`escritor.rs`), sobre os textos das versões do H1 (leitura em lote, uma passada da mais nova para a mais antiga: `Historico::textos_da_nota`). Nada é guardado a mais: se o trecho foi tirado do histórico, ele não aparece (o teste cobre).
+
+- **Achar o que apaguei.** Cada versão vira unidades (linha e frase; marcadores de lista, título e caixa de seleção saem da comparação). Uma unidade que existiu em alguma versão e **não está** no texto atual (comparação sem diferença de espaços) é um trecho apagado. Vale a mais longa (um trecho contido em outro apagado maior sai da lista). Cada item tem o texto, de quando a quando existiu e quando sumiu; a lista vem do mais recente para o mais antigo. Busca por palavra: sem diferença de maiúsculas e de acentos, todas as palavras digitadas precisam aparecer. Botões "Reinserir no cursor" (pelo mesmo caminho de edição do menu da nota, então o Ctrl+Z desfaz) e "Copiar".
+- **Histórico deste trecho.** Com uma seleção, o crate leva a faixa selecionada de volta pelas versões usando a diferença por palavra entre cada par de versões vizinhas (a faixa de depois vira a faixa de antes; trocas e inserções dentro da faixa a ampliam até o trecho trocado). A lista traz só as versões em que o texto daquela faixa mudou (ou nasceu), da mais nova para a mais antiga, com "Copiar" e "Trocar a seleção por esta" (só vale se o texto da seleção ainda é o mesmo).
+- **Comandos** (bloco "Histórico H3/H4" em `src/commands.rs`): "Achar o que apaguei", "Histórico deste trecho", "Galhos do desfazer". Aparecem na paleta; os dois primeiros e o terceiro também no menu de contexto da aba da nota, se houver menu (senão só paleta).
+
+### Testes
+
+Crate: ida e volta da árvore, galhos depois de desfazer+digitar, reabrir o arquivo, mudança de fora (arquivar), limite descartando os antigos, árvore sobrevive a `podar`/`compactar`/`renomear_nota`, migração (banco só com as tabelas do formato atual abre, ganha as novas e as versões continuam lendo), apagar do histórico (versões, passos e arquivo bruto), proptest da árvore (cada passo reconstrói com o hash gravado), achar apagados e histórico do trecho com textos conhecidos. GUI (`gui_tests/historico_h3h4.rs`): Ctrl+Z depois de reabrir o app, galho depois de desfazer+digitar e o diálogo, achar o que apaguei com busca e reinserir, histórico do trecho, apagar do histórico fazendo o trecho sumir do "achar". Print: `print_do_achar_apagado`.
