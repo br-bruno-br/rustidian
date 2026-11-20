@@ -30,6 +30,20 @@ pub fn Leitura(caminho: String) -> Element {
         let caminho = caminho.clone();
         move || cofre.ler_nota(&caminho).map_err(|e| explicar(&e))
     });
+    // A sincronização mudou o arquivo com a Leitura aberta: relê (nada é digitado aqui).
+    let mut recarga_vista = use_signal(|| nav.recarga_guardada());
+    use_effect({
+        let cofre = servicos.cofre.clone();
+        let caminho = caminho.clone();
+        move || {
+            let r = nav.recarga();
+            if r == *recarga_vista.peek() {
+                return;
+            }
+            recarga_vista.set(r);
+            aberta.set(cofre.ler_nota(&caminho).map_err(|e| explicar(&e)));
+        }
+    });
     // O índice de nomes do cofre (para `[[nota]]` e imagens), montado uma vez ao abrir.
     let mundo = use_hook({
         let cofre = servicos.cofre.clone();

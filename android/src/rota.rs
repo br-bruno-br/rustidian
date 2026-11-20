@@ -5,8 +5,7 @@
 //! que tira a tela do topo. Assim o Voltar do Android volta da nota para a lista, e só fecha o
 //! app na tela inicial.
 //!
-//! ENCAIXE da próxima fatia (acrescenta uma variante aqui e um braço em `ui::tela`):
-//! - R7b-3: `Sincronizacao`, a tela de configurar e acompanhar o sync.
+//! Cada tela nova é uma variante aqui e um braço em `ui::tela`.
 
 use dioxus::prelude::*;
 
@@ -21,6 +20,8 @@ pub enum Rota {
     /// A mesma nota lida em Markdown formatado (R7b-2). Editar/Ler troca uma pela outra sem
     /// empilhar histórico; abrir um link de nota empilha.
     Leitura { caminho: String },
+    /// Configurar e acompanhar a sincronização (R7b-3).
+    Sincronizar,
 }
 
 impl Rota {
@@ -76,6 +77,9 @@ pub struct Navegacao {
     versao: Signal<u32>,
     /// Texto da busca (fica guardado ao entrar numa nota e voltar).
     busca: Signal<String>,
+    /// Sobe quando a sincronização trouxe uma versão nova do que está aberto: o editor e a
+    /// leitura se releem (R7b-3).
+    recarga: Signal<u32>,
 }
 
 impl Navegacao {
@@ -84,6 +88,7 @@ impl Navegacao {
             pilha: Signal::new(Pilha::nova(inicial)),
             versao: Signal::new(0),
             busca: Signal::new(String::new()),
+            recarga: Signal::new(0),
         }
     }
 
@@ -122,6 +127,22 @@ impl Navegacao {
     /// Número da versão do disco; ler isto dentro de um componente o assina.
     pub fn versao(&self) -> u32 {
         *self.versao.read()
+    }
+
+    /// Pede que o editor e a leitura se releiam (a sincronização mudou o arquivo aberto).
+    pub fn recarregar(mut self) {
+        let r = *self.recarga.peek();
+        self.recarga.set(r.wrapping_add(1));
+    }
+
+    /// Número da recarga; ler isto dentro de um componente o assina.
+    pub fn recarga(&self) -> u32 {
+        *self.recarga.read()
+    }
+
+    /// O número da recarga sem assinar o componente.
+    pub fn recarga_guardada(&self) -> u32 {
+        *self.recarga.peek()
     }
 
     pub fn busca(&self) -> String {

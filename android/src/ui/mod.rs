@@ -5,12 +5,14 @@ use dioxus::prelude::*;
 use crate::edicao::Edicao;
 use crate::rota::{Navegacao, Rota};
 use crate::servicos::Servicos;
+use crate::vista::VistaSync;
 
 pub mod dialogo;
 pub mod leitura;
 pub mod lista;
 pub mod nota;
 pub mod ponte;
+pub mod sincronizar;
 
 /// O CSS do app inteiro (claro e escuro pelo tema do sistema).
 pub const CSS: &str = include_str!("../estilo.css");
@@ -38,14 +40,17 @@ pub fn App() -> Element {
 #[component]
 pub fn Raiz(servicos: Servicos, inicial: Option<Rota>) -> Element {
     let cofre = servicos.cofre.clone();
+    let sync = servicos.sync.clone();
     use_context_provider(|| servicos.clone());
     let nav = use_context_provider(|| Navegacao::nova(inicial.clone().unwrap_or_else(Rota::raiz)));
     let edicao = use_context_provider(Edicao::nova);
+    let vista = use_context_provider(VistaSync::nova);
 
-    // Escuta a WebView: Voltar do Android, app indo para segundo plano e o tique do
-    // salvamento automático.
+    // Escuta a WebView: Voltar do Android, app indo para segundo plano ou voltando à tela e o
+    // tique (salvamento automático e olhar o que a sincronização fez).
     use_future(move || {
         let cofre = cofre.clone();
+        let sync = sync.clone();
         async move {
             let mut ponte = document::eval(ponte::SCRIPT);
             while let Ok(mensagem) = ponte.recv::<String>().await {
@@ -55,8 +60,18 @@ pub fn Raiz(servicos: Servicos, inicial: Option<Rota>) -> Element {
                         edicao.salvar(&cofre);
                         nav.voltou_pelo_sistema();
                     }
-                    Some(ponte::Evento::Oculto) => edicao.salvar(&cofre),
-                    Some(ponte::Evento::Tique) => edicao.salvar_se_vencido(&cofre),
+                    Some(ponte::Evento::Oculto) => {
+                        edicao.salvar(&cofre);
+                        sync.observar_gravacoes();
+                    }
+                    Some(ponte::Evento::Visivel) => sync.voltou(),
+                    Some(ponte::Evento::Tique) => {
+                        edicao.salvar_se_vencido(&cofre);
+                        sync.observar_gravacoes();
+                        if vista.atualizar(&sync).cofre {
+                            depois_do_ciclo(nav, edicao, &cofre);
+                        }
+                    }
                     None => {}
                 }
             }
@@ -73,7 +88,19 @@ pub fn Raiz(servicos: Servicos, inicial: Option<Rota>) -> Element {
     }
 }
 
-/// O único lugar que liga uma rota à sua tela. ENCAIXE R7b-3: um braço por tela nova.
+/// A sincronização mudou arquivos do cofre: a lista relê e, se a nota aberta mudou no disco,
+/// o editor ou a leitura a releem. Um editor com texto digitado e ainda não gravado nunca é
+/// relido: o conflito é tratado quando o texto for gravado (`Cofre::salvar_nota_conferindo`).
+fn depois_do_ciclo(nav: Navegacao, edicao: Edicao, cofre: &crate::logica::cofre::Cofre) {
+    nav.disco_mudou();
+    match nav.rota() {
+        Rota::Nota { .. } if edicao.desatualizada(cofre) => nav.recarregar(),
+        Rota::Leitura { .. } => nav.recarregar(),
+        _ => {}
+    }
+}
+
+/// O único lugar que liga uma rota à sua tela: um braço por tela.
 fn tela(rota: Rota) -> Element {
     match rota {
         Rota::Lista { pasta } => rsx! { lista::Lista { key: "lista-{pasta}", pasta } },
@@ -81,5 +108,6 @@ fn tela(rota: Rota) -> Element {
         Rota::Leitura { caminho } => {
             rsx! { leitura::Leitura { key: "leitura-{caminho}", caminho } }
         }
+        Rota::Sincronizar => rsx! { sincronizar::Sincronizar {} },
     }
 }

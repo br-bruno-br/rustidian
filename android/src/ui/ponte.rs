@@ -1,7 +1,8 @@
 //! A ponte com a WebView (JavaScript): o que o Rust não enxerga sozinho.
 //!
 //! - `popstate`: o botão Voltar do Android (ou `history.back()`) andou no histórico;
-//! - visibilidade: o app foi para segundo plano (hora de gravar a nota);
+//! - visibilidade: o app foi para segundo plano (hora de gravar a nota) ou voltou à tela (hora
+//!   de sincronizar);
 //! - tique: de 0,6 em 0,6 s, enquanto o app está na tela, para o salvamento automático
 //!   conferir se o dono parou de digitar (o Rust não tem temporizador próprio aqui).
 
@@ -11,7 +12,7 @@ use dioxus::prelude::*;
 pub const SCRIPT: &str = r#"
 window.addEventListener('popstate', () => dioxus.send('voltar'));
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) dioxus.send('oculto');
+  dioxus.send(document.hidden ? 'oculto' : 'visivel');
 });
 window.addEventListener('pagehide', () => dioxus.send('oculto'));
 setInterval(() => {
@@ -68,6 +69,8 @@ pub enum Evento {
     Voltou,
     /// O app saiu da tela (segundo plano, tela bloqueada, outro app).
     Oculto,
+    /// O app voltou à tela.
+    Visivel,
     /// Passou um intervalo; confira o salvamento automático.
     Tique,
 }
@@ -76,6 +79,7 @@ pub fn interpretar(mensagem: &str) -> Option<Evento> {
     match mensagem {
         "voltar" => Some(Evento::Voltou),
         "oculto" => Some(Evento::Oculto),
+        "visivel" => Some(Evento::Visivel),
         "tique" => Some(Evento::Tique),
         _ => None,
     }
@@ -106,6 +110,7 @@ mod testes {
     fn mensagens_conhecidas() {
         assert_eq!(interpretar("voltar"), Some(Evento::Voltou));
         assert_eq!(interpretar("oculto"), Some(Evento::Oculto));
+        assert_eq!(interpretar("visivel"), Some(Evento::Visivel));
         assert_eq!(interpretar("tique"), Some(Evento::Tique));
         assert_eq!(interpretar("outra"), None);
     }

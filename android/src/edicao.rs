@@ -60,6 +60,21 @@ impl Edicao {
         self.rascunho.write().fechar();
     }
 
+    /// A gravação desviou para uma cópia de conflito porque a nota mudou por fora? Caminho dela.
+    pub fn desvio(&self) -> Option<String> {
+        self.rascunho.read().desvio().map(str::to_string)
+    }
+
+    /// Igual a `desvio`, sem assinar o componente (para efeitos e tiques).
+    pub fn desviou(&self) -> bool {
+        self.rascunho.peek().desvio().is_some()
+    }
+
+    /// A nota aberta (sem texto pendente) já é outra no disco: a tela deve reler.
+    pub fn desatualizada(&self, cofre: &Cofre) -> bool {
+        self.rascunho.peek().desatualizada(cofre)
+    }
+
     /// Há texto que ainda não foi para o disco?
     pub fn pendente(&self) -> bool {
         self.rascunho.peek().sujo()
