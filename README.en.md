@@ -56,7 +56,7 @@ This repository is a fork of [Rustidian by Masih Moafi](https://github.com/Masih
 - Not in daily use yet: the dedicated server and the backup are in the queue below.
 
 **Android (early stage)**
-- A Dioxus app with a note list, search, an editor with autosave, and a trash. It still shows raw text and does not sync yet.
+- A Dioxus app with a note list, search, an editor with autosave, and a trash. A **Read** view with formatted Markdown (tables, tap-to-tick tasks, links between notes, vault images; a note's HTML never runs). It does not sync yet.
 
 ## Your data is safe
 
@@ -81,8 +81,8 @@ The queue moves **one track at a time**: parallel Rust builds freeze the owner's
 
 | Now | Next | Later |
 | --- | --- | --- |
-| **Formatted Markdown on Android** (read notes like on desktop, with tables and tasks) | | **Windows release** with an installer (coming soon) |
-| | **Encrypted sync on Android** (address, token and passphrase, status and conflicts) | **Portable Linux** package signed by the owner |
+| **Encrypted sync on Android** (address, token and passphrase, status and conflicts) | | **Windows release** with an installer (coming soon) |
+| | **On-device test** of the formatted reading view (new APK) | **Portable Linux** package signed by the owner |
 | | **Our own sync server** (a home server, reachable only over Tailscale) **and an encrypted Google Drive backup** | Finish replacing the Python scripts with Rust (`cargo xtask` and `egui_kittest` tests) |
 
 Status of each step: [docs/bruno/FILA-ANDROID-SYNC.md](docs/bruno/FILA-ANDROID-SYNC.md). Full plan, with slices and what depends on the owner: [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Both are written in Portuguese.

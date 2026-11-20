@@ -56,7 +56,7 @@ Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/Ma
 - Ainda não está em uso diário: o servidor próprio e o backup ficam para a fila abaixo.
 
 **Android (fase inicial)**
-- App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Ainda mostra o texto cru e ainda não sincroniza.
+- App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Tela **Ler** com o Markdown formatado (tabelas, tarefas que marcam com um toque, links entre notas, imagens do cofre; HTML da nota nunca roda). Ainda não sincroniza.
 
 ## Seus dados estão seguros
 
@@ -81,8 +81,8 @@ A fila anda **uma frente por vez**: compilar em paralelo trava o PC do dono (2 n
 
 | Agora | Próximo | Depois |
 | --- | --- | --- |
-| **Markdown formatado no Android** (ler a nota como no PC, com tabelas e tarefas) | | **Release para Windows** com instalador (em breve) |
-| | **Sync cifrado no Android** (endereço, token e frase, estado e conflitos) | **Linux portátil** com pacote assinado pelo dono |
+| **Sync cifrado no Android** (endereço, token e frase, estado e conflitos) | | **Release para Windows** com instalador (em breve) |
+| | **Teste no celular** da leitura formatada (APK novo) | **Linux portátil** com pacote assinado pelo dono |
 | | **Servidor de sync próprio** (no servidor de casa, só pela Tailscale) **e backup cifrado no Google Drive** | Terminar de trocar os scripts Python por Rust (`cargo xtask` e testes `egui_kittest`) |
 
 Estado de cada passo: [docs/bruno/FILA-ANDROID-SYNC.md](docs/bruno/FILA-ANDROID-SYNC.md). Plano completo, com as fatias e o que depende do dono: [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Desenho do histórico: [docs/bruno/HISTORICO-NOTAS.md](docs/bruno/HISTORICO-NOTAS.md).
