@@ -288,7 +288,8 @@ impl Manager {
         ScrollArea::vertical()
             .id_salt("escritor-galhos")
             .max_height(altura)
-            .auto_shrink([false, false])
+            .min_scrolled_height(140.0_f32.min(altura))
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 for galho in &galhos.galhos {
                     ui.horizontal(|ui| {
@@ -424,7 +425,8 @@ impl Manager {
         ScrollArea::vertical()
             .id_salt("escritor-apagados")
             .max_height(altura)
-            .auto_shrink([false, false])
+            .min_scrolled_height(140.0_f32.min(altura))
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (linha, &i) in indices.iter().take(LINHAS_MAXIMAS).enumerate() {
                     let a = &self.apagados[i];
@@ -519,7 +521,8 @@ impl Manager {
         ScrollArea::vertical()
             .id_salt("escritor-trecho")
             .max_height(altura)
-            .auto_shrink([false, false])
+            .min_scrolled_height(140.0_f32.min(altura))
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 for (linha, m) in self.trecho.iter().enumerate() {
                     let quando_txt = match m.quando {
