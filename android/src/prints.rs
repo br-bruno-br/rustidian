@@ -268,7 +268,7 @@ fn nota_que_sumiu_mostra_o_erro_sem_campo() {
 fn gravar_html_das_telas() {
     let pasta = std::env::var_os("RUSTIDIAN_PRINTS")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\dev\_wt\prints-r7b1\html"));
+        .unwrap_or_else(|| PathBuf::from(r"C:\dev\_wt\prints-r7b2\html"));
     fs::create_dir_all(&pasta).unwrap();
     let t = tempfile::tempdir().unwrap();
     let servicos = cofre_de_exemplo(&t.path().join("Cofre"));
