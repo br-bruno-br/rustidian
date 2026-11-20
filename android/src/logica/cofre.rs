@@ -8,14 +8,16 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use nota_sync::caminhos::{dobrar, eh_ignorado};
-use nota_sync::cofre as disco;
+use nota_sync::caminhos::{dobrar, eh_ignorado, nome_conflito};
+use nota_sync::cofre::{self as disco, hash_de};
+use nota_sync::motor::Hash;
 
 use super::nomes::{
     PASTA_NOVA, TITULO_NOVO, arquivo_da_nota, eh_nota, juntar, limpar_nome, nome_unico, pasta_de,
     titulo_da_nota, ultimo_componente,
 };
 use super::ordem::comparar;
+use super::portao::PortaoComum;
 
 /// Nota maior que isto não abre no editor (a WebView engasga e a gravação fica pesada).
 pub const LIMITE_NOTA: u64 = 2 * 1024 * 1024;
@@ -39,6 +41,18 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cofre {
     raiz: PathBuf,
+    /// Toda gravação do app toma este portão; o ciclo de sincronização também (ver `portao`).
+    portao: PortaoComum,
+}
+
+/// O que aconteceu ao gravar o texto do editor (`salvar_nota_conferindo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Gravou {
+    /// Gravou na própria nota; este é o hash do que ficou no disco.
+    Normal(Hash),
+    /// A nota mudou no disco depois de aberta (sincronização, outro app): o arquivo novo
+    /// ficou como está e o texto do dono foi para esta cópia de conflito.
+    Desviou { copia: String, hash: Hash },
 }
 
 fn erro(tipo: io::ErrorKind, msg: &str) -> io::Error {
@@ -66,7 +80,14 @@ impl Cofre {
     /// Abre (e cria, se faltar) a pasta do cofre.
     pub fn abrir(raiz: PathBuf) -> io::Result<Self> {
         fs::create_dir_all(&raiz)?;
-        Ok(Self { raiz })
+        Ok(Self {
+            raiz,
+            portao: PortaoComum::default(),
+        })
+    }
+
+    pub fn portao(&self) -> &PortaoComum {
+        &self.portao
     }
 
     pub fn raiz(&self) -> &Path {
@@ -142,9 +163,80 @@ impl Cofre {
         })
     }
 
-    /// Grava a nota por inteiro, de forma atômica.
+    /// Grava a nota por inteiro, de forma atômica, com o portão preso. (O app grava pelo
+    /// `salvar_nota_conferindo`, `salvar_se_igual` e `criar_nota`; esta é a forma simples que os
+    /// testes usam para montar um cofre.)
+    #[cfg(test)]
     pub fn salvar_nota(&self, rel: &str, texto: &str) -> io::Result<()> {
-        disco::escrever_atomico(&self.raiz, rel, texto.as_bytes())
+        let _preso = self.portao.0.prender();
+        self.gravar(rel, texto)
+    }
+
+    /// A gravação em si; quem chama já está com o portão.
+    fn gravar(&self, rel: &str, texto: &str) -> io::Result<()> {
+        disco::escrever_atomico(&self.raiz, rel, texto.as_bytes())?;
+        self.portao.0.contou_gravacao();
+        Ok(())
+    }
+
+    /// O hash do arquivo no disco agora (`None` se não existe).
+    pub fn hash_da_nota(&self, rel: &str) -> io::Result<Option<Hash>> {
+        Ok(disco::ler(&self.raiz, rel)?.map(|b| hash_de(&b)))
+    }
+
+    /// Grava o texto que o dono digitou **só se a nota ainda é a que ele abriu** (`base` é o
+    /// hash do que o app leu ou gravou por último). Se o arquivo mudou no disco (o sync trouxe
+    /// outra versão, outro app mexeu), não pisa nele: o texto do dono vai para uma cópia
+    /// `nome (conflito <aparelho> <data>).md` e a versão nova fica onde estava. Conferir e
+    /// gravar acontecem com o portão preso, então o ciclo não troca o arquivo no meio.
+    /// Nota que sumiu do disco (apagada em outro aparelho) é recriada com o texto do dono.
+    pub fn salvar_nota_conferindo(
+        &self,
+        rel: &str,
+        texto: &str,
+        base: Option<Hash>,
+    ) -> io::Result<Gravou> {
+        let carimbo = chrono::Local::now().format("%Y-%m-%d %H%M").to_string();
+        self.salvar_conferindo_com(rel, texto, base, &carimbo)
+    }
+
+    /// Igual a `salvar_nota_conferindo`, com o carimbo escolhido (para os testes).
+    pub fn salvar_conferindo_com(
+        &self,
+        rel: &str,
+        texto: &str,
+        base: Option<Hash>,
+        carimbo: &str,
+    ) -> io::Result<Gravou> {
+        let _preso = self.portao.0.prender();
+        let novo = hash_de(texto.as_bytes());
+        let atual = self.hash_da_nota(rel)?;
+        let pode = match (atual, base) {
+            (None, _) => true,
+            (Some(a), Some(b)) => a == b || a == novo,
+            (Some(a), None) => a == novo,
+        };
+        if pode {
+            if atual != Some(novo) {
+                self.gravar(rel, texto)?;
+            }
+            return Ok(Gravou::Normal(novo));
+        }
+        let nome = nome_conflito(rel, &self.portao.0.aparelho(), carimbo);
+        let copia = disco::gravar_unico(&self.raiz, &nome, texto.as_bytes())?;
+        self.portao.0.contou_gravacao();
+        Ok(Gravou::Desviou { copia, hash: novo })
+    }
+
+    /// Troca o conteúdo da nota por `novo` **só se** ela ainda tem exatamente `esperado`
+    /// (conferir e gravar com o portão preso). `Ok(false)` = mudou por fora, nada gravado.
+    pub fn salvar_se_igual(&self, rel: &str, esperado: &str, novo: &str) -> io::Result<bool> {
+        let _preso = self.portao.0.prender();
+        if self.hash_da_nota(rel)? != Some(hash_de(esperado.as_bytes())) {
+            return Ok(false);
+        }
+        self.gravar(rel, novo)?;
+        Ok(true)
     }
 
     /// Nomes (de arquivo ou pasta) que já existem em `pasta`, na forma de comparação.
@@ -160,30 +252,35 @@ impl Cofre {
 
     /// Cria uma nota vazia em `pasta` chamada `Sem título`, `Sem título 2`... Devolve o caminho.
     pub fn criar_nota(&self, pasta: &str) -> io::Result<String> {
+        let _preso = self.portao.0.prender();
         let usados = self.chaves_em(pasta)?;
         let titulo = nome_unico(
             |n| usados.contains(&chave(&arquivo_da_nota(n))),
             TITULO_NOVO,
         );
         let rel = juntar(pasta, &arquivo_da_nota(&titulo));
-        self.salvar_nota(&rel, "")?;
+        self.gravar(&rel, "")?;
         Ok(rel)
     }
 
     /// Cria uma pasta em `pasta`. Se o nome já existe, vira `nome 2`. Devolve o caminho.
     pub fn criar_pasta(&self, pasta: &str, nome: &str) -> io::Result<String> {
+        let _preso = self.portao.0.prender();
         let base = limpar_nome(nome).unwrap_or_else(|| PASTA_NOVA.to_string());
         let usados = self.chaves_em(pasta)?;
         let nome = nome_unico(|n| usados.contains(&chave(n)), &base);
         let rel = juntar(pasta, &nome);
         let destino = disco::caminho_dentro(&self.raiz, &rel)?;
         fs::create_dir(&destino)?;
+        self.portao.0.contou_gravacao();
         Ok(rel)
     }
 
     /// Renomeia a nota para `titulo_novo` (sem `.md`), na mesma pasta. Se já existe uma nota com
     /// esse nome, a renomeada vira `nome 2`: nunca sobrescreve. Devolve o caminho novo.
     pub fn renomear_nota(&self, rel: &str, titulo_novo: &str) -> io::Result<String> {
+        // Conferir o nome e fazer o `rename` sem o ciclo de sincronização no meio.
+        let _preso = self.portao.0.prender();
         let titulo = limpar_nome(titulo_novo).ok_or_else(|| {
             erro(
                 io::ErrorKind::InvalidInput,
@@ -208,6 +305,7 @@ impl Cofre {
         let origem = disco::caminho_dentro(&self.raiz, rel)?;
         let destino = disco::caminho_dentro(&self.raiz, &novo_rel)?;
         fs::rename(origem, destino)?;
+        self.portao.0.contou_gravacao();
         Ok(novo_rel)
     }
 
@@ -219,7 +317,10 @@ impl Cofre {
 
     /// Igual a `para_a_lixeira`, com o carimbo escolhido (para os testes).
     pub fn para_a_lixeira_com(&self, rel: &str, carimbo: &str) -> io::Result<String> {
-        disco::mover_para_lixeira(&self.raiz, rel, carimbo)
+        let _preso = self.portao.0.prender();
+        let destino = disco::mover_para_lixeira(&self.raiz, rel, carimbo)?;
+        self.portao.0.contou_gravacao();
+        Ok(destino)
     }
 }
 

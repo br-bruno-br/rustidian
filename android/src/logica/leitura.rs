@@ -258,9 +258,14 @@ pub fn alternar_tarefa(
         return Err(ErroTarefa::Mudou);
     }
     let novo = markdown::alternar_tarefa(base, byte).ok_or(ErroTarefa::Sumiu)?;
-    cofre
-        .salvar_nota(caminho, &novo)
-        .map_err(ErroTarefa::Disco)?;
+    // Conferir de novo e gravar com o portão preso: o ciclo de sincronização não troca o
+    // arquivo entre as duas coisas.
+    if !cofre
+        .salvar_se_igual(caminho, base, &novo)
+        .map_err(ErroTarefa::Disco)?
+    {
+        return Err(ErroTarefa::Mudou);
+    }
     Ok(novo)
 }
 
