@@ -4,167 +4,130 @@
 
 <table>
   <tr>
-    <td align="center"><img src="docs/brand/themes/signature.png" width="112" height="112" alt="Rustidian signature pink logo"><br><sub>Main · Signature</sub></td>
-    <td align="center"><img src="docs/brand/rustidian.png" width="112" height="112" alt="Rustidian teal logo"><br><sub>Teal</sub></td>
-    <td align="center"><img src="docs/brand/themes/love-space.png" width="112" height="112" alt="Rustidian Love Space logo"><br><sub>Love Space</sub></td>
-    <td align="center"><img src="docs/brand/themes/elpis-gold.png" width="112" height="112" alt="Rustidian Elpis Gold logo"><br><sub>Elpis Gold</sub></td>
+    <td align="center"><img src="docs/brand/themes/signature.png" width="112" height="112" alt="Logo Rustidian, tema Signature"><br><sub>Signature</sub></td>
+    <td align="center"><img src="docs/brand/rustidian.png" width="112" height="112" alt="Logo Rustidian, verde-azulado"><br><sub>Teal</sub></td>
+    <td align="center"><img src="docs/brand/themes/love-space.png" width="112" height="112" alt="Logo Rustidian, tema Love Space"><br><sub>Love Space</sub></td>
+    <td align="center"><img src="docs/brand/themes/elpis-gold.png" width="112" height="112" alt="Logo Rustidian, tema Elpis Gold"><br><sub>Elpis Gold</sub></td>
   </tr>
 </table>
 
-**A native Markdown notebook for Linux. Your files, your folders, no account.**
+**Um caderno de notas em Markdown, nativo em Rust. Seus arquivos, suas pastas, sem conta.**
 
-Opens Obsidian-format vaults and started faster than Obsidian in our [paired test](docs/performance/startup-2026-10-22/README.md) (0.61 s vs 3.77 s, earlier build, one setup). Independent, not affiliated with Obsidian.
-
-**[Install for Linux — download .deb](https://github.com/MasihMoafi/rustidian/releases/latest/download/rustidian-linux-amd64.deb)**
-
-[Portable Linux download](https://github.com/MasihMoafi/rustidian/releases/latest/download/rustidian-linux-x86_64.tar.gz) · [Quick start](#quick-start) · [Report a bug](https://github.com/MasihMoafi/rustidian/issues/new/choose) · [Contribute](CONTRIBUTING.md)
-
-Linux desktop · Plain files · Native Rust
+Português · [English](README.en.md)
 
 </div>
 
-## Este fork (br-bruno-br/rustidian)
-
-Fork do [Rustidian de Masih Moafi](https://github.com/MasihMoafi/rustidian) para trocar o Obsidian no **Windows**, no **Android** e no **Linux**, com as notas sincronizadas entre os três. O que ele acrescenta ao original:
-
-| Peça | O que faz |
-| --- | --- |
-| **Windows** | O app roda no Windows: seletor de arquivos nativo, tema e fontes do sistema, uma janela só por vez |
-| **Segurança** | Imagem remota desligada por padrão (opção para ligar), aba do agente desligada, histórico de recuperação de 1 dia com chave para desligar |
-| **Sincronização cifrada** | `nota-cripto` (chave do cofre derivada da frase, cifra de ponta a ponta) e `nota-sync` + `nota-servidor`: o servidor guarda só conteúdo cifrado, cada aparelho tem a cópia completa e funciona sem rede; na dúvida guarda as duas versões |
-| **Sync dentro do app** | Tela para configurar endereço, token e frase; ícone de estado; ciclo em segundo plano |
-| **Menções sem link** | No painel de backlinks, lista as notas que citam o título (ou um apelido) da nota aberta sem link, com botão **Link** que transforma a menção em `[[link]]`. Ideia do [RustSidian](https://github.com/siddarth1872004/RustSidian) (MIT) |
-| **Corretor ortográfico pt-BR** | Sublinha palavras erradas, sugere correções no clique direito, lista pessoal de palavras e "Ignorar". Usa o [spellbook](https://github.com/helix-editor/spellbook) e o dicionário VERO (LibreOffice), baixado à parte pelo botão **Baixar dicionário pt-BR** e conferido por sha256 |
-| **Tela dividida** | Dois painéis lado a lado ou um sobre o outro, cada um com as suas abas. A mesma nota nos dois painéis é uma só (edita num, aparece no outro, salva uma vez); Ctrl+Alt+clique num link abre no outro painel; o layout volta ao reabrir. Veja a linha R15 do [plano](docs/bruno/PLANO.md) |
-| **Android** | Protótipos para escolher o toolkit que digita bem pelo Gboard (egui × Dioxus); roteiro em [docs/bruno/R7-TESTE.md](docs/bruno/R7-TESTE.md) |
-| **Interface em português** | Em andamento: menus, botões, configurações e mensagens em pt-BR |
-
-**Cofre grande e vigia confiável.** O índice incremental e a foto do índice (`index_photo`) abrem cofres de dezenas de milhares de notas sem reler tudo. O vigia de arquivos tem estas regras: uma nota que a varredura não achou só sai do índice depois de conferida duas vezes (sync que apaga e recria, ou varredura parcial, não a perdem); gravação do próprio app e arquivo temporário de editor externo (`.tmp`, `~`, `.swp`, `4913`) não pedem nova indexação; um par "apagada + criada" só vira renomeação quando é único e tem o mesmo texto não vazio. Nota `.md` acima de 8 MB fica fora do índice e o cofre abre com um aviso que a cita.
-
-**Medir lentidão (opcional).** Com a variável `RUSTIDIAN_PERF=<arquivo>` o app acrescenta ao arquivo uma linha JSON por ação: `abrir_cofre`, `salvar`, `indexar_nota`, `gravar_nota`, `buscar`, `buscar_arquivo`, `trocar_aba` e `quadro_lento` (quadro de tela acima de 50 ms). Cada linha traz `t` (ms desde 1970), `acao`, `ms` e, quando há cofre, `notas` e `bytes` (tamanho do cofre). Sem a variável não se abre arquivo nem se lê relógio: o custo é zero. Exemplo no PowerShell: `$env:RUSTIDIAN_PERF = "$env:TEMPustidian-perf.jsonl"; .	argeteleaseustidian.exe`.
-
-**Compilar no Windows:** `cargo build --release --bin rustidian` (MSVC); o executável sai em `target\release\rustidian.exe`. O plano completo e o estado de cada fatia estão em [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Créditos de terceiros em [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
-
----
-
-I built Rustidian for myself because every note editor I tried felt too slow. **Speed and stability** guide the project: ordinary Markdown folders, native editing, linked notes and graphs.
-
-**Try Rustidian for Linux. Contributors are welcome.**
-
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/images/rustidian-light.png">
-  <img src="docs/images/rustidian.png" alt="Rustidian showing its bundled Markdown notebook">
+  <img src="docs/images/rustidian.png" alt="Rustidian mostrando o cofre de demonstração">
 </picture>
 
-## Quick start
+## O que é
 
-**Requirements:** Linux x86_64 with **glibc 2.39 or newer** (Ubuntu 24.04 or newer; check with `ldd --version`) and an X11 or Wayland desktop. The Open dialogs use `zenity`, which the package installs; with the portable archive, install `zenity` with your package manager. Native UI checks use X11; Wayland is enabled, with broader coverage still open.
+O Rustidian guarda as notas em pastas comuns de arquivos Markdown. Não pede conta e abre cofres do Obsidian direto, sem importar nada. Tudo é nativo em Rust, da interface ao editor.
 
-Download the **[Debian/Ubuntu package](https://github.com/MasihMoafi/rustidian/releases/latest/download/rustidian-linux-amd64.deb)** and [checksums](https://github.com/MasihMoafi/rustidian/releases/latest/download/SHA256SUMS), then run:
+Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/MasihMoafi/rustidian), feito para o dono largar o Obsidian e usar o mesmo editor no Windows, no Android e no Linux. Independente, sem ligação com o Obsidian.
 
-```sh
-sha256sum --check --ignore-missing SHA256SUMS
-sudo apt install ./rustidian-linux-amd64.deb
-rustidian
+## O que já funciona
+
+**No computador (Windows e Linux)**
+- App para **Windows**: seletor de arquivos nativo, tema e fontes do sistema.
+- **Interface em português do Brasil** e **corretor ortográfico pt-BR** (dicionário baixado pelo botão "Baixar dicionário pt-BR" e conferido por sha256).
+- **Tela dividida**: dois painéis, lado a lado ou um sobre o outro, cada um com as suas abas. A mesma nota nos dois painéis é uma só.
+- **Tabelas**: inserir, colar da planilha, converter seleção e alinhar.
+- **Menções sem link**: o painel de backlinks lista as notas que citam o título da nota aberta, e o botão **Link** transforma a menção em `[[link]]`.
+- **Cofre grande e vigia confiável**: índice incremental, abre cofres de dezenas de milhares de notas e não perde nota por causa de sync ou de editor externo.
+- **Atualizações assinadas**: o app só instala o que bate com a chave pública embutida. A chave pública do dono já está no app; o primeiro release assinado sai com o instalador do Windows.
+
+**Quadro estilo Heptabase** (arquivos `.canvas`, o mesmo formato aberto do Obsidian)
+- Cada nota vira um **cartão vivo**: mostra o texto formatado e edita a nota no lugar.
+- **Seção como cartão** (só um trecho da nota) e **quadro dentro de quadro** (miniatura do quadro menor).
+- **Organizar**: alinhar, distribuir, arrumar em grade e **mapa mental** a partir de um cartão.
+- **Etiquetas e filtro** por cor e por etiqueta.
+
+**Histórico das notas**
+- Versões de cada nota, guardadas pela diferença (ocupa pouco espaço), com restaurar e ver a diferença.
+- **Linha do tempo** com barra deslizante, **versões com nome** e **apagar do histórico**.
+- Retenção configurável nas configurações.
+
+**Sincronização cifrada**
+- As peças existem e têm testes: `nota-cripto` (cifra de ponta a ponta), `nota-sync` e `nota-servidor` (o servidor guarda só conteúdo cifrado). No desktop há tela de configuração, ícone de estado e ciclo em segundo plano. Na dúvida, guarda as duas versões.
+- Ainda não está em uso diário: o servidor próprio e o backup ficam para a fila abaixo.
+
+**Android (fase inicial)**
+- App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Ainda mostra o texto cru e ainda não sincroniza.
+
+## Seus dados estão seguros
+
+Garantias que existem no código, com a contagem de testes marcados com `#[test]` na área (contagem por `grep`, sem compilar; não é cobertura).
+
+| Garantia | Como | Testes |
+| --- | --- | --- |
+| Nota nunca é apagada de vez | O que some vai para `.trash/` do cofre (é um `rename`, nunca `rm`), e o app pede confirmação antes de mandar a nota para a lixeira (dá para desligar o aviso) | `crates/nota-sync` 62; telas em `src/app/gui_tests` 270 |
+| Conflito não perde nada | Se a nota mudou nos dois lados, uma versão vira o arquivo principal e a outra é salva como `nome (conflito aparelho data).md` | `crates/nota-sync` 62 |
+| Servidor não lê as notas | Cifra de ponta a ponta: o servidor guarda só conteúdo cifrado. Cada aparelho tem a cópia completa e funciona sem rede | `crates/nota-cripto` 19, `crates/nota-servidor` 20 |
+| Gravação sem arquivo pela metade | Escrita atômica: arquivo temporário na mesma pasta, `sync_all` e `rename` por cima | `crates/nota-sync` 62 |
+| Nota que pode ser estragada não abre | Nota grande ou que não está em UTF-8 não é aberta, para não estragar o arquivo. Limites: 8 MB no índice do desktop (`.md` maior fica fora do índice, com aviso) e 2 MB no Android | `src/app/gui_tests` 270; `android/` 51 |
+| Vigia não perde nota | Uma nota que a varredura não achou só sai do índice depois de conferida duas vezes | `src/app/gui_tests` 270 |
+| Histórico das notas | Versões automáticas por diferença, retenção configurável (padrão: todas por 1 dia), restaurar, versões com nome (nunca saem) e "Apagar do histórico" tira um trecho de todas as versões, sem desfazer | `crates/nota-historico` 65 |
+| Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). A chave do dono já foi gerada e a pública está no repositório | `src/atualizacao.rs` 13 |
+| Desfazer que continua depois de fechar | **Em andamento** (histórico, fase H3/H4) | ainda não |
+| Sync cifrado no Android e backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
+
+## Roadmap
+
+A fila anda **uma frente por vez**: compilar em paralelo trava o PC do dono (2 núcleos), e cada fatia só começa depois que a anterior foi verificada e juntada. Sem datas.
+
+| Agora | Próximo | Depois |
+| --- | --- | --- |
+| **Histórico:** desfazer que continua depois de fechar o app e achar o que eu apaguei | **Markdown formatado no Android** (ler a nota como no PC, com tabelas e tarefas) | **Release para Windows** com instalador (em breve) |
+| | **Sync cifrado no Android** (endereço, token e frase, estado e conflitos) | **Linux portátil** com pacote assinado pelo dono |
+| | **Servidor de sync próprio** (no servidor de casa, só pela Tailscale) **e backup cifrado no Google Drive** | Terminar de trocar os scripts Python por Rust (`cargo xtask` e testes `egui_kittest`) |
+
+Estado de cada passo: [docs/bruno/FILA-ANDROID-SYNC.md](docs/bruno/FILA-ANDROID-SYNC.md). Plano completo, com as fatias e o que depende do dono: [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Desenho do histórico: [docs/bruno/HISTORICO-NOTAS.md](docs/bruno/HISTORICO-NOTAS.md).
+
+## Como compilar
+
+Este fork ainda não tem release próprio. Release para Windows: em breve. Por enquanto, compile.
+
+**Windows** (Rust com o alvo MSVC):
+
+```powershell
+cargo build --release --bin rustidian
+.\target\release\rustidian.exe
 ```
 
-**Other ways to install.** Snap: `sudo snap install rustidian`; the snap is confined, so it reads vaults in your home folder, and `sudo snap connect rustidian:removable-media` lets it open vaults on other drives. AppImage: download `Rustidian-0.1.6-x86_64.AppImage` from the [release](https://github.com/MasihMoafi/rustidian/releases/latest), run `chmod +x` on it and start it. Arch and Omarchy: `git clone https://github.com/MasihMoafi/rustidian && cd rustidian/packaging/aur-bin && makepkg -si` builds a native package from the release's exact executable.
+O executável sai em `target\release\rustidian.exe`. Em **Arquivo → Abrir pasta...** escolha uma cópia do seu cofre.
 
-The package adds Rustidian to your applications menu and opens a writable demo vault on first launch. Existing notes and settings are retained. The installer is built and checked on Ubuntu 24.04.
-
-For a portable installation, download the [tar archive](https://github.com/MasihMoafi/rustidian/releases/latest/download/rustidian-linux-x86_64.tar.gz) and the same checksums:
+**Linux** (x86_64, glibc 2.39 ou mais nova, como o Ubuntu 24.04; desktop X11 ou Wayland):
 
 ```sh
-sha256sum --check --ignore-missing SHA256SUMS
-mkdir rustidian && tar -xzf rustidian-linux-x86_64.tar.gz -C rustidian
-cd rustidian && ./rustidian
+cargo build --release --bin rustidian
+./target/release/rustidian "/caminho/do/cofre"
 ```
 
-The bundled demo opens immediately. To add Rustidian to your applications menu, run `./rustidian --install`; it installs for your user without root. You can also run it from the extracted folder:
+Os diálogos de abrir usam o `zenity`; instale pelo gerenciador de pacotes. Os pacotes `.deb`, AppImage e snap citados na documentação do original são do projeto dele, não deste fork.
 
-```sh
-./rustidian "/path/to/vault copy"
-./rustidian "/path/to/note.md"
-./rustidian --version
+Atalhos: Ctrl+P paleta de comandos, Ctrl+O troca rápida de nota, Ctrl+N nova nota, Ctrl+E alterna leitura e edição, Ctrl+Shift+F busca no cofre, Ctrl+S salva. O app salva sozinho depois de 600 ms parado. Plugins da comunidade do Obsidian não rodam.
+
+## Medir lentidão
+
+Com `RUSTIDIAN_PERF=<arquivo>`, o app acrescenta ao arquivo uma linha JSON por ação (`abrir_cofre`, `salvar`, `buscar`, `trocar_aba`, `quadro_lento` e outras), com o tempo em ms e o tamanho do cofre. Sem a variável, não abre arquivo nem lê relógio. No PowerShell:
+
+```powershell
+$env:RUSTIDIAN_PERF = "$env:TEMP\rustidian-perf.jsonl"; .\target\release\rustidian.exe
 ```
 
-**Opens Obsidian-format vaults.** Try a copy of your vault first. Open the folder directly with **File → Open folder…**; no import or account is needed. Rustidian reads ordinary Markdown files and selected Obsidian settings. Community plugins do not run; Canvas, Bases and other gaps are listed below. Keep Obsidian available for other workflows.
+Sobre velocidade: o autor do original mediu 0,61 s contra 3,77 s do Obsidian para abrir uma nota, no Linux, numa build antiga e num único ambiente ([teste](docs/performance/startup-2026-10-22/README.md)). Não é medida deste fork nem do Windows.
 
-**Why don't Obsidian plugins work?** Rustidian's interface is native Rust with egui/eframe. Obsidian plugins require Obsidian's JavaScript API and often its browser DOM and CSS. Running them needs a compatibility runtime or individual feature ports; copying plugin folders is insufficient.
+## Créditos e licença
 
-Edits autosave after 600 ms of inactivity; **Ctrl+S** saves immediately. If another program changes a note, Rustidian retains your buffer and refuses to overwrite the external change. Use **Save a copy** from the command palette to preserve your version.
+- Original: [Rustidian, de Masih Moafi](https://github.com/MasihMoafi/rustidian).
+- A ideia das menções sem link, da tela dividida e dos quadros vem do [RustSidian](https://github.com/siddarth1872004/RustSidian) (MIT); o código é nosso.
+- Corretor: [spellbook](https://github.com/helix-editor/spellbook) com o dicionário VERO (LibreOffice).
+- Bibliotecas de terceiros: [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+- Licença: [MIT](LICENSE).
 
-| Shortcut | Action |
-| --- | --- |
-| Ctrl+P | Command palette |
-| Ctrl+O | Quick switcher |
-| Ctrl+Shift+O | Open an existing file |
-| Ctrl+Alt+O | Open an existing folder as a vault |
-| Ctrl+N | New note |
-| Ctrl+E | Switch reading/editing |
-| Ctrl+Shift+F | Search the vault |
-| Ctrl+S | Save |
+## Contribuir com o original
 
-## Why Rustidian?
-
-- **Native throughout.** Rust powers the interface, text editor, Markdown renderer, search, and vault operations.
-- **Write your way.** Live editing, source and reading modes, folding, formatting, find/replace, and undo. Tables, callouts, images, syntax highlighting, LaTeX math and native Mermaid diagrams bring your notes to life.
-- **Follow your ideas.** Wiki links, backlinks, tags, aliases, properties, bookmarks, a quick switcher, and vault-wide search keep your knowledge connected.
-- **Return to your rhythm.** Daily notes, templates, pinned tabs, named workspaces, recent vaults, and tab restoration after a clean exit.
-- **Work beside an agent.** The Agent tab (Ctrl+Shift+A) runs Codex, Claude Code or Elpis in a terminal in your vault folder, whichever is installed.
-- **Keep control of your files.** Plain UTF-8 Markdown and text, atomic saves, external-change protection, recovery snapshots, and recoverable Trash. Workspace state lives outside the vault.
-
-## Development status
-
-Rustidian is a work in progress toward full support for Obsidian-format vaults. The current build covers a subset of that goal.
-
-| Area | Current state |
-| --- | --- |
-| Markdown editing, links, tasks, tables, Mermaid, LaTeX math | Implemented workflows with ongoing parity work |
-| Vaults, daily notes, templates, workspaces, recovery | Implemented workflows with remaining gaps |
-| Global and local graph | Native views verified; graph parity work continues |
-| Canvas, Bases, full settings and hotkeys | Missing or incomplete |
-| Existing Obsidian community plugins | Unsupported; compatibility design remains open |
-
-The [coverage ledger](docs/PARITY.md) records implemented workflows and remaining work. Full parity and existing Obsidian plugin compatibility are unfinished.
-
-## Performance
-
-These measurements use older builds. The current release has not yet been benchmarked against Obsidian.
-
-A [paired startup comparison](docs/performance/startup-2026-10-22/README.md) measured a median complete matching note frame at **0.61 s for the verified Rustidian baseline versus 3.77 s for Obsidian 1.14.4**. Ten balanced warmed pairs used 100 synthetic notes, a 1440×960 software display and screenshot/OCR sampling. The measured baseline precedes the later graph update. Exact versions, original paired screenshots, raw results and limits accompany this bounded result.
-
-A [verified same-host comparison](https://github.com/MasihMoafi/rustidian/actions/runs/39817952278) measured serial edit/save acknowledgement:
-
-| Editor | Median |
-| --- | ---: |
-| **Rustidian measured baseline** | **78.57 ms** |
-| Ferrite 0.3.0 | 439.32 ms |
-
-**About 5.6× faster in this edit-and-save test.** Both editors used the same 103,300-byte document in source mode on one Linux/Xvfb host. Four alternating rounds collected 100 timed samples plus 20 warmups. Timings cover synthetic input through observing the exact saved bytes, including keyboard-driver and file-polling overhead. Overall speed varies by workload.
-
-The linked run contains the verification evidence. See the [comparison script](scripts/compare-editors.py) for the method and the [workflow](.github/workflows/native.yml) for the checks.
-
-## Contributors welcome
-
-Try one useful workflow: open a copied vault, edit and save a note, follow a link, then reopen it. [Report what broke](https://github.com/MasihMoafi/rustidian/issues/new?template=bug_report.yml) with `rustidian --version`, your Linux/display setup and a small example. For a difference from Obsidian, use the [workflow gap form](https://github.com/MasihMoafi/rustidian/issues/new?template=parity_gap.yml).
-
-Rust/egui contributors can start with Markdown rendering, keyboard access or Linux/Wayland testing. [CONTRIBUTING.md](CONTRIBUTING.md) explains setup and checks; the [coverage ledger](docs/PARITY.md) records remaining work. If Rustidian is useful to you, a [GitHub star](https://github.com/MasihMoafi/rustidian) helps others discover it.
-
-[MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.txt) · Independent, not affiliated with Obsidian. Existing Obsidian JavaScript plugins are unsupported; full feature and visual parity remain unfinished.
-
-<!-- more-projects:start -->
-## More projects
-
-- [Elpis](https://github.com/MasihMoafi/Elpis): a coding agent for the terminal and desktop, with explicit context control
-- [rag-mcp](https://github.com/MasihMoafi/rag-mcp): local hybrid search over your documents, as a CLI and MCP server
-- [Skills](https://github.com/MasihMoafi/skills): SKILL.md workflows for coding agents
-- [WhisperType](https://github.com/MasihMoafi/WhisperType): local voice input for developers
-- [Read Aloud](https://github.com/MasihMoafi/read-aloud): select text, press Super+R, hear it in a local voice
-- [Love Spot](https://github.com/MasihMoafi/love-spot): a shared drawing board where characters talk, draw and compete with you
-- [SVG Studio](https://svg.masihmoafi.com): high-quality image vectorization
-- [Pin](https://github.com/MasihMoafi/pin): an always-on-top priority note, saved as plain Markdown
-- [Clocki](https://github.com/MasihMoafi/clocki): a floating desktop timer for tracking focus hours
-
-All of them: [masihmoafi.com](https://masihmoafi.com/projects)
-<!-- more-projects:end -->
+Correções que servem a todos saem em branches `upstream/<assunto>`, cada uma com um commit limpo em inglês, para virar Pull Request no original; o que é só do fork (Windows, sync, Android, servidor do dono) fica no `main`. Veja [docs/bruno/PLANO.md](docs/bruno/PLANO.md) e o [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -24,6 +24,29 @@ pub struct Occurrence {
     pub y: f64,
     /// O rótulo do menor grupo com nome que contém o cartão.
     pub group: Option<String>,
+    /// A seção (`subpath`) que o cartão mostra, sem o `#` da frente (H2a: cartão de seção).
+    pub section: Option<String>,
+}
+
+impl Occurrence {
+    /// O texto da linha em "Nos quadros": `Quadro`, `Quadro · Grupo` e, se o cartão mostra só
+    /// uma seção, `… › Seção`.
+    pub fn label(&self) -> String {
+        let name = self
+            .board
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut text = match &self.group {
+            Some(group) => format!("{name} · {group}"),
+            None => name,
+        };
+        if let Some(section) = &self.section {
+            text.push_str(" › ");
+            text.push_str(section);
+        }
+        text
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,6 +138,11 @@ fn occurrences_of(board: &Path, canvas: &Canvas) -> Vec<(String, Occurrence)> {
                 x: node.x,
                 y: node.y,
                 group,
+                section: node
+                    .subpath
+                    .as_deref()
+                    .and_then(crate::canvas_section::parse_subpath)
+                    .map(|parts| parts.join(" › ")),
             },
         ));
     }
@@ -319,6 +347,27 @@ mod tests {
         assert_eq!(found[0].group.as_deref(), Some("Fase 1"));
         assert_eq!(found[1].group, None);
         assert!(index.occurrences(Path::new("Outra.md")).is_empty());
+    }
+
+    #[test]
+    fn cartao_de_secao_conta_e_a_linha_mostra_a_secao() {
+        let mut index = CanvasIndex::default();
+        let text = r##"{"nodes":[
+            {"id":"g","type":"group","x":0,"y":0,"width":900,"height":900,"label":"Fase"},
+            {"id":"s","type":"file","x":10,"y":10,"width":100,"height":50,"file":"Alpha.md","subpath":"#Resumo#Detalhe"},
+            {"id":"b","type":"file","x":10,"y":100,"width":100,"height":50,"file":"Alpha.md","subpath":"#^bloco"},
+            {"id":"n","type":"file","x":10,"y":200,"width":100,"height":50,"file":"Alpha.md"}],"edges":[]}"##;
+        index.update_board(Path::new("Pasta/Plano.canvas"), Some(text));
+        let found = index.occurrences(Path::new("Alpha.md"));
+        assert_eq!(
+            found.len(),
+            3,
+            "o cartão de seção conta como qualquer outro"
+        );
+        assert_eq!(found[0].label(), "Plano · Fase › Resumo › Detalhe");
+        // Referência de bloco não é seção; a nota inteira fica sem seta.
+        assert_eq!(found[1].label(), "Plano · Fase");
+        assert_eq!(found[2].label(), "Plano · Fase");
     }
 
     #[test]

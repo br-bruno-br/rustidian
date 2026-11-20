@@ -15,10 +15,12 @@ mod edicao;
 mod historico;
 mod historico_config;
 mod historico_h3h4;
+mod migrados_janela;
 mod navegacao;
 mod nota_quadro;
 mod onde_aparece;
 mod prints;
+mod quadro_h2h3;
 mod quadro_vivo;
 mod tabela;
 

@@ -26,6 +26,8 @@ pub const NOTE_HEADER: f64 = 36.0;
 /// arquivo continua abrindo lá. Sem eles o cartão é um cartão de nota comum.
 pub const COLLAPSED_KEY: &str = "rustidianCollapsed";
 pub const EXPANDED_HEIGHT_KEY: &str = "rustidianHeight";
+/// Etiquetas do cartão (H3c): uma lista de textos. Campo opcional nosso, ignorado pelo Obsidian.
+pub const TAGS_KEY: &str = "rustidianTags";
 
 pub fn is_canvas(path: &Path) -> bool {
     path.extension()
@@ -217,6 +219,30 @@ impl Node {
             .get(COLLAPSED_KEY)
             .and_then(Value::as_bool)
             .unwrap_or(false)
+    }
+
+    /// As etiquetas do cartão (H3c), na ordem em que foram escritas.
+    pub fn tags(&self) -> Vec<String> {
+        self.extra
+            .get(TAGS_KEY)
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// O cartão aponta para outro quadro (`.canvas`): H2b, quadro dentro de quadro.
+    pub fn is_board_card(&self) -> bool {
+        self.node_kind() == NodeKind::File
+            && self
+                .file
+                .as_deref()
+                .is_some_and(|file| is_canvas(Path::new(file)))
     }
 
     /// Nome do arquivo (sem pasta e sem extensão) de um cartão de nota.
@@ -546,6 +572,85 @@ impl Canvas {
             .collect()
     }
 
+    /// Cartão de nota que mostra só a seção `subpath` (H2a). `path` é relativo ao cofre.
+    pub fn add_section(&mut self, path: &str, subpath: &str, x: f64, y: f64) -> String {
+        let id = self.add_file(path, x, y);
+        if let Some(node) = self.node_mut(&id) {
+            node.subpath = Some(subpath.to_owned());
+        }
+        id
+    }
+
+    /// Troca a seção que o cartão de nota mostra (`None` volta a nota inteira). `false` se o nó
+    /// não é cartão de nota ou já estava assim.
+    pub fn set_subpath(&mut self, id: &str, subpath: Option<&str>) -> bool {
+        let Some(node) = self.node_mut(id) else {
+            return false;
+        };
+        if !node.is_note_card() {
+            return false;
+        }
+        let new = subpath
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned);
+        if node.subpath == new {
+            return false;
+        }
+        node.subpath = new;
+        true
+    }
+
+    /// Põe as etiquetas de um cartão (H3c). Cada uma é aparada e perde o `#` do começo; as
+    /// repetidas (sem diferença de maiúsculas nem de acento) e as vazias saem. Sem etiquetas, o
+    /// campo some do arquivo. `false` se nada mudou.
+    pub fn set_tags(&mut self, id: &str, tags: &[String]) -> bool {
+        let Some(node) = self.node_mut(id) else {
+            return false;
+        };
+        let clean = clean_tags(tags);
+        if node.tags() == clean {
+            return false;
+        }
+        if clean.is_empty() {
+            node.extra.remove(TAGS_KEY);
+        } else {
+            node.extra.insert(
+                TAGS_KEY.to_owned(),
+                Value::Array(clean.into_iter().map(Value::String).collect()),
+            );
+        }
+        true
+    }
+
+    /// Todas as etiquetas do quadro, sem repetir, em ordem alfabética.
+    pub fn all_tags(&self) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        for node in &self.nodes {
+            for tag in node.tags() {
+                if !found.iter().any(|known| fold(known) == fold(&tag)) {
+                    found.push(tag);
+                }
+            }
+        }
+        found.sort_by_key(|tag| fold(tag));
+        found
+    }
+
+    /// As cores em uso nos cartões: as predefinidas primeiro e depois as `#rrggbb`.
+    pub fn colors_in_use(&self) -> Vec<String> {
+        let mut found: Vec<String> = Vec::new();
+        for node in &self.nodes {
+            if let Some(color) = node.color.as_deref().filter(|color| !color.is_empty())
+                && !found.iter().any(|known| known.eq_ignore_ascii_case(color))
+            {
+                found.push(color.to_owned());
+            }
+        }
+        found.sort_by_key(|color| (color.starts_with('#'), color.to_lowercase()));
+        found
+    }
+
     /// Recolhe (só o título) ou expande um cartão de nota. Recolher guarda a altura num campo
     /// nosso e expandir a devolve. `false` se o nó não é cartão de nota ou já estava assim.
     pub fn set_collapsed(&mut self, id: &str, collapsed: bool) -> bool {
@@ -816,6 +921,56 @@ impl Canvas {
         let start = self.node(&edge.from_node)?.anchor(from_side);
         let end = self.node(&edge.to_node)?.anchor(to_side);
         Some(Curve::between(start, from_side, end, to_side))
+    }
+}
+
+/// Etiquetas limpas: aparadas, sem `#` no começo, sem vazias e sem repetidas.
+pub fn clean_tags(tags: &[String]) -> Vec<String> {
+    let mut clean: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = tag.trim().trim_start_matches('#').trim();
+        if !tag.is_empty() && !clean.iter().any(|known| fold(known) == fold(tag)) {
+            clean.push(tag.to_owned());
+        }
+    }
+    clean
+}
+
+/// As etiquetas de um texto digitado: separadas por vírgula, ponto e vírgula ou espaço.
+pub fn parse_tags(text: &str) -> Vec<String> {
+    let parts: Vec<String> = text
+        .split([',', ';', ' ', '\n', '\t'])
+        .map(str::to_owned)
+        .collect();
+    clean_tags(&parts)
+}
+
+/// O filtro do quadro (H3c): só os cartões da cor e/ou da etiqueta ficam em destaque. É estado
+/// da tela; nunca vai para o arquivo.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Filter {
+    pub color: Option<String>,
+    pub tag: Option<String>,
+}
+
+impl Filter {
+    pub fn is_active(&self) -> bool {
+        self.color.is_some() || self.tag.is_some()
+    }
+
+    /// O cartão fica em destaque (cor e etiqueta, quando as duas estão no filtro, valem juntas).
+    pub fn matches(&self, node: &Node) -> bool {
+        let color_ok = self.color.as_deref().is_none_or(|wanted| {
+            node.color
+                .as_deref()
+                .is_some_and(|color| color.eq_ignore_ascii_case(wanted))
+        });
+        let tag_ok = self.tag.as_deref().is_none_or(|wanted| {
+            node.tags()
+                .iter()
+                .any(|tag| fold(tag) == fold(wanted.trim_start_matches('#')))
+        });
+        color_ok && tag_ok
     }
 }
 
@@ -1750,5 +1905,91 @@ mod tests {
         assert!(is_canvas(Path::new("Q.CANVAS")));
         assert!(!is_canvas(Path::new("Q.md")));
         assert!(!is_canvas(Path::new("canvas")));
+    }
+    #[test]
+    fn etiquetas_ida_e_volta_sem_repetir_e_o_campo_some_sem_elas() {
+        let mut canvas = Canvas::parse(SAMPLE).unwrap();
+        assert!(canvas.node("n1").unwrap().tags().is_empty());
+        assert!(canvas.set_tags(
+            "n1",
+            &[
+                " #Ideia ".to_owned(),
+                "ideia".to_owned(),
+                "Urgente".to_owned(),
+                "".to_owned()
+            ]
+        ));
+        assert_eq!(canvas.node("n1").unwrap().tags(), ["Ideia", "Urgente"]);
+        assert!(!canvas.set_tags("n1", &["Ideia".to_owned(), "Urgente".to_owned()]));
+        // O arquivo guarda uma lista de textos no campo opcional nosso e o resto segue igual.
+        let text = canvas.to_json();
+        assert!(
+            text.contains("\"rustidianTags\":[\"Ideia\",\"Urgente\"]"),
+            "{text}"
+        );
+        let again = Canvas::parse(&text).unwrap();
+        assert_eq!(again, canvas);
+        assert_eq!(again.node("n1").unwrap().extra["extra"]["a"][0], 1);
+        assert_eq!(again.all_tags(), ["Ideia", "Urgente"]);
+        // Tirar todas apaga o campo do arquivo.
+        assert!(canvas.set_tags("n1", &[]));
+        assert!(!canvas.to_json().contains("rustidianTags"));
+        assert!(!canvas.set_tags("nada", &["x".to_owned()]));
+        assert_eq!(parse_tags("a, #B;c  a\td"), ["a", "B", "c", "d"]);
+    }
+
+    #[test]
+    fn filtro_por_cor_e_etiqueta_combina_as_duas() {
+        let mut canvas = Canvas::parse(SAMPLE).unwrap();
+        canvas.set_tags("n1", &["Foco".to_owned()]);
+        canvas.set_tags("n2", &["foco".to_owned(), "outra".to_owned()]);
+        let hits = |filter: &Filter| -> Vec<String> {
+            canvas
+                .nodes
+                .iter()
+                .filter(|node| filter.matches(node))
+                .map(|node| node.id.clone())
+                .collect()
+        };
+        assert!(!Filter::default().is_active());
+        assert_eq!(hits(&Filter::default()).len(), 5, "sem filtro tudo casa");
+        let tag = Filter {
+            tag: Some("#FOCO".into()),
+            ..Filter::default()
+        };
+        assert_eq!(hits(&tag), ["n1", "n2"]);
+        let color = Filter {
+            color: Some("1".into()),
+            ..Filter::default()
+        };
+        assert_eq!(hits(&color), ["n1"]);
+        let both = Filter {
+            color: Some("4".into()),
+            tag: Some("foco".into()),
+        };
+        assert!(
+            hits(&both).is_empty(),
+            "o grupo é verde, mas não tem a etiqueta"
+        );
+        assert_eq!(canvas.colors_in_use(), ["1", "4"]);
+    }
+
+    #[test]
+    fn cartao_de_secao_troca_e_tira_o_subpath_so_em_nota() {
+        let mut canvas = Canvas::default();
+        let note = canvas.add_section("Home.md", "#Resumo", 0.0, 0.0);
+        assert_eq!(
+            canvas.node(&note).unwrap().subpath.as_deref(),
+            Some("#Resumo")
+        );
+        assert!(canvas.set_subpath(&note, Some("#Fim")));
+        assert!(!canvas.set_subpath(&note, Some(" #Fim ")));
+        assert!(canvas.set_subpath(&note, None));
+        assert!(canvas.node(&note).unwrap().subpath.is_none());
+        let text = canvas.add_text(0.0, 0.0);
+        assert!(!canvas.set_subpath(&text, Some("#X")));
+        let board = canvas.add_file("Sub/Outro.canvas", 0.0, 0.0);
+        assert!(canvas.node(&board).unwrap().is_board_card());
+        assert!(!canvas.node(&note).unwrap().is_board_card());
     }
 }
