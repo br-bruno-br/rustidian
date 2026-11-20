@@ -56,7 +56,7 @@ This repository is a fork of [Rustidian by Masih Moafi](https://github.com/Masih
 - Not in daily use yet: the dedicated server and the backup are in the queue below.
 
 **Android (early stage)**
-- A Dioxus app with a note list, search, an editor with autosave, and a trash. A **Read** view with formatted Markdown (tables, tap-to-tick tasks, links between notes, vault images; a note's HTML never runs). It does not sync yet.
+- A Dioxus app with a note list, search, an editor with autosave, and a trash. A **Read** view with formatted Markdown (tables, tap-to-tick tasks, links between notes, vault images; a note's HTML never runs). A **Sync** screen (address, token and passphrase; the passphrase is never written to a file and is asked when the app opens), a cycle on open, after saving and when returning, and conflicts keep both copies. The server still has to go live for real use.
 
 ## Your data is safe
 
@@ -73,7 +73,8 @@ Guarantees that exist in the code, with the number of `#[test]` functions in eac
 | Note history | Automatic diff-based versions, configurable retention (default: keep everything for 1 day), restore, named versions (never pruned), and "Delete from history" removes a snippet from every version, with no undo | `crates/nota-historico` 65 |
 | Updates are the ones the owner signed | The app only installs what matches the embedded public key (ed25519 and SHA256SUMS). The owner's key is generated and the public half is in the repository | `src/atualizacao.rs` 13 |
 | Undo that survives closing the app | The undo tree is stored in the history and comes back when the note reopens, with branches; if the file changed outside the app it is not applied. "Find what I deleted" lists vanished passages and lets you put them back | `crates/nota-historico` and `historico_h3h4` UI tests |
-| Encrypted sync on Android and the Google Drive backup | **In progress**, see the roadmap | not yet |
+| Encrypted sync on Android | Same engine as the desktop; the passphrase never goes to a file; conflicts make a copy; deletes go to the trash on both devices | `android/` (tests against the real server on a local port) |
+| Google Drive backup | **In progress**, see the roadmap | not yet |
 
 ## Roadmap
 
@@ -81,9 +82,9 @@ The queue moves **one track at a time**: parallel Rust builds freeze the owner's
 
 | Now | Next | Later |
 | --- | --- | --- |
-| **Encrypted sync on Android** (address, token and passphrase, status and conflicts) | | **Windows release** with an installer (coming soon) |
+| **Our own sync server** (a home server, reachable only over Tailscale) **and an encrypted Google Drive backup** | | **Windows release** with an installer (coming soon) |
 | | **On-device test** of the formatted reading view (new APK) | **Portable Linux** package signed by the owner |
-| | **Our own sync server** (a home server, reachable only over Tailscale) **and an encrypted Google Drive backup** | Finish replacing the Python scripts with Rust (`cargo xtask` and `egui_kittest` tests) |
+| | **On-device test** of sync (needs the server) | Finish replacing the Python scripts with Rust (`cargo xtask` and `egui_kittest` tests) |
 
 Status of each step: [docs/bruno/FILA-ANDROID-SYNC.md](docs/bruno/FILA-ANDROID-SYNC.md). Full plan, with slices and what depends on the owner: [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Both are written in Portuguese.
 

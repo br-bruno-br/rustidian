@@ -56,7 +56,7 @@ Este repositório é um fork do [Rustidian de Masih Moafi](https://github.com/Ma
 - Ainda não está em uso diário: o servidor próprio e o backup ficam para a fila abaixo.
 
 **Android (fase inicial)**
-- App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Tela **Ler** com o Markdown formatado (tabelas, tarefas que marcam com um toque, links entre notas, imagens do cofre; HTML da nota nunca roda). Ainda não sincroniza.
+- App em Dioxus com lista de notas, busca, editor com salvamento automático e lixeira. Tela **Ler** com o Markdown formatado (tabelas, tarefas que marcam com um toque, links entre notas, imagens do cofre; HTML da nota nunca roda). Tela **Sincronizar** (endereço, token e frase; a frase nunca vai para arquivo e é pedida ao abrir o app), ciclo ao abrir, ao salvar e ao voltar, conflito guarda as duas cópias. Falta o servidor no ar para usar de verdade.
 
 ## Seus dados estão seguros
 
@@ -73,7 +73,8 @@ Garantias que existem no código, com a contagem de testes marcados com `#[test]
 | Histórico das notas | Versões automáticas por diferença, retenção configurável (padrão: todas por 1 dia), restaurar, versões com nome (nunca saem) e "Apagar do histórico" tira um trecho de todas as versões, sem desfazer | `crates/nota-historico` 65 |
 | Atualização é a que o dono assinou | O app só instala o que bate com a chave pública embutida (ed25519 e SHA256SUMS). A chave do dono já foi gerada e a pública está no repositório | `src/atualizacao.rs` 13 |
 | Desfazer que continua depois de fechar | A árvore do desfazer é gravada no histórico e volta ao reabrir a nota, com galhos; se o arquivo mudou por fora, ela não é aplicada. "Achar o que apaguei" lista os trechos que sumiram e deixa reinserir | `crates/nota-historico` e telas `historico_h3h4` |
-| Sync cifrado no Android e backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
+| Sync cifrado no Android | Mesmo motor do desktop; a frase nunca vai para arquivo; conflito gera cópia; apagar vai para a lixeira nos dois aparelhos | `android/` (testes contra o servidor de verdade em porta local) |
+| Backup no Google Drive | **Em andamento**, veja o roadmap | ainda não |
 
 ## Roadmap
 
@@ -81,9 +82,9 @@ A fila anda **uma frente por vez**: compilar em paralelo trava o PC do dono (2 n
 
 | Agora | Próximo | Depois |
 | --- | --- | --- |
-| **Sync cifrado no Android** (endereço, token e frase, estado e conflitos) | | **Release para Windows** com instalador (em breve) |
+| **Servidor de sync próprio** (no servidor de casa, só pela Tailscale) **e backup cifrado no Google Drive** | | **Release para Windows** com instalador (em breve) |
 | | **Teste no celular** da leitura formatada (APK novo) | **Linux portátil** com pacote assinado pelo dono |
-| | **Servidor de sync próprio** (no servidor de casa, só pela Tailscale) **e backup cifrado no Google Drive** | Terminar de trocar os scripts Python por Rust (`cargo xtask` e testes `egui_kittest`) |
+| | **Teste no celular** do sync (depende do servidor) | Terminar de trocar os scripts Python por Rust (`cargo xtask` e testes `egui_kittest`) |
 
 Estado de cada passo: [docs/bruno/FILA-ANDROID-SYNC.md](docs/bruno/FILA-ANDROID-SYNC.md). Plano completo, com as fatias e o que depende do dono: [docs/bruno/PLANO.md](docs/bruno/PLANO.md). Desenho do histórico: [docs/bruno/HISTORICO-NOTAS.md](docs/bruno/HISTORICO-NOTAS.md).
 
