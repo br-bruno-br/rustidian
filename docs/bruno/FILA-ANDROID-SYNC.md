@@ -6,7 +6,7 @@ Uma frente por vez: compilar Rust em paralelo trava o PC de 2 núcleos. Cada fat
 |---|---|---|---|
 | 0 | Histórico H3/H4 (desktop) | s-h | juntado em 20/11 (353 testes do app, 224 da lib, 159 dos crates) |
 | 1 | **R7b-2** Markdown no Android | s-h | juntada na main (20/11); falta o dono passar `R7B2-TESTE.md` no celular |
-| 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | **pronta no código** na branch `r7b3-sync` (20/11), esperando verificação e juntada; APK em `C:/dev/_wt/rustidian-r7b3-sync.apk`; o teste no celular (`R7B3-TESTE.md`) depende da R6 |
+| 2 | **R7b-3** Sync no Android (contra servidor local nos testes) | s-h | juntada na main (20/11, 7626bf0); APK em `C:/dev/_wt/rustidian-r7b3-sync.apk`; o teste no celular (`R7B3-TESTE.md`) depende da R6 |
 | 3 | **R6** Servidor no re-servidor + backup rustic → Drive | eu, com o dono | esperando o dono |
 
 Por que essa ordem: o código da R7b-3 é testado contra um `nota-servidor` local, então não depende da R6. A R6 mexe numa máquina de verdade e precisa do dono (login do Google, senhas), por isso vai por último e com ok.
