@@ -53,7 +53,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
-const NOTAS: TableDefinition<&str, u32> = TableDefinition::new("notas");
+pub(crate) const NOTAS: TableDefinition<&str, u32> = TableDefinition::new("notas");
 const VERSOES: TableDefinition<(u32, u64), &[u8]> = TableDefinition::new("versoes");
 const PEDACOS: TableDefinition<[u8; 32], &[u8]> = TableDefinition::new("pedacos");
 const REFS: TableDefinition<[u8; 32], u32> = TableDefinition::new("refs");
@@ -151,11 +151,13 @@ pub struct Estatisticas {
 
 /// O histórico de todas as notas de um cofre, num arquivo `redb`.
 pub struct Historico {
-    db: Database,
+    pub(crate) db: Database,
     caminho: PathBuf,
-    codec: Box<dyn Codec>,
-    opc: Opcoes,
+    pub(crate) codec: Box<dyn Codec>,
+    pub(crate) opc: Opcoes,
     nao_persistido: bool,
+    /// Limite da árvore de desfazer por nota (H3).
+    pub(crate) limites_desfazer: crate::desfazer::LimitesDesfazer,
 }
 
 fn u32_le(b: &[u8]) -> Result<u32> {
@@ -211,7 +213,7 @@ fn registro<T: ReadableTable<(u32, u64), &'static [u8]>>(
     }
 }
 
-fn numero_da_nota<T: ReadableTable<&'static str, u32>>(
+pub(crate) fn numero_da_nota<T: ReadableTable<&'static str, u32>>(
     n: &T,
     nota: &NotaId,
 ) -> Result<Option<u32>> {
@@ -267,6 +269,10 @@ impl Historico {
             w.open_table(VERSOES)?;
             w.open_table(PEDACOS)?;
             w.open_table(REFS)?;
+            // H3: tabelas novas. Criar uma tabela que não existia não mexe nas outras: um cofre
+            // gravado antes da H3 abre igual e as versões continuam as mesmas.
+            w.open_table(crate::desfazer::ARVORES)?;
+            w.open_table(crate::desfazer::NOS)?;
         }
         w.commit()?;
         Ok(Historico {
@@ -275,10 +281,29 @@ impl Historico {
             codec,
             opc,
             nao_persistido: false,
+            limites_desfazer: Default::default(),
         })
     }
 
-    fn txn_gravacao(&mut self, imediata: bool) -> Result<WriteTransaction> {
+    /// O número curto da nota; cria se ainda não existe (a árvore de desfazer pode nascer antes da
+    /// primeira versão). Abre e fecha `notas` e `meta` dentro da chamada.
+    pub(crate) fn garantir_numero(w: &WriteTransaction, nota: &NotaId) -> Result<u32> {
+        let mut notas = w.open_table(NOTAS)?;
+        if let Some(n) = numero_da_nota(&notas, nota)? {
+            return Ok(n);
+        }
+        let mut meta = w.open_table(META)?;
+        let n = meta
+            .get("proxima_nota")?
+            .map(|g| u32_le(g.value()))
+            .transpose()?
+            .unwrap_or(1);
+        meta.insert("proxima_nota", (n + 1).to_le_bytes().as_slice())?;
+        notas.insert(nota.como_str(), n)?;
+        Ok(n)
+    }
+
+    pub(crate) fn txn_gravacao(&mut self, imediata: bool) -> Result<WriteTransaction> {
         let mut w = self.db.begin_write()?;
         if !imediata && self.opc.durabilidade == Durabilidade::Adiada {
             w.set_durability(Durability::None)?;
@@ -875,6 +900,63 @@ impl Historico {
 
     // -------------------------------------------------------------- apagar
 
+    /// Copia o banco inteiro para um arquivo novo e troca o antigo por ele. É o que **garante** que
+    /// um trecho apagado não sobra no disco: o `redb` reaproveita páginas sem zerar a sobra delas
+    /// (e `compact` só move páginas), então bytes comprimidos de uma senha podiam ficar na folga de
+    /// uma página que continua em uso. Um arquivo novo só recebe o que está vivo.
+    ///
+    /// Custo: lê e regrava o banco todo; rode em segundo plano e raramente (só ao apagar do
+    /// histórico). Se a troca falhar, o arquivo antigo continua valendo e o erro volta.
+    fn reconstruir_arquivo(&mut self) -> Result<()> {
+        macro_rules! copiar {
+            ($r:expr, $w:expr, $def:expr) => {{
+                let origem = $r.open_table($def)?;
+                let mut destino = $w.open_table($def)?;
+                for e in origem.iter()? {
+                    let (k, v) = e?;
+                    destino.insert(k.value(), v.value())?;
+                }
+            }};
+        }
+        let tmp = {
+            let mut nome = self.caminho.as_os_str().to_owned();
+            nome.push(".novo");
+            PathBuf::from(nome)
+        };
+        let _ = std::fs::remove_file(&tmp);
+        let copiado = (|| -> Result<()> {
+            let novo = Database::create(&tmp)?;
+            let r = self.db.begin_read()?;
+            let w = novo.begin_write()?;
+            copiar!(r, w, META);
+            copiar!(r, w, NOTAS);
+            copiar!(r, w, VERSOES);
+            copiar!(r, w, PEDACOS);
+            copiar!(r, w, REFS);
+            copiar!(r, w, crate::desfazer::ARVORES);
+            copiar!(r, w, crate::desfazer::NOS);
+            w.commit()?;
+            Ok(())
+        })();
+        if let Err(e) = copiado {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        // Solta o arquivo antigo (no Windows não se troca um arquivo aberto) e põe o novo no lugar.
+        let reserva =
+            Database::builder().create_with_backend(redb::backends::InMemoryBackend::new())?;
+        drop(std::mem::replace(&mut self.db, reserva));
+        let trocou = std::fs::rename(&tmp, &self.caminho);
+        // Aconteça o que acontecer, o banco volta a estar aberto no arquivo que vale.
+        self.db = Database::create(&self.caminho)?;
+        if let Err(e) = trocou {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        self.nao_persistido = false;
+        Ok(())
+    }
+
     /// Faz `trecho` sumir de **todas** as versões da nota (para uma senha colada por engano):
     /// cada ocorrência é removida do texto de cada versão que a contém; os pedaços e as diferenças
     /// que a continham são regravados e os pedaços antigos, apagados do banco. Devolve em quantas
@@ -892,12 +974,12 @@ impl Historico {
         if trecho.is_empty() {
             return Err(Erro::Argumento("trecho vazio".into()));
         }
-        let n = self.apagar_texto_sem_compactar(nota, trecho)?;
-        if n > 0 {
-            self.db.compact()?;
+        let (versoes, passos) = self.apagar_texto_sem_compactar(nota, trecho)?;
+        if versoes > 0 || passos > 0 {
+            self.reconstruir_arquivo()?;
             self.nao_persistido = false;
         }
-        Ok(n)
+        Ok(versoes)
     }
 
     /// Como [`Historico::apagar_texto_do_historico`], mas em **todas** as notas (uma senha colada
@@ -912,33 +994,41 @@ impl Historico {
             return Err(Erro::Argumento("trecho vazio".into()));
         }
         let mut total = ApagadoEmTodas::default();
+        let mut mexeu = false;
         for (nome, _) in self.todas_as_notas()? {
-            let n = self.apagar_texto_sem_compactar(&NotaId(nome), trecho)?;
-            if n > 0 {
+            let (versoes, passos) = self.apagar_texto_sem_compactar(&NotaId(nome), trecho)?;
+            if versoes > 0 || passos > 0 {
+                mexeu = true;
                 total.notas += 1;
-                total.versoes += n;
+                total.versoes += versoes;
             }
         }
-        if total.versoes > 0 {
-            self.db.compact()?;
+        if mexeu {
+            self.reconstruir_arquivo()?;
             self.nao_persistido = false;
         }
         Ok(total)
     }
 
-    /// O miolo de [`Historico::apagar_texto_do_historico`], sem compactar o arquivo. `trecho` não vazio.
-    fn apagar_texto_sem_compactar(&mut self, nota: &NotaId, trecho: &str) -> Result<usize> {
+    /// O miolo de [`Historico::apagar_texto_do_historico`], sem compactar o arquivo. `trecho` não
+    /// vazio. Devolve (versões mudadas, passos da árvore de desfazer mudados): a árvore da H3
+    /// também guarda o texto da nota e perde o trecho junto.
+    fn apagar_texto_sem_compactar(
+        &mut self,
+        nota: &NotaId,
+        trecho: &str,
+    ) -> Result<(usize, usize)> {
         let num = {
             let r = self.db.begin_read()?;
             let notas = r.open_table(NOTAS)?;
             match numero_da_nota(&notas, nota)? {
                 Some(n) => n,
-                None => return Ok(0),
+                None => return Ok((0, 0)),
             }
         };
         let vazio = HashSet::new();
         let trocar = |t: &str| t.contains(trecho).then(|| t.replace(trecho, ""));
-        self.reescrever_nota(
+        let versoes = self.reescrever_nota(
             nota,
             num,
             &Mudancas {
@@ -946,7 +1036,60 @@ impl Historico {
                 trocar: Some(&trocar),
                 refazer: false,
             },
-        )
+        )?;
+        let passos = self.desfazer_apagar(num, trecho)?;
+        Ok((versoes, passos))
+    }
+
+    // --------------------------------------------------------- textos em lote
+
+    /// Os textos das versões mais recentes de uma nota (no máximo `maximo`), da mais antiga para a
+    /// mais nova, numa passada só (da mais nova para trás, cada texto sai do vizinho). Muito mais
+    /// barato que chamar [`Historico::ler`] em cada uma. Serve ao "achar o que apaguei" (H4).
+    pub fn textos_da_nota(
+        &self,
+        nota: &NotaId,
+        maximo: usize,
+    ) -> Result<Vec<(VersaoInfo, String)>> {
+        let r = self.db.begin_read()?;
+        let notas = r.open_table(NOTAS)?;
+        let Some(num) = numero_da_nota(&notas, nota)? else {
+            return Ok(Vec::new());
+        };
+        let versoes = r.open_table(VERSOES)?;
+        let pedacos = r.open_table(PEDACOS)?;
+        let itens = todas(&versoes, num)?;
+        let n = itens.len();
+        let mut saida: Vec<(VersaoInfo, String)> = Vec::with_capacity(n.min(maximo));
+        let mut proximo: Vec<u8> = Vec::new();
+        for i in (0..n).rev() {
+            if saida.len() >= maximo {
+                break;
+            }
+            let (id, reg) = &itens[i];
+            let texto = match &reg.corpo {
+                Corpo::Cheia(ch) => self.texto_da_cheia(&pedacos, ch)?,
+                Corpo::Delta { base, dados } => {
+                    if i + 1 >= n || itens[i + 1].0 != *base {
+                        return Err(Erro::Corrompido(
+                            "a base da diferença não é a versão vizinha".into(),
+                        ));
+                    }
+                    self.codec
+                        .descomprimir_com_base(dados, &proximo, reg.tamanho as usize)?
+                }
+            };
+            if hash(&texto) != reg.hash {
+                return Err(Erro::Integridade {
+                    nota: nota.0.clone(),
+                    versao: *id,
+                });
+            }
+            proximo.clone_from(&texto);
+            saida.push((reg.info(*id), texto_de(texto)?));
+        }
+        saida.reverse();
+        Ok(saida)
     }
 
     // --------------------------------------------------------- estatísticas

@@ -207,3 +207,20 @@ implementar `Codec`.
   `apagar_texto_em_todas`. Com o histórico desligado ou indisponível respondem erro e não criam o
   arquivo.
 - O sync ignora `.rustidian/` (`nota-sync/src/caminhos.rs`); o histórico não é sincronizado nem cifrado.
+
+## H3 e H4 (20/11/2026)
+
+- **Desfazer que fica** (`desfazer.rs`): uma árvore de passos por nota, no mesmo arquivo `redb`
+  (tabelas `arvores` e `nos`, número da nota como chave: renomear leva a árvore junto). Cada passo é
+  uma diferença zstd sobre o texto do pai e leva o blake3 do texto, conferido na leitura. `FORMATO`
+  continua 1: um arquivo da H2 abre igual e ganha as tabelas novas. Se o texto do arquivo não é o de
+  nenhum passo (mudou por fora), a árvore antiga é arquivada (até 2) e começa outra; nada é aplicado
+  sobre texto diferente. O limite (`LimitesDesfazer`, padrão 5.000 passos ou 2 MiB por nota) descarta
+  os passos mais antigos. `apagar_texto_do_historico` e `apagar_texto_de_todas` também reescrevem os
+  passos e, como o `redb` deixa páginas velhas no arquivo, refazem o arquivo (`reconstruir_arquivo`).
+- **Escritor** (`escritor.rs`): `achar_apagados` lista os trechos (linha ou frase) que existiram em
+  alguma versão e não estão no texto de agora; `filtrar_apagados` busca por palavra sem ligar para
+  maiúscula e acento; `historico_do_trecho` leva uma faixa selecionada de volta pelas versões.
+- Testes: `src/desfazer.rs` e `src/escritor.rs` (unidade) e `tests/desfazer_escritor.rs` (16, contra
+  um banco de verdade: ida e volta, galhos, mudança de fora, limite, migração da H2, apagar nos bytes
+  brutos, `proptest` da árvore, achar apagados e histórico do trecho).
