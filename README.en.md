@@ -57,6 +57,23 @@ This repository is a fork of [Rustidian by Masih Moafi](https://github.com/Masih
 **Android (early stage)**
 - A Dioxus app with a note list, search, an editor with autosave, and a trash. It still shows raw text and does not sync yet.
 
+## Your data is safe
+
+Guarantees that exist in the code, with the number of `#[test]` functions in each area (counted with `grep`, not compiled; this is not coverage).
+
+| Guarantee | How | Tests |
+| --- | --- | --- |
+| A note is never deleted for good | Whatever goes away moves to the vault's `.trash/` (a `rename`, never `rm`), and the app asks for confirmation before trashing a note (the prompt can be turned off) | `crates/nota-sync` 62; UI in `src/app/gui_tests` 270 |
+| Conflicts lose nothing | If a note changed on both sides, one version becomes the main file and the other is saved as `name (conflict device date).md` | `crates/nota-sync` 62 |
+| The server cannot read your notes | End-to-end encryption: the server stores only ciphertext. Every device keeps a full copy and works offline | `crates/nota-cripto` 19, `crates/nota-servidor` 20 |
+| No half-written files | Atomic writes: a temp file in the same folder, `sync_all`, then `rename` over the target | `crates/nota-sync` 62 |
+| Notes that could be damaged are not opened | A note that is too large or not UTF-8 is not opened, so the file is not corrupted. Limits: 8 MB for the desktop index (a bigger `.md` stays out of the index, with a warning) and 2 MB on Android | `src/app/gui_tests` 270; `android/` 51 |
+| The file watcher does not drop notes | A note the scan did not find leaves the index only after it is checked twice | `src/app/gui_tests` 270 |
+| Note history | Automatic diff-based versions, configurable retention (default: keep everything for 1 day), restore, named versions (never pruned), and "Delete from history" removes a snippet from every version, with no undo | `crates/nota-historico` 65 |
+| Updates are the ones the owner signed | The app only installs what matches the embedded public key (ed25519 and SHA256SUMS). The owner still has to generate the key | `src/atualizacao.rs` 13 |
+| Undo that survives closing the app | **In progress** (history, phases H3/H4) | not yet |
+| Encrypted sync on Android and the Google Drive backup | **In progress**, see the roadmap | not yet |
+
 ## Roadmap
 
 The queue moves **one track at a time**: parallel Rust builds freeze the owner's 2-core PC, and each slice starts only after the previous one is verified and merged. No dates.
